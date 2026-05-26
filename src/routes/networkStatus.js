@@ -10,6 +10,43 @@ const { success } = require("../utils/response");
  * @example
  * GET /network-status
  */
+
+/**
+ * Handler to retrieve the current Stellar network status and latest ledger details.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.params - Route parameters (none)
+ * @param {Object} req.query - Query parameters (none)
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response with the following structure:
+ * {
+ *   network: string,
+ *   horizonUrl: string,
+ *   latestLedger: {
+ *     sequence: number,
+ *     closedAt: string,
+ *     transactionCount: number,
+ *     operationCount: number,
+ *     totalCoins: string,
+ *     feePool: string
+ *   },
+ *   fees: {
+ *     baseFeeInStroops: number,
+ *     baseFeeInXLM: string,
+ *     basereserveInStroops: number,
+ *     baseReserveInXLM: string
+ *   },
+ *   protocol: {
+ *     version: number
+ *   }
+ * }
+ *
+ * @throws Will pass any errors to the next middleware
+ */
 router.get("/", async (req, res, next) => {
   try {
     const ledger = await server.ledgers().order("desc").limit(1).call();
