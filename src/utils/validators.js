@@ -1,7 +1,10 @@
 const { StrKey } = require("@stellar/stellar-sdk");
 
 /**
- * Validates a Stellar account ID (public key).
+ * Validate a Stellar account ID.
+ *
+ * @param {string} accountId - The Stellar account ID to validate.
+ * @throws {Error} If the account ID is missing or invalid.
  */
 function validateAccountId(accountId) {
   if (!accountId) {
@@ -11,7 +14,7 @@ function validateAccountId(accountId) {
   }
   if (!StrKey.isValidEd25519PublicKey(accountId)) {
     const err = new Error(
-      `Invalid Stellar account ID: "${accountId}". Must be a valid Ed25519 public key starting with "G".`
+      `Invalid Stellar account ID: "${accountId}". Must be a valid Ed25519 public key starting with "G".`,
     );
     err.isValidation = true;
     throw err;
@@ -19,7 +22,10 @@ function validateAccountId(accountId) {
 }
 
 /**
- * Validates an asset code (1–12 alphanumeric characters).
+ * Validate an asset code.
+ *
+ * @param {string} code - The asset code to validate.
+ * @throws {Error} If the asset code is missing or invalid.
  */
 function validateAssetCode(code) {
   if (!code) {
@@ -29,7 +35,7 @@ function validateAssetCode(code) {
   }
   if (!/^[A-Z0-9]{1,12}$/.test(code.toUpperCase())) {
     const err = new Error(
-      `Invalid asset code: "${code}". Must be 1–12 uppercase alphanumeric characters.`
+      `Invalid asset code: "${code}". Must be 1–12 uppercase alphanumeric characters.`,
     );
     err.isValidation = true;
     throw err;
@@ -37,7 +43,12 @@ function validateAssetCode(code) {
 }
 
 /**
- * Validates a pagination limit parameter.
+ * Validate a numeric limit and return it as an integer.
+ *
+ * @param {number|string} limit - The limit value to validate.
+ * @param {number} [max=200] - The maximum allowed limit.
+ * @returns {number} The parsed limit value.
+ * @throws {Error} If the limit is not a number or is out of range.
  */
 function validateLimit(limit, max = 200) {
   const parsed = parseInt(limit);
