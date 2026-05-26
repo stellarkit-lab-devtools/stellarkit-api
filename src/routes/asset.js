@@ -14,6 +14,40 @@ const { validateAccountId, validateAssetCode } = require("../utils/validators");
  * @example
  * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
  */
+
+/**
+ * Handler to fetch metadata and statistics for a specific Stellar asset.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.params - Route parameters
+ * @param {string} req.params.code - Asset code (e.g. USDC)
+ * @param {string} req.params.issuer - Issuer account public key (G...)
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response with the following structure:
+ * {
+ *   assetCode: string,
+ *   assetIssuer: string,
+ *   assetType: string,
+ *   amount: string,
+ *   numAccounts: number,
+ *   numClaimableBalances: number,
+ *   numLiquidityPools: number,
+ *   claimableBalancesAmount: string,
+ *   liquidityPoolsAmount: string,
+ *   flags: Object,
+ *   issuer: {
+ *     homeDomain: string | null,
+ *     flags: Object,
+ *     thresholds: Object
+ *   } | null
+ * }
+ *
+ * @throws Will pass validation or network errors to the next middleware
+ */
 router.get("/:code/:issuer", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
@@ -81,6 +115,37 @@ router.get("/:code/:issuer", async (req, res, next) => {
  *
  * @example
  * GET /asset/search?code=USDC
+ */
+
+/**
+ * Handler to search for Stellar assets by code across all issuers.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.query - Query parameters
+ * @param {string} req.query.code - Asset code to search (required)
+ * @param {string|number} [req.query.limit=10] - Maximum number of results (capped at 50)
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response with the following structure:
+ * {
+ *   data: Array<{
+ *     assetCode: string,
+ *     assetIssuer: string,
+ *     assetType: string,
+ *     amount: string,
+ *     numAccounts: number,
+ *     flags: Object
+ *   }>,
+ *   meta: {
+ *     count: number,
+ *     query: string
+ *   }
+ * }
+ *
+ * @throws Will throw a validation error if 'code' is missing or invalid
  */
 router.get("/search", async (req, res, next) => {
   try {
