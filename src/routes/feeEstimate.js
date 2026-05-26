@@ -14,6 +14,57 @@ const { success } = require("../utils/response");
  * GET /fee-estimate
  * GET /fee-estimate?operations=3
  */
+
+/**
+ * Handler to fetch Stellar network fee estimates based on recent ledger data.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.query - Query parameters
+ * @param {string|number} [req.query.operations=1] - Number of operations in the transaction (minimum 1)
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response with the following structure:
+ * {
+ *   note: string,
+ *   operationCount: number,
+ *   perOperation: {
+ *     economy: {
+ *       stroops: number,
+ *       xlm: string,
+ *       description: string
+ *     },
+ *     standard: {
+ *       stroops: number,
+ *       xlm: string,
+ *       description: string
+ *     },
+ *     priority: {
+ *       stroops: number,
+ *       xlm: string,
+ *       description: string
+ *     }
+ *   },
+ *   totalFee: {
+ *     economy: { stroops: number, xlm: string },
+ *     standard: { stroops: number, xlm: string },
+ *     priority: { stroops: number, xlm: string }
+ *   },
+ *   networkStats: {
+ *     lastLedgerBaseFee: string,
+ *     ledgerCapacityUsage: string,
+ *     maxFeeCharged: string,
+ *     p10: string,
+ *     p50: string,
+ *     p95: string,
+ *     p99: string
+ *   }
+ * }
+ *
+ * @throws Will pass any errors to the next middleware
+ */
 router.get("/", async (req, res, next) => {
   try {
     const operations = Math.max(1, parseInt(req.query.operations) || 1);
