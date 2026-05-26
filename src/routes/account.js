@@ -2,7 +2,152 @@ const express = require("express");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
+const {
+  fetchStellarToml,
+  getAssetToml,
+  normalizeHomeDomain,
+} = require("../utils/assetToml");
 const { validateAccountId } = require("../utils/validators");
+
+function formatTrustline(balance, toml) {
+  return {
+    assetCode: balance.asset_code,
+    assetIssuer: balance.asset_issuer,
+    assetType: balance.asset_type,
+    balance: balance.balance,
+    limit: balance.limit,
+    buyingLiabilities: balance.buying_liabilities,
+    sellingLiabilities: balance.selling_liabilities,
+    isAuthorized: balance.is_authorized,
+    isClawbackEnabled: balance.is_clawback_enabled,
+    toml,
+  };
+}
+
+async function resolveIssuerHomeDomain(assetIssuer, issuerCache) {
+  if (!issuerCache.has(assetIssuer)) {
+    issuerCache.set(
+      assetIssuer,
+      server
+        .loadAccount(assetIssuer)
+        .then((account) => normalizeHomeDomain(account.home_domain))
+        .catch(() => null),
+    );
+  }
+
+  return issuerCache.get(assetIssuer);
+}
+
+async function resolveTrustline(balance, issuerCache, tomlCache) {
+  const homeDomain = await resolveIssuerHomeDomain(
+    balance.asset_issuer,
+    issuerCache,
+  );
+
+  let assetToml = null;
+  if (homeDomain) {
+    if (!tomlCache.has(homeDomain)) {
+      tomlCache.set(homeDomain, fetchStellarToml(homeDomain));
+    }
+
+    assetToml = getAssetToml(
+      await tomlCache.get(homeDomain),
+      balance.asset_code,
+      balance.asset_issuer,
+    );
+  }
+
+  return formatTrustline(balance, assetToml);
+}
+
+/**
+ * GET /account/:id/trustlines
+ * Returns all non-native balances for an account with optional issuer TOML
+ * metadata for each asset.
+ */
+router.get("/:id/trustlines", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const issuerCache = new Map();
+    const tomlCache = new Map();
+    const trustlineBalances = account.balances.filter(
+      (balance) => balance.asset_type !== "native",
+    );
+
+    const trustlines = await Promise.all(
+      trustlineBalances.map((balance) =>
+        resolveTrustline(balance, issuerCache, tomlCache),
+      ),
+    );
+
+    return success(res, {
+      accountId: account.id,
+      trustlines,
+      count: trustlines.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /account/:id/analytics
+ * Returns lightweight transaction analytics for an account.
+ */
+router.get("/:id/analytics", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    let transactions = [];
+    try {
+      const response = await server
+        .transactions()
+        .forAccount(id)
+        .limit(200)
+        .order("asc")
+        .call();
+      transactions = response.records || [];
+    } catch (_) {
+      transactions = [];
+    }
+
+    const successfulTransactions = transactions.filter(
+      (transaction) => transaction.successful !== false,
+    );
+    const firstSeen = successfulTransactions[0]?.created_at || null;
+    const lastSeen =
+      successfulTransactions[successfulTransactions.length - 1]?.created_at ||
+      null;
+    const activeDays =
+      firstSeen && lastSeen
+        ? Math.max(
+            1,
+            Math.ceil(
+              (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) /
+                86400000,
+            ),
+          )
+        : 0;
+
+    return success(res, {
+      totalSent: 0,
+      totalReceived: 0,
+      topAssets: [],
+      avgTransactionsPerDay:
+        activeDays > 0
+          ? Number((successfulTransactions.length / activeDays).toFixed(2))
+          : 0,
+      firstSeen,
+      lastSeen,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /account/:id

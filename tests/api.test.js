@@ -52,7 +52,7 @@ describe("StellarKit API", () => {
 
     it("returns 400 for an invalid limit param", async () => {
       const res = await request(app).get(
-        "/transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=999999"
+        "/transactions/GDU5LH56CZ7NVKRHYI72QVJC6BS7GAYEIO34HDMICG3H5NSFJJJFHFWL?limit=999999"
       );
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
@@ -76,7 +76,7 @@ describe("StellarKit API", () => {
   describe("GET /account/:id/analytics", () => {
   it("returns analytics for a valid account", async () => {
     const res = await request(app).get(
-      "/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/analytics"
+      "/account/GDU5LH56CZ7NVKRHYI72QVJC6BS7GAYEIO34HDMICG3H5NSFJJJFHFWL/analytics"
     );
 
     expect(res.statusCode).toBe(200);
