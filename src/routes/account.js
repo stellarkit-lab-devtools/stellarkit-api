@@ -14,6 +14,55 @@ const { validateAccountId } = require("../utils/validators");
  * @example
  * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
  */
+
+/**
+ * Handler to fetch and format a Stellar account's full details.
+ *
+ * @async
+ * @function
+ * @param {import("express").Request} req - Express request object
+ * @param {Object} req.params - Route parameters
+ * @param {string} req.params.id - Stellar account public key (G...)
+ * @param {import("express").Response} res - Express response object
+ * @param {import("express").NextFunction} next - Express next middleware function
+ *
+ * @returns {Promise<void>} Sends a JSON response with the following structure:
+ * {
+ *   accountId: string,
+ *   sequence: string,
+ *   subentryCount: number,
+ *   xlm: {
+ *     balance: string,
+ *     buyingLiabilities: string,
+ *     sellingLiabilities: string,
+ *     minimumBalance: string,
+ *     spendableBalance: string
+ *   },
+ *   assets: Array<{
+ *     assetCode: string,
+ *     assetIssuer: string,
+ *     assetType: string,
+ *     balance: string,
+ *     limit: string,
+ *     buyingLiabilities: string,
+ *     sellingLiabilities: string,
+ *     isAuthorized: boolean,
+ *     isClawbackEnabled: boolean
+ *   }>,
+ *   assetCount: number,
+ *   signers: Array<{
+ *     key: string,
+ *     type: string,
+ *     weight: number
+ *   }>,
+ *   thresholds: Object,
+ *   flags: Object,
+ *   homeDomain: string | null,
+ *   lastModifiedLedger: number
+ * }
+ *
+ * @throws Will pass any error to the next middleware
+ */
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
