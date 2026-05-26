@@ -72,4 +72,23 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
     });
   });
+
+describe("GET /account/:id/summary", () => {
+  it("should return full account summary", async () => {
+    const res = await request(app)
+      .get("/account/GBVALIDACCOUNTIDEXAMPLE1234567890ABCDEFGHIJKLMN");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty("account");
+    expect(res.body).toHaveProperty("recentTransactions");
+    expect(res.body).toHaveProperty("openOffers");
+    expect(res.body).toHaveProperty("claimableBalances");
+  });
+
+  it("should reject invalid account id", async () => {
+    const res = await request(app).get("/account/invalid-id");
+
+    expect(res.statusCode).toBe(400);
+  });
+});
 });
