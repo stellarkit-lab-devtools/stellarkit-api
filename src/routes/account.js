@@ -73,4 +73,47 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
+router.get("/:id/summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const [
+      accountResult,
+      txResult,
+      offersResult,
+      claimableResult,
+    ] = await Promise.allSettled([
+      server.loadAccount(id),
+      server.transactions().forAccount(id).limit(10).order("desc").call(),
+      server.offers().forAccount(id).limit(50).call(),
+      server.claimableBalances().forAccount(id).limit(50).call(),
+    ]);
+
+    return success(res, {
+      account:
+        accountResult.status === "fulfilled"
+          ? accountResult.value
+          : null,
+
+      recentTransactions:
+        txResult.status === "fulfilled"
+          ? txResult.value.records
+          : [],
+
+      openOffers:
+        offersResult.status === "fulfilled"
+          ? offersResult.value.records
+          : [],
+
+      claimableBalances:
+        claimableResult.status === "fulfilled"
+          ? claimableResult.value.records
+          : [],
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
