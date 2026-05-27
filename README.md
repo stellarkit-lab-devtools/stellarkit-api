@@ -29,6 +29,7 @@ StellarKit API wraps the [Stellar Horizon API](https://developers.stellar.org/ap
 
 ## 🚀 Getting Started
 
+
 ### Prerequisites
 
 - Node.js >= 18
@@ -254,7 +255,26 @@ ws.onclose = () => {
 
 ---
 
+## Development
+
+To create a funded Stellar testnet account for local development/testing, run:
+
+```bash
+npm run seed
+```
+
+This script:
+- generates a new keypair
+- funds the public key on Stellar testnet using Friendbot
+- prints the public/private keys to the console
+
+**Note:** keep the printed private key secret.
+
+---
+
 ## 🧪 Running Tests
+
+
 
 ```bash
 npm test
