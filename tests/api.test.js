@@ -439,6 +439,21 @@ describe("StellarKit API", () => {
     });
   });
 
+  // ── HTTP Parameter Pollution ────────────────────────────────────────────────
+  describe("HTTP Parameter Pollution (hpp) protection", () => {
+    it("handles duplicate non-whitelisted params safely", async () => {
+      const res = await request(app).get("/health?foo=1&foo=2");
+      expect(res.statusCode).toBe(200);
+    });
+
+    it("handles duplicate whitelisted params safely", async () => {
+      const res = await request(app).get(
+        "/fee-estimate?operations=1&operations=2"
+      );
+      expect(res.statusCode).toBe(200);
+    });
+  });
+
   // ── Compression ────────────────────────────────────────────────────────────
   describe("Response Compression", () => {
     it("compresses responses when Accept-Encoding is gzip", async () => {

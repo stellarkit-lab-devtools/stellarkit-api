@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
+const hpp = require("hpp");
 const cors = require("cors");
 const morgan = require("morgan");
 const compression = require("compression");
@@ -27,6 +28,7 @@ app.use(compression({ threshold: 0 }));
 app.use(cors());
 app.use(contentTypeValidator);
 app.use(express.json());
+app.use(hpp({ whitelist: ["limit", "order", "cursor", "operations"] }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
