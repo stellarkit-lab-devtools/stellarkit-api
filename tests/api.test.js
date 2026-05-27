@@ -160,6 +160,59 @@ describe("StellarKit API", () => {
     });
   });
 
+  describe("GET /account/:id/offers", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    it("returns open offers for a valid account", async () => {
+      const res = await request(app).get(`/account/${VALID_KEY}/offers`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body).toHaveProperty("meta");
+      expect(res.body.meta).toHaveProperty("count");
+      expect(res.body.meta).toHaveProperty("limit");
+      expect(res.body.meta).toHaveProperty("nextCursor");
+      expect(res.body.meta).toHaveProperty("hasMore");
+      expect(typeof res.body.meta.hasMore).toBe("boolean");
+
+      if (res.body.data.length > 0) {
+        const offer = res.body.data[0];
+        expect(offer).toHaveProperty("id");
+        expect(offer).toHaveProperty("selling");
+        expect(offer).toHaveProperty("buying");
+        expect(offer).toHaveProperty("price");
+        expect(offer).toHaveProperty("lastModifiedLedger");
+        expect(offer.selling).toHaveProperty("assetType");
+        expect(offer.selling).toHaveProperty("assetCode");
+        expect(offer.selling).toHaveProperty("assetIssuer");
+        expect(offer.selling).toHaveProperty("amount");
+        expect(offer.buying).toHaveProperty("assetType");
+        expect(offer.buying).toHaveProperty("assetCode");
+        expect(offer.buying).toHaveProperty("assetIssuer");
+      }
+    });
+
+    it("respects limit query param", async () => {
+      const res = await request(app).get(
+        `/account/${VALID_KEY}/offers?limit=1`
+      );
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.meta.limit).toBe(1);
+      expect(res.body.data.length).toBeLessThanOrEqual(1);
+    });
+
+    it("returns 400 for invalid account ID", async () => {
+      const res = await request(app).get("/account/INVALID_KEY/offers");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+  });
+
   describe("GET /account/:id/analytics", () => {
     it("returns analytics for a valid account", async () => {
       const res = await request(app).get(

@@ -117,6 +117,83 @@ router.get("/:id/summary", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/offers
+ * Returns all open DEX offers for an account.
+ *
+ * Query params:
+ *   - limit   (number, default: 10, max: 200)
+ *   - cursor  (string, pagination cursor from previous response)
+ *
+ * @param {string} id - Stellar account public key (G...)
+ */
+router.get("/:id/offers", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limit = validateLimit(req.query.limit || 10, 200);
+    const cursor = req.query.cursor || undefined;
+
+    let query = server.offers().forAccount(id).limit(limit);
+    if (cursor) query = query.cursor(cursor);
+
+    const offerResponse = await query.call();
+    const offers = offerResponse.records.map((offer) => {
+      const buildAsset = (assetType, assetCode, assetIssuer) => {
+        if (assetType === "native") {
+          return {
+            assetType: "native",
+            assetCode: "XLM",
+            assetIssuer: null,
+          };
+        }
+
+        return {
+          assetType,
+          assetCode,
+          assetIssuer,
+        };
+      };
+
+      return {
+        id: offer.id,
+        selling: {
+          ...buildAsset(
+            offer.selling_asset_type,
+            offer.selling_asset_code,
+            offer.selling_asset_issuer
+          ),
+          amount: offer.amount,
+        },
+        buying: buildAsset(
+          offer.buying_asset_type,
+          offer.buying_asset_code,
+          offer.buying_asset_issuer
+        ),
+        price: offer.price,
+        lastModifiedLedger: offer.last_modified_ledger,
+      };
+    });
+
+    const hasMore = offerResponse.records.length === limit;
+    const nextCursor = hasMore
+      ? offerResponse.records[offerResponse.records.length - 1].paging_token
+      : null;
+
+    return success(res, offers, {
+      meta: {
+        count: offers.length,
+        limit,
+        nextCursor,
+        hasMore,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /account/:id/payments
  * Returns only payment and create_account operations for an account,
  * filtered from the full operations list.

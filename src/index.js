@@ -64,6 +64,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/fee-estimate",                     description: "Fee tiers for transaction submission" },
         { method: "GET", path: "/fee-estimate?operations=N",        description: "Fee estimate for N operations" },
         { method: "GET", path: "/account/:id",                      description: "Account details, balances, signers" },
+        { method: "GET", path: "/account/:id/offers",                description: "Open DEX offers for an account" },
         { method: "GET", path: "/transactions/:id",                 description: "Transaction history for an account" },
         { method: "GET", path: "/transactions/:id/operations",      description: "Operation history for an account" },
         { method: "GET", path: "/asset/:code/:issuer",              description: "Asset metadata and statistics" },
