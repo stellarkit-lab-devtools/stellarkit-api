@@ -1,5 +1,7 @@
 const request = require("supertest");
+const axios = require("axios");
 const app = require("../src/index");
+const { server } = require("../src/config/stellar");
 const { networkStatusCache, feeEstimateCache } = require("../src/utils/cache");
 
 describe("StellarKit API", () => {
@@ -47,6 +49,120 @@ describe("StellarKit API", () => {
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("ValidationError");
+    });
+  });
+
+  describe("GET /account/:id/trustlines", () => {
+    const MOCK_ACCOUNT = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+    const MOCK_ISSUER = "GC3C6BRSPTJTJ4DI7ELZ2J4Y3Z5OCN7R2VIX5FQY3Y5QIN3QAKXUQY5R";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns non-native trustlines with resolved TOML metadata", async () => {
+      const accountResponse = {
+        id: MOCK_ACCOUNT,
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "TEST",
+            asset_issuer: MOCK_ISSUER,
+            balance: "100.0000000",
+            limit: "1000.0000000",
+            buying_liabilities: "0.0000000",
+            selling_liabilities: "0.0000000",
+            is_authorized: true,
+            is_clawback_enabled: false,
+          },
+        ],
+        sequence: "1",
+        subentry_count: 1,
+        signers: [],
+        thresholds: {},
+        flags: {},
+        last_modified_ledger: 1,
+      };
+
+      const issuerResponse = {
+        id: MOCK_ISSUER,
+        home_domain: "example.com",
+      };
+
+      jest.spyOn(server, "loadAccount").mockImplementation(async (id) => {
+        if (id === MOCK_ACCOUNT) return accountResponse;
+        if (id === MOCK_ISSUER) return issuerResponse;
+        throw new Error(`Unexpected account load for ${id}`);
+      });
+
+      jest.spyOn(axios, "get").mockResolvedValue({
+        data: `[[CURRENCIES]]
+code = "TEST"
+issuer = "${MOCK_ISSUER}"
+name = "Test Asset"
+desc = "A test asset"
+image = "https://example.com/test.png"
+`,
+      });
+
+      const res = await request(app).get(`/account/${MOCK_ACCOUNT}/trustlines`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveProperty("accountId", MOCK_ACCOUNT);
+      expect(res.body.data).toHaveProperty("assetCount", 1);
+      expect(res.body.data.assets).toHaveLength(1);
+      expect(res.body.data.assets[0]).toMatchObject({
+        assetCode: "TEST",
+        assetIssuer: MOCK_ISSUER,
+        toml: {
+          name: "Test Asset",
+          description: "A test asset",
+          image: "https://example.com/test.png",
+        },
+      });
+    });
+
+    it("returns null TOML metadata when issuer resolution is not available", async () => {
+      const accountResponse = {
+        id: MOCK_ACCOUNT,
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "NONE",
+            asset_issuer: MOCK_ISSUER,
+            balance: "42.0000000",
+            limit: "1000.0000000",
+            buying_liabilities: "0.0000000",
+            selling_liabilities: "0.0000000",
+            is_authorized: false,
+            is_clawback_enabled: false,
+          },
+        ],
+        sequence: "1",
+        subentry_count: 1,
+        signers: [],
+        thresholds: {},
+        flags: {},
+        last_modified_ledger: 1,
+      };
+
+      const issuerResponse = {
+        id: MOCK_ISSUER,
+        home_domain: null,
+      };
+
+      jest.spyOn(server, "loadAccount").mockImplementation(async (id) => {
+        if (id === MOCK_ACCOUNT) return accountResponse;
+        if (id === MOCK_ISSUER) return issuerResponse;
+        throw new Error(`Unexpected account load for ${id}`);
+      });
+
+      const res = await request(app).get(`/account/${MOCK_ACCOUNT}/trustlines`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.assets[0].toml).toBeNull();
     });
   });
 
