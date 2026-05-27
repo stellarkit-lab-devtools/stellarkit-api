@@ -160,6 +160,95 @@ describe("StellarKit API", () => {
   describe("GET /account/:id/payments", () => {
     const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
 
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns only payment and create_account operations with payment fields", async () => {
+      const query = {
+        limit: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        cursor: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({
+          records: [
+            {
+              type: "payment",
+              amount: "15.0000000",
+              asset_type: "credit_alphanum4",
+              asset_code: "USDC",
+              asset_issuer: "GA5ZSEJYB37UIUIK3VHI67YFVL2OESQ5X2Z3U5QZWAJT44PJ5G2NXFXA",
+              from: "GASENDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              to: "GARECEIVERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              created_at: "2026-05-27T10:00:00Z",
+              paging_token: "payment-token",
+            },
+            {
+              type: "change_trust",
+              created_at: "2026-05-27T10:01:00Z",
+              paging_token: "change-trust-token",
+            },
+            {
+              type: "create_account",
+              starting_balance: "2.5000000",
+              funder: "GAFUNDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              account: "GANEWACCOUNTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              created_at: "2026-05-27T10:02:00Z",
+              paging_token: "create-account-token",
+            },
+          ],
+        }),
+      };
+
+      const operations = {
+        forAccount: jest.fn().mockReturnValue(query),
+      };
+
+      jest.spyOn(server, "operations").mockReturnValue(operations);
+
+      const res = await request(app).get(
+        `/account/${VALID_KEY}/payments?limit=3&order=asc&cursor=start-token`
+      );
+
+      expect(res.statusCode).toBe(200);
+      expect(operations.forAccount).toHaveBeenCalledWith(VALID_KEY);
+      expect(query.limit).toHaveBeenCalledWith(3);
+      expect(query.order).toHaveBeenCalledWith("asc");
+      expect(query.cursor).toHaveBeenCalledWith("start-token");
+      expect(res.body.data).toEqual([
+        {
+          type: "payment",
+          amount: "15.0000000",
+          asset: {
+            code: "USDC",
+            issuer: "GA5ZSEJYB37UIUIK3VHI67YFVL2OESQ5X2Z3U5QZWAJT44PJ5G2NXFXA",
+            type: "credit_alphanum4",
+          },
+          sender: "GASENDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          receiver: "GARECEIVERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          createdAt: "2026-05-27T10:00:00Z",
+        },
+        {
+          type: "create_account",
+          amount: "2.5000000",
+          asset: {
+            code: "XLM",
+            issuer: null,
+            type: "native",
+          },
+          sender: "GAFUNDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          receiver: "GANEWACCOUNTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          createdAt: "2026-05-27T10:02:00Z",
+        },
+      ]);
+      expect(res.body.meta).toEqual({
+        count: 2,
+        limit: 3,
+        order: "asc",
+        nextCursor: "create-account-token",
+        hasMore: true,
+      });
+    });
+
     it("returns payments for a valid account", async () => {
       const res = await request(app).get(`/account/${VALID_KEY}/payments`);
 
@@ -175,14 +264,14 @@ describe("StellarKit API", () => {
 
       if (res.body.data.length > 0) {
         const payment = res.body.data[0];
+        expect(payment).toHaveProperty("type");
         expect(payment).toHaveProperty("amount");
-        expect(payment).toHaveProperty("assetCode");
-        expect(payment).toHaveProperty("assetIssuer");
-        expect(payment).toHaveProperty("from");
-        expect(payment).toHaveProperty("to");
+        expect(payment).toHaveProperty("asset");
+        expect(payment).toHaveProperty("sender");
+        expect(payment).toHaveProperty("receiver");
         expect(payment).toHaveProperty("createdAt");
         expect(Object.keys(payment).sort()).toEqual(
-          ["amount", "assetCode", "assetIssuer", "from", "to", "createdAt"].sort()
+          ["type", "amount", "asset", "sender", "receiver", "createdAt"].sort()
         );
       }
     });
@@ -192,11 +281,11 @@ describe("StellarKit API", () => {
 
       expect(res.statusCode).toBe(200);
       res.body.data.forEach((payment) => {
+        expect(["payment", "create_account"]).toContain(payment.type);
         expect(payment).toHaveProperty("amount");
-        expect(payment).toHaveProperty("assetCode");
-        expect(payment).toHaveProperty("assetIssuer");
-        expect(payment).toHaveProperty("from");
-        expect(payment).toHaveProperty("to");
+        expect(payment).toHaveProperty("asset");
+        expect(payment).toHaveProperty("sender");
+        expect(payment).toHaveProperty("receiver");
       });
     });
 

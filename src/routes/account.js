@@ -191,16 +191,18 @@ router.get("/:id/payments", async (req, res, next) => {
 
     rawRecords.forEach((op, idx) => {
       if (op.type === "payment" || op.type === "create_account") {
+        const isPayment = op.type === "payment";
+
         paymentOps.push({
-          amount: op.type === "payment" ? op.amount : op.starting_balance,
-          assetCode: op.type === "payment"
-            ? (op.asset_code || "XLM")
-            : "XLM",
-          assetIssuer: op.type === "payment"
-            ? (op.asset_issuer || null)
-            : null,
-          from: op.type === "payment" ? op.from : op.funder,
-          to: op.type === "payment" ? op.to : op.account,
+          type: op.type,
+          amount: isPayment ? op.amount : op.starting_balance,
+          asset: {
+            code: isPayment ? (op.asset_code || "XLM") : "XLM",
+            issuer: isPayment ? (op.asset_issuer || null) : null,
+            type: isPayment ? (op.asset_type || "native") : "native",
+          },
+          sender: isPayment ? op.from : op.funder,
+          receiver: isPayment ? op.to : op.account,
           createdAt: op.created_at,
         });
         lastPaymentIndex = idx;
