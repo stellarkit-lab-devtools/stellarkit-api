@@ -1,8 +1,91 @@
 const express = require("express");
 const router = express.Router();
+const axios = require("axios");
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAccountId, validateLimit } = require("../utils/validators");
+
+function parseStellarToml(tomlText) {
+  const currencies = [];
+  let current = null;
+
+  tomlText.split(/\r?\n/).forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith("//")) {
+      return;
+    }
+
+    const tableMatch = line.match(/^\[\[\s*([A-Za-z0-9_]+)\s*\]\]$/);
+    if (tableMatch) {
+      if (current && Object.keys(current).length > 0) {
+        currencies.push(current);
+      }
+      current = {};
+      return;
+    }
+
+    const kvMatch = line.match(/^([A-Za-z0-9_]+)\s*=\s*(.+)$/);
+    if (!kvMatch || !current) {
+      return;
+    }
+
+    let [, key, value] = kvMatch;
+    value = value.trim();
+
+    const quoted = value.match(/^"([\s\S]*)"$/);
+    if (quoted) {
+      value = quoted[1].replace(/\\"/g, '"');
+    } else if (/^(true|false)$/i.test(value)) {
+      value = value.toLowerCase() === "true";
+    } else if (!Number.isNaN(Number(value))) {
+      value = Number(value);
+    }
+
+    current[key] = value;
+  });
+
+  if (current && Object.keys(current).length > 0) {
+    currencies.push(current);
+  }
+
+  return currencies;
+}
+
+async function resolveIssuerToml(assetIssuer, assetCode) {
+  try {
+    const issuerAccount = await server.loadAccount(assetIssuer);
+    if (!issuerAccount.home_domain) {
+      return null;
+    }
+
+    const tomlUrl = `https://${issuerAccount.home_domain}/.well-known/stellar.toml`;
+    const response = await axios.get(tomlUrl, {
+      timeout: 5000,
+      headers: {
+        Accept: "text/plain, */*",
+      },
+    });
+
+    const currencies = parseStellarToml(response.data);
+    const match = currencies.find(
+      (currency) =>
+        currency.code === assetCode &&
+        (currency.issuer === assetIssuer || currency.issuer_account_id === assetIssuer),
+    );
+
+    if (!match) {
+      return null;
+    }
+
+    return {
+      name: match.name || null,
+      description: match.desc || match.description || null,
+      image: match.image || null,
+    };
+  } catch (err) {
+    return null;
+  }
+}
 
 /**
  * GET /account/:id
@@ -67,6 +150,51 @@ router.get("/:id", async (req, res, next) => {
       flags: account.flags,
       homeDomain: account.home_domain || null,
       lastModifiedLedger: account.last_modified_ledger,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/:id/trustlines", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const tokenBalances = account.balances.filter((balance) => balance.asset_type !== "native");
+
+    const tomlCache = {};
+    const assetPromises = tokenBalances.map(async (balance) => {
+      const cachedToml = tomlCache[balance.asset_issuer];
+      const tomlResult = cachedToml
+        ? cachedToml
+        : await resolveIssuerToml(balance.asset_issuer, balance.asset_code);
+
+      if (!cachedToml) {
+        tomlCache[balance.asset_issuer] = tomlResult;
+      }
+
+      return {
+        assetCode: balance.asset_code,
+        assetIssuer: balance.asset_issuer,
+        assetType: balance.asset_type,
+        balance: balance.balance,
+        limit: balance.limit,
+        buyingLiabilities: balance.buying_liabilities,
+        sellingLiabilities: balance.selling_liabilities,
+        isAuthorized: balance.is_authorized,
+        isClawbackEnabled: balance.is_clawback_enabled,
+        toml: tomlResult,
+      };
+    });
+
+    const assets = await Promise.all(assetPromises);
+
+    return success(res, {
+      accountId: account.id,
+      assetCount: assets.length,
+      assets,
     });
   } catch (err) {
     next(err);
