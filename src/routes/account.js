@@ -4,6 +4,32 @@ const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAccountId, validateLimit } = require("../utils/validators");
 
+function formatAccountBalances(account) {
+  const xlmBalance = account.balances.find((b) => b.asset_type === "native");
+  const assets = account.balances
+    .filter((b) => b.asset_type !== "native")
+    .map((b) => ({
+      assetCode: b.asset_code,
+      assetIssuer: b.asset_issuer,
+      assetType: b.asset_type,
+      balance: b.balance,
+      limit: b.limit,
+      buyingLiabilities: b.buying_liabilities,
+      sellingLiabilities: b.selling_liabilities,
+      isAuthorized: b.is_authorized,
+      isClawbackEnabled: b.is_clawback_enabled,
+    }));
+
+  return {
+    xlm: {
+      balance: xlmBalance ? xlmBalance.balance : "0.0000000",
+      buyingLiabilities: xlmBalance ? xlmBalance.buying_liabilities : "0",
+      sellingLiabilities: xlmBalance ? xlmBalance.selling_liabilities : "0",
+    },
+    assets,
+  };
+}
+
 /**
  * GET /account/:id
  * Returns full account details including XLM balance, all asset balances,
@@ -21,21 +47,7 @@ router.get("/:id", async (req, res, next) => {
 
     const account = await server.loadAccount(id);
 
-    // Separate native XLM from other assets
-    const xlmBalance = account.balances.find((b) => b.asset_type === "native");
-    const tokenBalances = account.balances
-      .filter((b) => b.asset_type !== "native")
-      .map((b) => ({
-        assetCode: b.asset_code,
-        assetIssuer: b.asset_issuer,
-        assetType: b.asset_type,
-        balance: b.balance,
-        limit: b.limit,
-        buyingLiabilities: b.buying_liabilities,
-        sellingLiabilities: b.selling_liabilities,
-        isAuthorized: b.is_authorized,
-        isClawbackEnabled: b.is_clawback_enabled,
-      }));
+    const balances = formatAccountBalances(account);
 
     // Minimum balance calculation
     // Min balance = (2 + subentries) * base_reserve
@@ -48,16 +60,14 @@ router.get("/:id", async (req, res, next) => {
       sequence: account.sequence,
       subentryCount: account.subentry_count,
       xlm: {
-        balance: xlmBalance ? xlmBalance.balance : "0.0000000",
-        buyingLiabilities: xlmBalance ? xlmBalance.buying_liabilities : "0",
-        sellingLiabilities: xlmBalance ? xlmBalance.selling_liabilities : "0",
+        ...balances.xlm,
         minimumBalance: minBalance.toFixed(7),
-        spendableBalance: xlmBalance
-          ? Math.max(0, parseFloat(xlmBalance.balance) - minBalance).toFixed(7)
+        spendableBalance: balances.xlm.balance
+          ? Math.max(0, parseFloat(balances.xlm.balance) - minBalance).toFixed(7)
           : "0.0000000",
       },
-      assets: tokenBalances,
-      assetCount: tokenBalances.length,
+      assets: balances.assets,
+      assetCount: balances.assets.length,
       signers: account.signers.map((s) => ({
         key: s.key,
         type: s.type,
@@ -68,6 +78,28 @@ router.get("/:id", async (req, res, next) => {
       homeDomain: account.home_domain || null,
       lastModifiedLedger: account.last_modified_ledger,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /account/:id/balances
+ * Returns only native XLM and asset balances for a Stellar account.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/balances
+ */
+router.get("/:id/balances", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    return success(res, formatAccountBalances(account));
   } catch (err) {
     next(err);
   }

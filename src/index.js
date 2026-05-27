@@ -7,6 +7,7 @@ const morgan = require("morgan");
 const { setupWebSocket } = require("./websocket");
 
 const rateLimiter = require("./middleware/rateLimiter");
+const contentTypeValidator = require("./middleware/contentTypeValidator");
 const errorHandler = require("./middleware/errorHandler");
 
 const networkStatusRouter = require("./routes/networkStatus");
@@ -21,6 +22,7 @@ const PORT = process.env.PORT || 3000;
 // ── Security & Parsing ──────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors());
+app.use(contentTypeValidator);
 app.use(express.json());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
@@ -64,6 +66,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/fee-estimate",                     description: "Fee tiers for transaction submission" },
         { method: "GET", path: "/fee-estimate?operations=N",        description: "Fee estimate for N operations" },
         { method: "GET", path: "/account/:id",                      description: "Account details, balances, signers" },
+        { method: "GET", path: "/account/:id/balances",             description: "XLM and asset balances for an account" },
         { method: "GET", path: "/transactions/:id",                 description: "Transaction history for an account" },
         { method: "GET", path: "/transactions/:id/operations",      description: "Operation history for an account" },
         { method: "GET", path: "/asset/:code/:issuer",              description: "Asset metadata and statistics" },

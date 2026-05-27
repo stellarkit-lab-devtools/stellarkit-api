@@ -1,6 +1,7 @@
 const request = require("supertest");
 const app = require("../src/index");
 const { networkStatusCache, feeEstimateCache } = require("../src/utils/cache");
+const { server } = require("../src/config/stellar");
 
 describe("StellarKit API", () => {
   // Clear caches before each test
@@ -77,6 +78,82 @@ describe("StellarKit API", () => {
       const res = await request(app).get("/asset/search?code=TOOLONGASSETCODE");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
+    });
+  });
+
+  describe("Content-Type validation", () => {
+    it("returns 400 when a POST request sends a non-JSON body", async () => {
+      const res = await request(app)
+        .post("/future-route")
+        .set("Content-Type", "text/plain")
+        .send("not json");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toEqual({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: "Content-Type must be application/json for requests with a body.",
+        },
+      });
+    });
+  });
+
+  describe("GET /account/:id/balances", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns only XLM and asset balances", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        balances: [
+          {
+            asset_type: "native",
+            balance: "100.0000000",
+            buying_liabilities: "1.0000000",
+            selling_liabilities: "2.0000000",
+          },
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "USDC",
+            asset_issuer: "GA5ZSEJYB37UIUIK3VHI67YFVL2OESQ5X2Z3U5QZWAJT44PJ5G2NXFXA",
+            balance: "25.5000000",
+            limit: "1000.0000000",
+            buying_liabilities: "0.0000000",
+            selling_liabilities: "0.0000000",
+            is_authorized: true,
+            is_clawback_enabled: false,
+          },
+        ],
+      });
+
+      const res = await request(app).get(`/account/${VALID_KEY}/balances`);
+
+      expect(res.statusCode).toBe(200);
+      expect(server.loadAccount).toHaveBeenCalledWith(VALID_KEY);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({
+        xlm: {
+          balance: "100.0000000",
+          buyingLiabilities: "1.0000000",
+          sellingLiabilities: "2.0000000",
+        },
+        assets: [
+          {
+            assetCode: "USDC",
+            assetIssuer: "GA5ZSEJYB37UIUIK3VHI67YFVL2OESQ5X2Z3U5QZWAJT44PJ5G2NXFXA",
+            assetType: "credit_alphanum4",
+            balance: "25.5000000",
+            limit: "1000.0000000",
+            buyingLiabilities: "0.0000000",
+            sellingLiabilities: "0.0000000",
+            isAuthorized: true,
+            isClawbackEnabled: false,
+          },
+        ],
+      });
     });
   });
 
