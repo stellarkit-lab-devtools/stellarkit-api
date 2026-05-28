@@ -106,6 +106,32 @@ router.get("/:id/balances", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /account/:id/sequence
+ * Returns only the current sequence number for a Stellar account.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sequence
+ */
+router.get("/:id/sequence", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    return success(res, {
+      accountId: account.id,
+      sequence: account.sequence,
+      lastModifiedLedger: account.last_modified_ledger,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => {
   try {
     const { id } = req.params;

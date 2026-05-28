@@ -157,6 +157,41 @@ describe("StellarKit API", () => {
     });
   });
 
+  describe("GET /account/:id/sequence", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns accountId, sequence and lastModifiedLedger", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "123456789",
+        last_modified_ledger: 42,
+      });
+
+      const res = await request(app).get(`/account/${VALID_KEY}/sequence`);
+
+      expect(res.statusCode).toBe(200);
+      expect(server.loadAccount).toHaveBeenCalledWith(VALID_KEY);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({
+        accountId: VALID_KEY,
+        sequence: "123456789",
+        lastModifiedLedger: 42,
+      });
+    });
+
+    it("returns 400 for invalid account ID", async () => {
+      const res = await request(app).get("/account/INVALID_KEY/sequence");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+  });
+
   describe("GET /account/:id/payments", () => {
     const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
 
