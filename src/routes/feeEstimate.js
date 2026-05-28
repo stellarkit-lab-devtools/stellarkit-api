@@ -80,6 +80,20 @@ router.get("/", async (req, res, next) => {
         p95: feeStats.fee_charged.p95,
         p99: feeStats.fee_charged.p99,
       },
+      // New fields
+      context: "Stroops are the smallest unit of XLM; 1 XLM = 10,000,000 stroops.",
+      networkCongestion: (function () {
+        const usage = feeStats.ledger_capacity_usage;
+        if (usage < 0.5) return "low";
+        if (usage < 0.75) return "medium";
+        return "high";
+      })(),
+      recommendation: (function () {
+        const usage = feeStats.ledger_capacity_usage;
+        if (usage < 0.5) return "Economy tier is sufficient – network is not congested.";
+        if (usage < 0.75) return "Standard tier is recommended for moderate congestion.";
+        return "Priority tier is recommended – network is highly congested.";
+      })(),
     };
 
     // Cache the response
