@@ -18,6 +18,7 @@ const accountRouter = require("./routes/account");
 const transactionsRouter = require("./routes/transactions");
 const assetRouter = require("./routes/asset");
 const dexRouter = require("./routes/dex");
+const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
 
@@ -57,6 +58,7 @@ app.use("/account", accountRouter);
 app.use("/transactions", transactionsRouter);
 app.use("/asset", assetRouter);
 app.use("/dex", dexRouter);
+app.use("/liquidity-pools", liquidityPoolRouter);
 app.use("/stream", streamRouter);
 app.use("/utils", utilsRouter);
 
@@ -84,6 +86,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/asset/:code/:issuer/holders",      description: "Paginated accounts holding an asset" },
         { method: "GET", path: "/asset/search?code=:code",          description: "Search assets by code across all issuers" },
         { method: "GET", path: "/dex/arbitrage/:code/:issuer",      description: "Find profitable circular arbitrage paths for an asset" },
+        { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
         { method: "GET", path: "/utils/friendbot/:accountId",       description: "Fund a testnet account via Friendbot (testnet only)" },
         { method: "WS",  path: "/stream/ledgers",                  description: "Real-time stream of live Stellar ledger updates" },
       ],
