@@ -10,6 +10,7 @@
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
 [![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Security Audit](https://github.com/stellarkit-lab-devtools/stellarkit-api/actions/workflows/ci.yml/badge.svg?label=security)](https://github.com/stellarkit-lab-devtools/stellarkit-api/actions/workflows/ci.yml)
 
 StellarKit API wraps the [Stellar Horizon API](https://developers.stellar.org/api/horizon) into clean, developer-friendly REST endpoints. It helps developers building on Stellar quickly access fee estimates, account data, transaction history, network status, and asset metadata — without having to read through raw Horizon responses.
 
