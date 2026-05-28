@@ -54,7 +54,15 @@ router.get("/:id", async (req, res, next) => {
     // Min balance = (2 + subentries) * base_reserve
     // We use 0.5 XLM as the current base reserve
     const baseReserve = 0.5;
-    const minBalance = (2 + account.subentry_count) * baseReserve;
+    const STROOPS_PER_XLM = 10_000_000;
+    const accountReserve = 2 * baseReserve;
+    const subentryReserve = account.subentry_count * baseReserve;
+    const totalLocked = accountReserve + subentryReserve;
+    const xlmBalance = parseFloat(balances.xlm.balance || "0");
+    const spendable = Math.max(0, xlmBalance - totalLocked);
+
+    const toXLM = (xlm) => xlm.toFixed(7);
+    const toStroops = (xlm) => Math.round(xlm * STROOPS_PER_XLM);
 
     return success(res, {
       accountId: account.id,
@@ -62,10 +70,15 @@ router.get("/:id", async (req, res, next) => {
       subentryCount: account.subentry_count,
       xlm: {
         ...balances.xlm,
-        minimumBalance: minBalance.toFixed(7),
-        spendableBalance: balances.xlm.balance
-          ? Math.max(0, parseFloat(balances.xlm.balance) - minBalance).toFixed(7)
-          : "0.0000000",
+        minimumBalance: totalLocked.toFixed(7),
+        spendableBalance: spendable.toFixed(7),
+      },
+      reserveBreakdown: {
+        baseReserve:       { xlm: toXLM(baseReserve),     stroops: toStroops(baseReserve) },
+        accountReserve:    { xlm: toXLM(accountReserve),  stroops: toStroops(accountReserve) },
+        subentryReserve:   { xlm: toXLM(subentryReserve), stroops: toStroops(subentryReserve) },
+        totalLocked:       { xlm: toXLM(totalLocked),     stroops: toStroops(totalLocked) },
+        spendable:         { xlm: toXLM(spendable),       stroops: toStroops(spendable) },
       },
       assets: balances.assets,
       assetCount: balances.assets.length,
