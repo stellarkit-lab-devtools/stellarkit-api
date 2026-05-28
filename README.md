@@ -68,6 +68,113 @@ The API will be available at `http://localhost:3000`.
 
 ---
 
+## 📘 TypeScript Support
+
+`stellarkit-api` ships with full TypeScript type definitions. All response shapes are typed and exported from `types/index.d.ts`.
+
+### Installation
+
+Types are included automatically — no `@types/` package needed.
+
+### Usage
+
+```typescript
+import type {
+  AccountResponse,
+  TransactionHistoryResponse,
+  OperationHistoryResponse,
+  FeeEstimateResponse,
+  NetworkStatusResponse,
+  AssetResponse,
+  AssetSearchResponse,
+  AccountBalancesResponse,
+  AccountPaymentsResponse,
+  AccountSummaryResponse,
+  ApiError,
+} from 'stellarkit-api'
+
+// Example: typed API response
+const response: AccountResponse = await fetch(
+  'http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN'
+).then(r => r.json())
+
+// Fully typed access to response fields
+console.log(response.data.xlm.balance)
+console.log(response.data.assets[0].assetCode)
+```
+
+### Available Types
+
+| Type | Description |
+|------|-------------|
+| `AccountResponse` | Response from GET /account/:id |
+| `AccountBalancesResponse` | Response from GET /account/:id/balances |
+| `AccountSummaryResponse` | Response from GET /account/:id/summary |
+| `AccountPaymentsResponse` | Response from GET /account/:id/payments |
+| `TransactionHistoryResponse` | Response from GET /transactions/:id |
+| `OperationHistoryResponse` | Response from GET /transactions/:id/operations |
+| `FeeEstimateResponse` | Response from GET /fee-estimate |
+| `NetworkStatusResponse` | Response from GET /network-status |
+| `AssetResponse` | Response from GET /asset/:code/:issuer |
+| `AssetSearchResponse` | Response from GET /asset/search?code=:code |
+| `HealthResponse` | Response from GET /health |
+| `ApiError` | Standard error response shape |
+| `StellarPublicKey` | Stellar public key type alias |
+| `TransactionHash` | Transaction hash type alias |
+| `ISOTimestamp` | ISO 8601 timestamp type alias |
+| `StellarAmount` | Stellar amount (string) type alias |
+| `StellarAsset` | Stellar asset identifier |
+| `AccountBalances` | Account balances wrapper |
+| `XLMBalance` | XLM balance information |
+| `AssetBalance` | Non-native asset balance |
+| `Signer` | Signer information |
+| `Thresholds` | Account thresholds |
+| `AccountFlags` | Account flags |
+| `FeeTier` | Fee tier information |
+| `LedgerInfo` | Ledger information |
+| `TransactionRecord` | Transaction record |
+| `OperationRecord` | Operation record |
+| `PaginationMeta` | Pagination metadata |
+
+### Type-Safe Error Handling
+
+```typescript
+import type { ApiError } from 'stellarkit-api'
+
+try {
+  const response = await fetch('http://localhost:3000/account/invalid-key')
+  const data = await response.json()
+  
+  if (!response.ok) {
+    const error = data as ApiError
+    console.error(error.error.type, error.error.message)
+  }
+} catch (err) {
+  console.error('Network error:', err)
+}
+```
+
+### Query Parameter Types
+
+For endpoints that accept query parameters, use the corresponding `Params` types:
+
+```typescript
+import type { FeeEstimateParams, TransactionHistoryParams } from 'stellarkit-api'
+
+const feeParams: FeeEstimateParams = {
+  operations: 3,
+  fresh: true,
+}
+
+const txParams: TransactionHistoryParams = {
+  limit: 20,
+  order: 'asc',
+  cursor: 'paging-token-here',
+}
+```
+
+---
+
 ## 📡 API Endpoints
 
 ### `GET /`

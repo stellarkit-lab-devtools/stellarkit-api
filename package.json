@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A developer utility API for the Stellar blockchain — fee estimation, account info, transaction history, network status, and asset metadata via Horizon.",
   "main": "src/index.js",
+  "types": "types/index.d.ts",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
