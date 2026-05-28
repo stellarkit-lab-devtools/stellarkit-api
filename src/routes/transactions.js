@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
-const { validateAccountId, validateLimit } = require("../utils/validators");
+const { validateAccountId, validateLimit, validateOrder } = require("../utils/validators");
 
 /**
  * GET /transactions/:id
@@ -70,9 +70,7 @@ router.get("/:id", async (req, res, next) => {
     validateAccountId(id);
 
     const limit = validateLimit(req.query.limit || 10, 200);
-    const order = ["asc", "desc"].includes(req.query.order)
-      ? req.query.order
-      : "desc";
+    const order = validateOrder(req.query.order);
     const cursor = req.query.cursor || undefined;
 
     let query = server
@@ -191,9 +189,7 @@ router.get("/:id/operations", async (req, res, next) => {
     validateAccountId(id);
 
     const limit = validateLimit(req.query.limit || 10, 200);
-    const order = ["asc", "desc"].includes(req.query.order)
-      ? req.query.order
-      : "desc";
+    const order = validateOrder(req.query.order);
     const cursor = req.query.cursor || undefined;
 
     let query = server
