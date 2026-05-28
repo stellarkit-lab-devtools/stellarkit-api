@@ -466,4 +466,106 @@ describe("StellarKit API", () => {
       expect(res.headers["content-encoding"]).toBe("gzip");
     });
   });
-});
+  // ── Friendbot Tests ─────────────────────────────────────────────────────────
+  describe("GET /utils/friendbot/:accountId", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    beforeEach(() => {
+      // Set to testnet for tests
+      process.env.STELLAR_NETWORK = "testnet";
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns 400 for an invalid account ID", async () => {
+      const res = await request(app).get("/utils/friendbot/INVALID_KEY");
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 when account ID is missing", async () => {
+      const res = await request(app).get("/utils/friendbot/");
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("returns 403 when not on testnet", async () => {
+      process.env.STELLAR_NETWORK = "mainnet";
+      const res = await request(app).get(`/utils/friendbot/${VALID_KEY}`);
+      expect(res.statusCode).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.message).toContain("testnet");
+    });
+
+    it("returns 200 and funds account on testnet success", async () => {
+      const axios = require("axios");
+      const mockFriendbot = {
+        hash: "abc123",
+        result_xdr: "xdr...",
+      };
+
+      jest.spyOn(axios, "get").mockResolvedValue({
+        data: mockFriendbot,
+      });
+
+      const res = await request(app).get(`/utils/friendbot/${VALID_KEY}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.accountId).toBe(VALID_KEY);
+      expect(res.body.data.message).toContain("10,000 XLM");
+      expect(res.body.data.transaction).toEqual(mockFriendbot);
+    });
+
+    it("returns 400 and error message if account already funded", async () => {
+      const axios = require("axios");
+      jest.spyOn(axios, "get").mockRejectedValue({
+        response: {
+          status: 400,
+          data: {
+            detail: "Account already exists",
+            message: "This account is already funded",
+          },
+        },
+      });
+
+      const res = await request(app).get(`/utils/friendbot/${VALID_KEY}`);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.message).toContain("Account already");
+    });
+
+    it("handles network errors gracefully", async () => {
+      const axios = require("axios");
+      jest.spyOn(axios, "get").mockRejectedValue({
+        response: {
+          status: 500,
+          data: {
+            detail: "Internal Server Error",
+          },
+        },
+      });
+
+      const res = await request(app).get(`/utils/friendbot/${VALID_KEY}`);
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.success).toBe(false);
+    });
+
+    it("passes the account ID correctly to Friendbot", async () => {
+      const axios = require("axios");
+      jest.spyOn(axios, "get").mockResolvedValue({
+        data: { hash: "test" },
+      });
+
+      await request(app).get(`/utils/friendbot/${VALID_KEY}`);
+
+      expect(axios.get).toHaveBeenCalledWith("https://friendbot.stellar.org", {
+        params: { addr: VALID_KEY },
+        timeout: 10000,
+      });
+    });
+  });});

@@ -18,6 +18,7 @@ const accountRouter = require("./routes/account");
 const transactionsRouter = require("./routes/transactions");
 const assetRouter = require("./routes/asset");
 const streamRouter = require("./routes/stream");
+const utilsRouter = require("./routes/utils");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -55,6 +56,7 @@ app.use("/account", accountRouter);
 app.use("/transactions", transactionsRouter);
 app.use("/asset", assetRouter);
 app.use("/stream", streamRouter);
+app.use("/utils", utilsRouter);
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
@@ -77,6 +79,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/transactions/:id/operations",      description: "Operation history for an account" },
         { method: "GET", path: "/asset/:code/:issuer",              description: "Asset metadata and statistics" },
         { method: "GET", path: "/asset/search?code=:code",          description: "Search assets by code across all issuers" },
+        { method: "GET", path: "/utils/friendbot/:accountId",       description: "Fund a testnet account via Friendbot (testnet only)" },
         { method: "WS",  path: "/stream/ledgers",                  description: "Real-time stream of live Stellar ledger updates" },
       ],
       docs: "https://github.com/stellarkit-lab-devtools/stellarkit-api#readme",
