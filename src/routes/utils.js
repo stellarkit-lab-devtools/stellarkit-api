@@ -135,4 +135,63 @@ router.get("/base64", (req, res, next) => {
   }
 });
 
+/**
+ * GET /utils/validate-asset?code={code}
+ * Validate whether a given string is a valid Stellar asset code.
+ *
+ * @example
+ * GET /utils/validate-asset?code=USDC
+ */
+router.get("/validate-asset", (req, res, next) => {
+  try {
+    const { code } = req.query;
+    if (code === undefined || code === null || code === "") {
+      const err = new Error("Query parameter 'code' is required.");
+      err.statusCode = 400;
+      err.isValidation = true;
+      throw err;
+    }
+
+    const input = code;
+    let isValid = true;
+    let assetType = null;
+    let reason = null;
+
+    const upperCode = code.toUpperCase();
+
+    if (upperCode === "XLM") {
+      assetType = "native";
+    } else if (code.length >= 1 && code.length <= 4) {
+      assetType = "credit_alphanum4";
+    } else if (code.length >= 5 && code.length <= 12) {
+      assetType = "credit_alphanum12";
+    } else if (code.length > 12) {
+      isValid = false;
+      reason = "Asset code is too long (maximum 12 characters).";
+    } else {
+      // Empty code check
+      isValid = false;
+      reason = "Asset code cannot be empty.";
+    }
+
+    if (isValid && assetType !== "native") {
+      const alphanumericPattern = /^[A-Za-z0-9]+$/;
+      if (!alphanumericPattern.test(code)) {
+        isValid = false;
+        reason = "Asset code contains invalid characters. Only alphanumeric characters are allowed.";
+      }
+    }
+
+    return success(res, {
+      input,
+      isValid,
+      assetType,
+      reason,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+
