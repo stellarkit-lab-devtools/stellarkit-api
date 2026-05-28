@@ -65,6 +65,28 @@ describe("StellarKit API", () => {
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
     });
+
+    it("returns 400 for an invalid order param", async () => {
+      const res = await request(app).get(
+        "/transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?order=invalid"
+      );
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.message).toContain("asc");
+      expect(res.body.error.message).toContain("desc");
+    });
+  });
+
+  describe("GET /transactions/:id/operations — validation", () => {
+    it("returns 400 for an invalid order param", async () => {
+      const res = await request(app).get(
+        "/transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/operations?order=invalid"
+      );
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.message).toContain("asc");
+      expect(res.body.error.message).toContain("desc");
+    });
   });
 
   describe("GET /asset/search — validation", () => {

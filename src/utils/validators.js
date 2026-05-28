@@ -60,4 +60,28 @@ function validateLimit(limit, max = 200) {
   return parsed;
 }
 
-module.exports = { validateAccountId, validateAssetCode, validateLimit };
+/**
+ * Validate the order query parameter.
+ *
+ * @param {string} order - The order value to validate ("asc" or "desc").
+ * @returns {string} The validated order value.
+ * @throws {Error} If the order is not "asc" or "desc".
+ */
+function validateOrder(order) {
+  if (!order) {
+    // order is optional, default to "desc"
+    return "desc";
+  }
+
+  const lowerOrder = String(order).toLowerCase();
+  if (!["asc", "desc"].includes(lowerOrder)) {
+    const err = new Error(
+      `Invalid order parameter: "${order}". Valid values are "asc" or "desc".`
+    );
+    err.isValidation = true;
+    throw err;
+  }
+  return lowerOrder;
+}
+
+module.exports = { validateAccountId, validateAssetCode, validateLimit, validateOrder };
