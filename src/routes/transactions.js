@@ -86,22 +86,36 @@ router.get("/:id", async (req, res, next) => {
 
     const txResponse = await query.call();
 
-    const transactions = txResponse.records.map((tx) => ({
-      id: tx.id,
-      hash: tx.hash,
-      ledger: tx.ledger,
-      createdAt: tx.created_at,
-      sourceAccount: tx.source_account,
-      fee: {
-        charged: tx.fee_charged,
-        account: tx.fee_account,
-      },
-      operationCount: tx.operation_count,
-      memoType: tx.memo_type,
-      memo: tx.memo || null,
-      successful: tx.successful,
-      envelopeXdr: tx.envelope_xdr,
-    }));
+    const STROOPS_PER_XLM = 10_000_000;
+
+    const transactions = txResponse.records.map((tx) => {
+      const chargedInStroops = parseInt(tx.fee_charged, 10);
+      const opCount = tx.operation_count || 1;
+      const perOpStroops = Math.floor(chargedInStroops / opCount);
+
+      return {
+        id: tx.id,
+        hash: tx.hash,
+        ledger: tx.ledger,
+        createdAt: tx.created_at,
+        sourceAccount: tx.source_account,
+        fee: {
+          charged: tx.fee_charged,
+          account: tx.fee_account,
+        },
+        feeSummary: {
+          chargedInStroops,
+          chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+          perOperationInStroops: perOpStroops,
+          perOperationInXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
+        },
+        operationCount: tx.operation_count,
+        memoType: tx.memo_type,
+        memo: tx.memo || null,
+        successful: tx.successful,
+        envelopeXdr: tx.envelope_xdr,
+      };
+    });
 
     const lastRecord = txResponse.records[txResponse.records.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;

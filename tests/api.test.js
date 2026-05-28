@@ -389,6 +389,90 @@ describe("StellarKit API", () => {
     });
   });
 
+  // ── Issue #78: reserveBreakdown ────────────────────────────────────────────
+  describe("GET /account/:id — reserveBreakdown", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("includes reserveBreakdown with correct XLM and stroops values", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 2,
+        last_modified_ledger: 1,
+        balances: [{ asset_type: "native", balance: "10.0000000", buying_liabilities: "0", selling_liabilities: "0" }],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      const res = await request(app).get(`/account/${VALID_KEY}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.reserveBreakdown).toEqual({
+        baseReserve:     { xlm: "0.5000000", stroops: 5000000 },
+        accountReserve:  { xlm: "1.0000000", stroops: 10000000 },
+        subentryReserve: { xlm: "1.0000000", stroops: 10000000 },
+        totalLocked:     { xlm: "2.0000000", stroops: 20000000 },
+        spendable:       { xlm: "8.0000000", stroops: 80000000 },
+      });
+    });
+  });
+
+  // ── Issue #75: feeSummary ──────────────────────────────────────────────────
+  describe("GET /transactions/:id — feeSummary", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("includes feeSummary with correct stroops and XLM values", async () => {
+      const query = {
+        limit: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        includeFailed: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({
+          records: [
+            {
+              id: "tx1",
+              hash: "abc",
+              ledger: 1,
+              created_at: "2026-01-01T00:00:00Z",
+              source_account: VALID_KEY,
+              fee_charged: "300",
+              fee_account: VALID_KEY,
+              operation_count: 3,
+              memo_type: "none",
+              memo: null,
+              successful: true,
+              envelope_xdr: "xdr",
+              paging_token: "tok1",
+            },
+          ],
+        }),
+      };
+
+      jest.spyOn(server, "transactions").mockReturnValue({
+        forAccount: jest.fn().mockReturnValue(query),
+      });
+
+      const res = await request(app).get(`/transactions/${VALID_KEY}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data[0].feeSummary).toEqual({
+        chargedInStroops: 300,
+        chargedInXLM: "0.0000300",
+        perOperationInStroops: 100,
+        perOperationInXLM: "0.0000100",
+      });
+    });
+  });
+
   // ── Cache Tests ─────────────────────────────────────────────────────────────
   describe("Cache - /network-status", () => {
     it("returns X-Cache: MISS on first request", async () => {
