@@ -89,4 +89,74 @@ router.get("/:id/profitability", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /liquidity-pools/:id/reserve-ratio
+ * Returns the current reserve ratio between the two assets in a Stellar AMM liquidity pool
+ * and tracks how far it has drifted from a 50/50 ratio.
+ *
+ * @param {string} id - Liquidity Pool ID (64-char hex string)
+ */
+router.get("/:id/reserve-ratio", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch pool details
+    let pool;
+    try {
+      pool = await server.liquidityPools().liquidityPoolId(id).call();
+    } catch (err) {
+      if (err.response && err.response.status === 404) {
+        const notFoundErr = new Error("Liquidity pool not found.");
+        notFoundErr.status = 404;
+        return next(notFoundErr);
+      }
+      throw err;
+    }
+
+    const reserveA = {
+      asset: pool.reserves[0].asset,
+      amount: pool.reserves[0].amount,
+    };
+    const reserveB = {
+      asset: pool.reserves[1].asset,
+      amount: pool.reserves[1].amount,
+    };
+
+    const amountA = parseFloat(reserveA.amount);
+    const amountB = parseFloat(reserveB.amount);
+    const totalAmount = amountA + amountB;
+
+    let ratioA = "0.00";
+    let ratioB = "0.00";
+    let driftFromEqual = 0;
+    let driftRating = "balanced";
+
+    if (totalAmount > 0) {
+      const numRatioA = (amountA / totalAmount) * 100;
+      const numRatioB = (amountB / totalAmount) * 100;
+      ratioA = numRatioA.toFixed(2);
+      ratioB = numRatioB.toFixed(2);
+      
+      driftFromEqual = Math.abs(numRatioA - 50);
+      
+      if (driftFromEqual > 20) {
+        driftRating = "imbalanced";
+      } else if (driftFromEqual > 5) {
+        driftRating = "moderate";
+      }
+    }
+
+    return success(res, {
+      reserveA,
+      reserveB,
+      ratioA: `${ratioA}%`,
+      ratioB: `${ratioB}%`,
+      driftFromEqual: `${driftFromEqual.toFixed(2)}%`,
+      driftRating,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
