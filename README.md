@@ -227,6 +227,212 @@ These are common Horizon transaction and operation result codes developers may s
 
 ---
 
+## Response Structure
+
+All StellarKit API endpoints follow a standardized JSON response envelope. This ensures developers know exactly what structure to expect from every API call, whether it succeeds or fails.
+
+### Success Response Envelope
+
+Every successful response includes the following structure:
+
+```json
+{
+  "success": true,
+  "data": {},
+  "meta": {}
+}
+```
+
+**Fields:**
+
+- `success` **(boolean)**: Always `true` for successful responses.
+- `data` **(object)**: The actual response payload. Structure varies by endpoint.
+- `meta` **(object)**: Optional metadata about the response, such as pagination information.
+
+#### Non-Paginated Success Example
+
+```json
+{
+  "success": true,
+  "data": {
+    "accountId": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+    "sequence": "12345678",
+    "xlm": {
+      "balance": "100.0000000",
+      "minimumBalance": "1.0000000",
+      "spendableBalance": "99.0000000"
+    }
+  },
+  "meta": {}
+}
+```
+
+#### Paginated Success Example
+
+When an endpoint returns paginated results, the `meta` field includes pagination details:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "txn_001",
+      "type": "payment",
+      "amount": "50.0000000"
+    },
+    {
+      "id": "txn_002",
+      "type": "payment",
+      "amount": "25.5000000"
+    }
+  ],
+  "meta": {
+    "cursor": "eyJpZCI6InR4bl8wMDIifQ==",
+    "limit": 10,
+    "order": "desc"
+  }
+}
+```
+
+### Error Response Envelope
+
+When an error occurs, the response structure differs:
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "ACCOUNT_NOT_FOUND",
+    "message": "Account does not exist on the Stellar network"
+  }
+}
+```
+
+**Fields:**
+
+- `success` **(boolean)**: Always `false` for error responses.
+- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `ACCOUNT_NOT_FOUND`, `INVALID_REQUEST`, `RATE_LIMITED`).
+- `error.message` **(string)**: A human-readable error message describing what went wrong.
+
+#### Error Response Example
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "VALIDATION_ERROR",
+    "message": "Invalid Stellar account ID. Must be a valid public key starting with 'G'."
+  }
+}
+```
+
+---
+
+## Pagination Guide
+
+Several endpoints in the StellarKit API return lists of records and support cursor-based pagination. This allows clients to fetch large datasets efficiently in smaller chunks.
+
+### Query Parameters
+
+When querying a paginated endpoint, the following optional parameters can be used:
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `limit` | number | `10` | The maximum number of records to return in a single page (Max 200, except `/account/:id/timeline` which has a max of 50). |
+| `order` | string | `desc` | The chronological sorting order of the records: `desc` (newest first) or `asc` (oldest first). *(Not supported by `/account/:id/timeline`)*. |
+| `cursor` | string | — | A pointer to a specific location in the dataset from which to resume fetching. |
+
+### How Cursor-based Pagination Works
+
+1. **Initial Request**: Make a request to a paginated endpoint without specifying a `cursor`. You can optionally set the `limit` and `order` parameters.
+2. **Metadata Inspection**: The successful response contains a `meta` object.
+   - If `nextCursor` has a string value (and `hasMore` is `true`), there is more data available.
+   - If `nextCursor` is `null` (or not present), you have reached the end of the dataset.
+3. **Subsequent Request**: To fetch the next page of results, make the same API call but include the `nextCursor` value as the `cursor` query parameter.
+
+### Step-by-Step Example
+
+Below is a step-by-step example showing how to paginate through transaction history for an account.
+
+#### Step 1: Fetch the first page
+Request a page of transactions with a `limit` of 2:
+```http
+GET /transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=2
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "51234567-001",
+      "hash": "8f8c4bc6f...",
+      "ledger": 51234567,
+      "createdAt": "2026-05-29T12:00:00Z",
+      "sourceAccount": "GAAZI4..."
+    },
+    {
+      "id": "51234566-002",
+      "hash": "4a3b8cd12...",
+      "ledger": 51234566,
+      "createdAt": "2026-05-29T11:58:00Z",
+      "sourceAccount": "GAAZI4..."
+    }
+  ],
+  "meta": {
+    "count": 2,
+    "limit": 2,
+    "order": "desc",
+    "nextCursor": "51234566-002",
+    "hasMore": true
+  }
+}
+```
+
+#### Step 2: Fetch the next page using the cursor
+Extract `"nextCursor": "51234566-002"` from the first response and send it as the `cursor` query parameter:
+```http
+GET /transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=2&cursor=51234566-002
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "51234560-001",
+      "hash": "1d2e3f4a...",
+      "ledger": 51234560,
+      "createdAt": "2026-05-29T11:45:00Z",
+      "sourceAccount": "GAAZI4..."
+    }
+  ],
+  "meta": {
+    "count": 1,
+    "limit": 2,
+    "order": "desc",
+    "nextCursor": null,
+    "hasMore": false
+  }
+}
+```
+Since `nextCursor` is `null` and `hasMore` is `false`, the client knows that there are no additional records to fetch.
+
+### Paginated Endpoints
+
+The following StellarKit API endpoints support cursor-based pagination:
+
+* **`GET /transactions/:id`**: Returns paginated transaction history for an account.
+* **`GET /transactions/:id/operations`**: Returns paginated operation history for an account.
+* **`GET /account/:id/payments`**: Returns paginated payment and create_account operations for an account.
+* **`GET /account/:id/timeline`**: Returns a unified chronological timeline of events for an account.
+* **`GET /account/:id/transactions/search`**: Searches transaction history filtered by memo content.
+* **`GET /asset/:code/:issuer/holders`**: Returns accounts holding a trustline for a specific asset.
+
+---
+
 ## Example Responses
 
 ### Health
