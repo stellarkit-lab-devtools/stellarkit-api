@@ -162,6 +162,74 @@ router.get("/:code/:issuer", async (req, res, next) => {
 });
 
 /**
+ * GET /asset/:code/:issuer/supply
+ * Returns full supply breakdown for a Stellar asset.
+ *
+ * Acceptance Criteria:
+ * - Returns { totalSupply, circulatingSupply, lockedInPools, lockedInClaimableBalances, holderCount }
+ * - circulatingSupply = totalSupply minus locked amounts (lockedInPools + lockedInClaimableBalances)
+ * - Returns 404 if asset not found
+ *
+ * @param {string} code   - Asset code (e.g. USDC)
+ * @param {string} issuer - Issuer account public key (G...)
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/supply
+ */
+router.get("/:code/:issuer/supply", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAssetCode(code);
+    validateAccountId(issuer);
+
+    const assetCode = code.toUpperCase();
+
+    const assetsResponse = await server
+      .assets()
+      .forCode(assetCode)
+      .forIssuer(issuer)
+      .call();
+
+    if (!assetsResponse.records || assetsResponse.records.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
+        },
+      });
+    }
+
+    const asset = assetsResponse.records[0];
+
+    // In Horizon, 'amount' is the total held by all accounts (trustline balances).
+    // 'liquidity_pools_amount' is the total held in liquidity pools.
+    // 'claimable_balances_amount' is the total held in claimable balances.
+    const amount = parseFloat(asset.amount || "0");
+    const lockedInPools = parseFloat(asset.liquidity_pools_amount || "0");
+    const lockedInClaimableBalances = parseFloat(asset.claimable_balances_amount || "0");
+
+    // Total Supply includes trustline balances, liquidity pools, and claimable balances.
+    const totalSupply = amount + lockedInPools + lockedInClaimableBalances;
+
+    // Circulating Supply is what is currently available in accounts (not locked).
+    // According to requirement: circulatingSupply = totalSupply - (lockedInPools + lockedInClaimableBalances)
+    // which simplifies to 'amount'.
+    const circulatingSupply = amount;
+
+    return success(res, {
+      totalSupply: totalSupply.toFixed(7),
+      circulatingSupply: circulatingSupply.toFixed(7),
+      lockedInPools: lockedInPools.toFixed(7),
+      lockedInClaimableBalances: lockedInClaimableBalances.toFixed(7),
+      holderCount: asset.num_accounts,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /asset/search?code=USDC
  * Searches for all assets matching a given code (across all issuers).
  *

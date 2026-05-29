@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
+const { Asset } = require("@stellar/stellar-sdk");
 const { validateAccountId, validateAssetCode, validateLimit } = require("../utils/validators");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 
@@ -1387,6 +1388,256 @@ router.get("/:id/pool-positions", async (req, res, next) => {
         count: positions.length,
         accountId: id,
       },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/balances/xlm-equivalent
+ * Fetches all balances and converts each to an equivalent XLM value using current DEX prices.
+ *
+ * Acceptance Criteria:
+ * - Fetches all balances and converts each to XLM
+ * - Uses Horizon path finding to get current XLM equivalent for each non-native asset
+ * - Returns { totalXlmEquivalent, balances: [{ asset, balance, xlmEquivalent, rateUsed }] }
+ * - Marks assets with no available path as xlmEquivalent: null, rateUsed: null
+ * - Validates account ID
+ *
+ * @param {string} id - Stellar account public key (G...)
+ */
+router.get("/:id/balances/xlm-equivalent", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const nativeBalance = account.balances.find((b) => b.asset_type === "native");
+    const nonNativeBalances = account.balances.filter((b) => b.asset_type !== "native" && b.asset_type !== "liquidity_pool_shares");
+
+    const xlmAsset = Asset.native();
+
+    // Convert each non-native asset to XLM equivalent
+    const conversionPromises = nonNativeBalances.map(async (b) => {
+      const balanceAmount = b.balance;
+      const result = {
+        asset: `${b.asset_code}:${b.asset_issuer}`,
+        balance: balanceAmount,
+        xlmEquivalent: null,
+        rateUsed: null,
+      };
+
+      try {
+        if (parseFloat(balanceAmount) === 0) {
+          result.xlmEquivalent = "0.0000000";
+          result.rateUsed = "0.0000000";
+          return result;
+        }
+
+        const sourceAsset = new Asset(b.asset_code, b.asset_issuer);
+
+        // Use path finding to find the best rate from asset to XLM
+        // We want to know: if we SELL balanceAmount of sourceAsset, how much XLM do we get?
+        // Horizon strictSendPaths: source asset -> destination asset
+        const paths = await server.strictSendPaths(sourceAsset, balanceAmount, [xlmAsset]).call();
+
+        if (paths.records && paths.records.length > 0) {
+          const bestPath = paths.records[0];
+          const xlmEquivalentValue = parseFloat(bestPath.destination_amount);
+          const balanceNum = parseFloat(balanceAmount);
+          const rateUsed = balanceNum > 0 ? xlmEquivalentValue / balanceNum : 0;
+
+          result.xlmEquivalent = xlmEquivalentValue.toFixed(7);
+          result.rateUsed = rateUsed.toFixed(7);
+        }
+
+        return result;
+      } catch (err) {
+        // Path finding might fail if no market exists or 400 from Horizon
+        return result;
+      }
+    });
+
+    const convertedBalances = await Promise.all(conversionPromises);
+
+    // Calculate total XLM equivalent
+    let totalXlmEquivalentValue = parseFloat(nativeBalance ? nativeBalance.balance : "0");
+
+    convertedBalances.forEach((b) => {
+      if (b.xlmEquivalent !== null) {
+        totalXlmEquivalentValue += parseFloat(b.xlmEquivalent);
+      }
+    });
+
+    const responseData = {
+      totalXlmEquivalent: totalXlmEquivalentValue.toFixed(7),
+      balances: [
+        {
+          asset: "XLM:native",
+          balance: nativeBalance ? nativeBalance.balance : "0.0000000",
+          xlmEquivalent: nativeBalance ? nativeBalance.balance : "0.0000000",
+          rateUsed: "1.0000000",
+        },
+        ...convertedBalances,
+      ],
+    };
+
+    return success(res, responseData);
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/risk-score
+ * Computes a simple risk score for a Stellar account based on on-chain signals.
+ *
+ * Scoring factors:
+ * - Account Age: Older accounts are considered lower risk.
+ * - Signers: Multi-sig accounts or accounts with standard 1 signer are favored over 0 signers.
+ * - Home Domain: Presence of a home domain is a positive signal for transparency.
+ * - Trustline Count: A moderate number of trustlines is standard; excessive can be spammy.
+ * - Transaction Frequency: Extremely high recent activity can indicate a bot.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ */
+router.get("/:id/risk-score", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Fetch account details, first operation (for age), and recent transactions in parallel
+    const [account, firstOpResponse, recentTxResponse] = await Promise.all([
+      server.loadAccount(id),
+      server.operations().forAccount(id).order("asc").limit(1).call(),
+      server.transactions().forAccount(id).order("desc").limit(50).call(),
+    ]);
+
+    const factors = [];
+    let totalScore = 0;
+
+    // 1. Account Age
+    const firstOp = firstOpResponse.records[0];
+    const creationDate = firstOp ? new Date(firstOp.created_at) : new Date();
+    const ageInDays = Math.floor((new Date() - creationDate) / (1000 * 60 * 60 * 24));
+    let ageScore = 0;
+    let ageDetail = "";
+
+    if (ageInDays > 365) {
+      ageScore = 20;
+      ageDetail = "Account is over a year old.";
+    } else if (ageInDays > 180) {
+      ageScore = 15;
+      ageDetail = "Account is over 6 months old.";
+    } else if (ageInDays > 30) {
+      ageScore = 10;
+      ageDetail = "Account is over a month old.";
+    } else {
+      ageScore = 5;
+      ageDetail = "Account is relatively new (less than 30 days).";
+    }
+    totalScore += ageScore;
+    factors.push({
+      name: "Account Age",
+      value: `${ageInDays} days`,
+      impact: ageScore >= 10 ? "positive" : "negative",
+      detail: ageDetail,
+    });
+
+    // 2. Home Domain
+    const homeDomain = account.home_domain;
+    const domainScore = homeDomain ? 20 : 0;
+    totalScore += domainScore;
+    factors.push({
+      name: "Home Domain",
+      value: homeDomain || "None",
+      impact: homeDomain ? "positive" : "negative",
+      detail: homeDomain
+        ? `Account has a registered home domain: ${homeDomain}.`
+        : "Account has no registered home domain.",
+    });
+
+    // 3. Signers
+    const signerCount = account.signers.length;
+    let signerScore = 0;
+    if (signerCount > 1) {
+      signerScore = 20; // Multi-sig is good
+    } else if (signerCount === 1) {
+      signerScore = 15; // Standard
+    } else {
+      signerScore = 5; // Locked or no signers
+    }
+    totalScore += signerScore;
+    factors.push({
+      name: "Signer Count",
+      value: signerCount.toString(),
+      impact: signerScore >= 15 ? "positive" : "negative",
+      detail: signerCount > 1
+        ? "Account uses multi-signature security."
+        : signerCount === 1
+          ? "Account has a standard single signer."
+          : "Account has no active signers (locked).",
+    });
+
+    // 4. Trustline Count
+    const trustlineCount = account.balances.length - 1; // Exclude native XLM
+    let trustlineScore = 0;
+    if (trustlineCount >= 1 && trustlineCount <= 10) {
+      trustlineScore = 20;
+    } else if (trustlineCount === 0 || (trustlineCount > 10 && trustlineCount <= 30)) {
+      trustlineScore = 15;
+    } else {
+      trustlineScore = 5; // Potential spam or excessive assets
+    }
+    totalScore += trustlineScore;
+    factors.push({
+      name: "Trustline Count",
+      value: trustlineCount.toString(),
+      impact: trustlineScore >= 15 ? "positive" : "negative",
+      detail: trustlineCount > 30
+        ? "Account has an unusually high number of trustlines."
+        : `Account has ${trustlineCount} asset trustlines.`,
+    });
+
+    // 5. Recent Transaction Frequency (last 24 hours)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentTxCount = recentTxResponse.records.filter(
+      (tx) => new Date(tx.created_at) > oneDayAgo
+    ).length;
+
+    let txScore = 0;
+    if (recentTxCount <= 20) {
+      txScore = 20;
+    } else if (recentTxCount <= 50) {
+      txScore = 10;
+    } else {
+      txScore = 5; // High activity
+    }
+    totalScore += txScore;
+    factors.push({
+      name: "Recent Activity",
+      value: `${recentTxCount} tx / 24h`,
+      impact: txScore >= 10 ? "positive" : "negative",
+      detail: recentTxCount > 50
+        ? "Account shows high recent transaction volume."
+        : "Account transaction frequency is within normal range.",
+    });
+
+    // Determine rating
+    let rating = "";
+    if (totalScore >= 70) {
+      rating = "low";
+    } else if (totalScore >= 40) {
+      rating = "medium";
+    } else {
+      rating = "high";
+    }
+
+    return success(res, {
+      score: totalScore,
+      rating: rating,
+      factors: factors,
     });
   } catch (err) {
     handleAccountNotFound(err, next);
