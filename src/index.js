@@ -10,6 +10,7 @@ const { setupWebSocket } = require("./websocket");
 
 const rateLimiter = require("./middleware/rateLimiter");
 const contentTypeValidator = require("./middleware/contentTypeValidator");
+const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
 const apiKeyMiddleware = require("./middleware/apiKey");
 
@@ -31,7 +32,7 @@ app.use(helmet());
 app.use(compression({ threshold: 0 }));
 app.use(cors());
 app.use(contentTypeValidator);
-app.use(express.json());
+app.use(bodySizeLimit);
 app.use(hpp({ whitelist: ["limit", "order", "cursor", "operations"] }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
@@ -109,9 +110,9 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/dex/price/:sellAsset/:buyAsset", description: "Calculate effective exchange rate via best DEX payment path" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
         { method: "GET", path: "/liquidity-pools/:id/reserve-ratio", description: "Get reserve ratio and drift from equal for a liquidity pool" },
-        { method: "GET", path: "/utils/friendbot/:accountId",       description: "Fund a testnet account via Friendbot (testnet only)" },
-        { method: "GET", path: "/utils/validate-account?id=:id",   description: "Validate a Stellar public key format (no Horizon call)" },
-        { method: "WS",  path: "/stream/ledgers",                  description: "Real-time stream of live Stellar ledger updates" },
+        { method: "GET", path: "/utils/friendbot/:accountId", description: "Fund a testnet account via Friendbot (testnet only)" },
+        { method: "GET", path: "/utils/validate-account?id=:id", description: "Validate a Stellar public key format (no Horizon call)" },
+        { method: "WS", path: "/stream/ledgers", description: "Real-time stream of live Stellar ledger updates" },
       ],
       docs: "https://github.com/stellarkit-lab-devtools/stellarkit-api#readme",
     },
