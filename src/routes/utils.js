@@ -3,7 +3,7 @@ const axios = require("axios");
 const router = express.Router();
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
-const { Transaction, Networks } = require("@stellar/stellar-sdk");
+const { Transaction, Networks, Keypair } = require("@stellar/stellar-sdk");
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const { decodeMemo } = require("../utils/memo");
@@ -312,6 +312,34 @@ router.post("/decode-xdr", (req, res, next) => {
     };
 
     return success(res, decoded);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /utils/keypair
+ * Generates a new random Stellar keypair for testnet use.
+ * Only available when STELLAR_NETWORK=testnet.
+ *
+ * @returns {{ publicKey, secretKey, warning }}
+ * @throws {Error} 403 if not on testnet
+ */
+router.get("/keypair", (req, res, next) => {
+  try {
+    const network = process.env.STELLAR_NETWORK || "testnet";
+    if (network !== "testnet") {
+      const err = new Error("Keypair generation is only available on testnet.");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const keypair = Keypair.random();
+    return success(res, {
+      publicKey: keypair.publicKey(),
+      secretKey: keypair.secret(),
+      warning: "Never share your secret key",
+    });
   } catch (err) {
     next(err);
   }
