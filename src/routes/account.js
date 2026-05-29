@@ -1,10 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { server } = require("../config/stellar");
+const { server, fetchAccountCreation } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { Asset } = require("@stellar/stellar-sdk");
 const { validateAccountId, validateAssetCode, validateLimit } = require("../utils/validators");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
+const { buildAccountAgeResponse } = require("../utils/accountAge");
 
 const handleAccountNotFound = (err, next) => {
   if (err.response && err.response.status === 404) {
@@ -1639,6 +1640,61 @@ router.get("/:id/risk-score", async (req, res, next) => {
       rating: rating,
       factors: factors,
     });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/age
+ * Returns account age and longevity metrics for trust and reputation systems.
+ *
+ * Fetches the account's first funding transaction from Horizon and calculates:
+ * - ageInDays: Complete days since account creation
+ * - ageInMonths: Floored months (ageInDays / 30.4375)
+ * - ageInYears: Floored years (ageInDays / 365.25)
+ * - maturity: 'new' (<30 days), 'established' (30–364 days), or 'veteran' (≥365 days)
+ * - createdAt: ISO 8601 timestamp of account creation
+ * - createdAtLedger: Ledger sequence number of first funding transaction
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/age
+ *
+ * Response (200):
+ * {
+ *   "success": true,
+ *   "data": {
+ *     "publicKey": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+ *     "createdAtLedger": 12345678,
+ *     "createdAt": "2020-06-15T10:30:45Z",
+ *     "ageInDays": 1234,
+ *     "ageInMonths": 40,
+ *     "ageInYears": 3,
+ *     "maturity": "veteran"
+ *   }
+ * }
+ */
+router.get("/:id/age", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Validate the public key
+    validateAccountId(id);
+
+    // 2. Fetch creation data from Horizon
+    const creation = await fetchAccountCreation(id);
+
+    // 3. Build the response
+    const response = buildAccountAgeResponse({
+      publicKey: id,
+      createdAtLedger: creation.ledger,
+      createdAt: creation.timestamp,
+    });
+
+    // 4. Return with success wrapper
+    return success(res, response);
   } catch (err) {
     handleAccountNotFound(err, next);
   }

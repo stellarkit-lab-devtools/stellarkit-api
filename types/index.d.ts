@@ -261,6 +261,23 @@ export interface AccountResponse {
 }
 
 /**
+ * Response from GET /account/:id/age
+ * Returns account age and longevity metrics for trust and reputation systems.
+ */
+export interface AccountAgeResponse {
+  success: true
+  data: {
+    publicKey: StellarPublicKey
+    createdAtLedger: number
+    createdAt: ISOTimestamp
+    ageInDays: number
+    ageInMonths: number
+    ageInYears: number
+    maturity: 'new' | 'established' | 'veteran'
+  }
+}
+
+/**
  * Response from GET /account/:id/balances
  * Returns only native XLM and asset balances for a Stellar account.
  */
