@@ -40,6 +40,20 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // Payload too large errors from body parsers
+  if (err.type === "entity.too.large" || err.status === 413) {
+    const maxBodySize = process.env.MAX_BODY_SIZE || "10kb";
+    const message = `Payload too large. Maximum request body size is ${maxBodySize}.`;
+    logError(413, req, message);
+    return res.status(413).json({
+      success: false,
+      error: {
+        type: "PayloadTooLargeError",
+        message,
+      },
+    });
+  }
+
   // Validation errors (thrown manually)
   if (err.isValidation) {
     logError(400, req, err.message);
