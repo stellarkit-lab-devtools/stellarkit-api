@@ -168,6 +168,107 @@ You don't need to calculate this manually! The `GET /account/:id` endpoint provi
 
 ---
 
+## Understanding Claimable Balances
+
+A **claimable balance** is a Stellar ledger entry that holds funds on behalf of one or more future recipients without requiring those recipients to exist on the network or take any action in advance. Think of it as placing money in a secure lockbox and handing out keys — each key can have conditions attached that control _when_ it can be used.
+
+### How Claimable Balances Differ from Regular Payments
+
+With a regular `payment` operation, the destination account must already exist, must have a trustline for non-native assets, and receives the funds immediately. A claimable balance removes all three constraints:
+
+- **No destination account required at creation time.** The recipient's public key is listed as a claimant, but their account does not need to be funded yet. They can create and fund their account later and then claim the balance.
+- **No trustline required in advance.** The claimant does not need a pre-existing trustline for the asset. Stellar creates the necessary trustline automatically when the balance is claimed.
+- **Funds are not delivered instantly.** The balance sits on the ledger until a claimant actively submits a `claimClaimableBalance` operation. This makes claimable balances ideal for deferred, conditional, or opt-in transfers.
+
+The account that creates the claimable balance pays the base reserves to keep the entry on the ledger. Those reserves are returned when the balance is eventually claimed or reclaimed.
+
+### Predicates — Controlling When Funds Can Be Claimed
+
+Every claimant in a claimable balance is paired with a **predicate** — a rule that determines whether the claim is allowed at a given moment. Stellar supports five predicate types that can be nested to build arbitrarily complex conditions.
+
+#### Unconditional
+
+```
+{ "unconditional": true }
+```
+
+The claimant can claim the balance **at any time**, with no restrictions. This is the simplest predicate and is useful when you just want to park funds for someone to pick up whenever they are ready.
+
+#### Time-Based: `abs_before`
+
+```
+{ "abs_before": "2026-12-31T23:59:59Z" }
+```
+
+The claim must happen **before** the specified timestamp. Once the deadline passes, this predicate evaluates to `false` and the claimant can no longer claim through it. Use this to set expiration dates — for example, a promotional reward that expires at the end of the quarter.
+
+#### Time-Based: `abs_after`
+
+```
+{ "abs_after": "2026-06-01T00:00:00Z" }
+```
+
+The claim is only allowed **on or after** the specified timestamp. Before that moment the predicate evaluates to `false`. This is useful for vesting schedules, release dates, or any scenario where funds should be locked until a future date.
+
+#### Compound: `and`
+
+```json
+{
+  "and": [
+    { "abs_after": "2026-06-01T00:00:00Z" },
+    { "abs_before": "2026-12-31T23:59:59Z" }
+  ]
+}
+```
+
+**Both** sub-predicates must be true at the same time. The example above creates a claim window: the funds can only be claimed between June 1 and December 31, 2026. Outside that window the claim is denied.
+
+#### Compound: `or`
+
+```json
+{
+  "or": [
+    { "abs_after": "2026-06-01T00:00:00Z" },
+    { "unconditional": true }
+  ]
+}
+```
+
+**At least one** sub-predicate must be true. Compound `or` predicates are less common but can model fallback conditions — for example, "claimable after a certain date, _or_ claimable unconditionally by a backup account."
+
+#### Compound: `not`
+
+```json
+{
+  "not": { "abs_before": "2026-06-01T00:00:00Z" }
+}
+```
+
+Inverts the inner predicate. `not(abs_before X)` is logically equivalent to `abs_after X`. While `not` is rarely needed on its own, it becomes powerful when nested inside `and`/`or` trees to express precise business rules.
+
+### Practical Use Cases
+
+| Use Case | How Claimable Balances Help |
+|---|---|
+| **Onboarding new users** | Send tokens to a public key that does not exist yet. The new user creates their account later and claims the balance — no coordination needed. |
+| **Vesting schedules** | Create a balance with an `abs_after` predicate set to the vesting date. The employee or contributor can only claim once the date arrives. |
+| **Time-limited promotions** | Use an `and` predicate combining `abs_after` (start) and `abs_before` (expiry) to define a claim window for airdrops or rewards. |
+| **Escrow / conditional release** | The sender and a mediator are both listed as claimants. The sender's predicate uses `abs_after` (allowing reclaim after a timeout), while the recipient's predicate is unconditional. |
+| **Recurring grants** | Create multiple claimable balances with staggered `abs_after` dates to simulate a payment schedule without requiring the recipient to be online. |
+
+### Claimable Balance Endpoints in StellarKit API
+
+StellarKit API exposes claimable balance data through two surfaces:
+
+| Endpoint | Description |
+|---|---|
+| `GET /account/:id/summary` | Returns the account's open claimable balances alongside recent transactions, open offers, and account details. |
+| `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). |
+
+Use the `/claimable-balances/eligible` endpoint to build dashboards that show users exactly which funds are available to claim today and which are still locked. The API handles predicate evaluation server-side, so clients do not need to implement their own predicate logic.
+
+---
+
 ## API Overview
 
 ### `GET /`
