@@ -23,6 +23,7 @@ const dexRouter = require("./routes/dex");
 const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
+const stellarTomlRouter = require("./routes/stellarToml");
 const claimableBalancesRouter = require("./routes/claimableBalances");
 
 const app = express();
@@ -67,6 +68,7 @@ app.use("/dex", dexRouter);
 app.use("/liquidity-pools", liquidityPoolRouter);
 app.use("/stream", streamRouter);
 app.use("/utils", utilsRouter);
+app.use("/stellar-toml", stellarTomlRouter);
 app.use("/claimable-balances", claimableBalancesRouter);
 
 // ── Root ─────────────────────────────────────────────────────────────────────

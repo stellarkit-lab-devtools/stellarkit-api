@@ -2,7 +2,6 @@ const express = require("express");
 const router = express.Router();
 const { server, fetchAccountCreation } = require("../config/stellar");
 const { success } = require("../utils/response");
-const { validateAccountId } = require("../utils/validators");
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { Asset } = require("@stellar/stellar-sdk");
 const {
@@ -405,15 +404,6 @@ router.get("/:id/sequence", async (req, res, next) => {
   }
 });
 
- AccountTrustlineHealthDasboardEndpoint
-router.get(
-  "/:id/summary",
-  accountSummaryRateLimiter,
-  async (req, res, next) => {
-    try {
-      const { id } = req.params;
-      validateAccountId(id);
-
 /**
  * GET /account/:id/inactivity
  * Detects how long a Stellar account has been inactive by analyzing its most recent transaction.
@@ -667,14 +657,6 @@ router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => 
  * - Fetches stellar.toml from the issuer's domain
  * - Extracts name, description, and image for the asset if available
  * - Gracefully handles missing or unreachable TOML files
- * GET /account/:id/merge-eligibility
- * Checks whether an account is eligible to be merged.
- *
- * Verifies:
- * - Zero non-native asset balances
- * - No open offers
- * - No open trustlines (excluding native XLM)
- * - No data entries
  *
  * @param {string} id - Stellar account public key (G...)
  *
@@ -682,9 +664,6 @@ router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => 
  * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustlines
  */
 router.get("/:id/trustlines", async (req, res, next) => {
- * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/merge-eligibility
- */
-router.get("/:id/merge-eligibility", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -746,9 +725,32 @@ router.get("/:id/merge-eligibility", async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * GET /account/:id/merge-eligibility
+ * Checks whether an account is eligible to be merged.
+ *
+ * Verifies:
+ * - Zero non-native asset balances
+ * - No open offers
+ * - No open trustlines (excluding native XLM)
+ * - No data entries
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/merge-eligibility
+ */
+router.get("/:id/merge-eligibility", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
     const blockers = [];
 
-    // 1. Check for non-native asset balances and open trustlines
     const nonNativeBalances = account.balances.filter(
       (b) => b.asset_type !== "native",
     );
@@ -766,13 +768,11 @@ router.get("/:id/merge-eligibility", async (req, res, next) => {
       );
     }
 
-    // 2. Check for open offers
     const offers = await server.offers().forAccount(id).limit(1).call();
     if (offers.records.length > 0) {
       blockers.push("Account has open offers. All offers must be cancelled.");
     }
 
-    // 3. Check for data entries
     const dataEntries = Object.keys(account.data_attr || {});
     if (dataEntries.length > 0) {
       blockers.push(
@@ -2232,7 +2232,13 @@ router.get("/:id/trustline-health", async (req, res, next) => {
       trustlineCount: trustlines.length,
       warningCount: warningCount,
       trustlines: trustlines,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
 
+/**
  * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/age
  *
  * Response (200):
@@ -2297,46 +2303,6 @@ router.get("/:id/volume", async (req, res, next) => {
       .order("desc")
       .call();
 
-    const senders = {};
-    const receivers = {};
-
-    opResponse.records.forEach((op) => {
-      let counterparty = null;
-      let isSend = false;
-
-      if (op.type === "payment" || op.type === "path_payment_strict_receive" || op.type === "path_payment_strict_send") {
-        if (op.from === id) {
-          counterparty = op.to;
-          isSend = true;
-        } else if (op.to === id) {
-          counterparty = op.from;
-          isSend = false;
-        }
-      } else if (op.type === "create_account") {
-        if (op.funder === id) {
-          counterparty = op.account;
-          isSend = true;
-        } else if (op.account === id) {
-          counterparty = op.funder;
-          isSend = false;
-        }
-      }
-
-      if (counterparty) {
-        const target = isSend ? receivers : senders;
-        target[counterparty] = (target[counterparty] || 0) + 1;
-      }
-    });
-
-    const formatTop = (counts) =>
-      Object.entries(counts)
-        .map(([accountId, transactionCount]) => ({ accountId, transactionCount }))
-        .sort((a, b) => b.transactionCount - a.transactionCount)
-        .slice(0, 10);
-
-    return success(res, {
-      topSenders: formatTop(senders),
-      topReceivers: formatTop(receivers),
     const days = parseInt(req.query.days || "30", 10);
     if (isNaN(days) || days < 1 || days > 90) {
       return res.status(400).json({
@@ -2429,4 +2395,3 @@ router.get("/:id/volume", async (req, res, next) => {
 });
 
 module.exports = router;
-
