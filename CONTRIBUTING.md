@@ -52,10 +52,21 @@ npm run dev
 
 ## 🧱 Code Style
 
+- An `.editorconfig` file is included at the repo root. Make sure your editor supports it (most do natively or via a plugin: [editorconfig.org](https://editorconfig.org)). It enforces: 2-space indentation, LF line endings, UTF-8 charset, and a final newline on all files.
 - Use `async/await` — no raw promise chains
 - All routes must use the `next(err)` pattern for errors
 - Use the `success()` helper from `src/utils/response.js` for consistent responses
 - Validate all user inputs with helpers from `src/utils/validators.js`
+
+## 🔍 Linting
+
+This project uses ESLint with `eslint:recommended` rules.
+
+- Run: `npm run lint`
+- To auto-fix issues: `npm run lint:fix`
+- Expected: lint should pass with no errors before opening a PR.
+
+
 
 ---
 

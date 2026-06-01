@@ -1,0 +1,6 @@
+{
+  "watch": ["src"],
+  "ignore": ["tests/", "coverage/", "node_modules/"],
+  "delay": 500
+}
+

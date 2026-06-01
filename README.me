@@ -1,0 +1,889 @@
+StellarKit API
+==============
+
+Overview
+--------
+
+StellarKit API is a lightweight REST service that wraps the Stellar Horizon API and delivers clean, typed blockchain data for applications and services. Built with Express and the official `@stellar/stellar-sdk`, it simplifies account lookups, fee estimation, transaction history, network status, and asset metadata so developers can integrate Stellar faster without Horizon complexity.
+
+This repository is ideal for web and mobile apps, wallets, analytics dashboards, and backend services that need reliable Stellar data through a normalized, easy-to-use API.
+
+Project Goals
+-------------
+
+StellarKit API was created with the following objectives:
+
+- Provide a lightweight API wrapper around Stellar Horizon.
+- Reduce the complexity of retrieving common Stellar information.
+- Offer a standardized response structure that includes success flags, metadata, and error handling.
+- Support both `testnet` and `mainnet` environments through configuration.
+- Deliver typed integration support through `types/index.d.ts`.
+- Include middleware for security, rate limiting, content validation, and error handling.
+- Keep the project simple enough for extension and contribution while still being production-ready.
+
+Why This Project Exists
+-----------------------
+
+The Stellar network is built for financial applications, cross-border payments, token issuance, and asset transfers. Horizon is Stellars official REST API layer, but Horizon responses can be verbose and sometimes inconsistent for front-end or business logic use cases. StellarKit API offers a layer of abstraction that helps developers do the following faster:
+
+- query account balances and signer details
+- compute fee estimates across multiple priority levels
+- fetch paginated transaction and operation histories
+- inspect an asset issuer and asset statistics
+- validate and normalize returned data for UI and reporting
+
+Project Structure
+-----------------
+
+This repository organizes code clearly around the major responsibilities of a REST API.
+
+Root files:
+
+- `package.json` 0 package metadata, scripts, dependencies, and basic project configuration.
+- `README.md` 0 primary markdown readme with quick project overview.
+- `README.fr.md` and `README.es.md` 0 translated readmes in French and Spanish.
+- `CONTRIBUTING.md` 0 contribution guidelines for authors and maintainers.
+- `CHANGELOG.md` 0 project history and release notes.
+- `LICENSE` 0 MIT license text.
+- `nodemon.json` 0 nodemon configuration used for development.
+- `scripts/` 0 auxiliary scripts, such as `seed-testnet.js` and WebSocket demo helpers.
+- `src/` 0 main application code.
+- `tests/` 0 automated tests and coverage checks.
+- `types/` 0 TypeScript declarations for API consumers.
+
+Inside `src/`:
+
+- `src/index.js` 0 Express application bootstrap and server entrypoint.
+- `src/websocket.js` 0 WebSocket helper for streaming Stellar data.
+- `src/config/stellar.js` 0 Stellar network configuration and Horizon server selection.
+- `src/routes/` 0 route modules that implement the REST endpoints.
+- `src/utils/` 0 helper functions for caching, formatting, validation, and shaping responses.
+- `src/middleware/` 0 Express middleware for request validation, rate limiting, error handling, and content type enforcement.
+
+Key Dependencies
+----------------
+
+Dependencies declared in `package.json` provide the runtime capabilities of the API.
+
+- `express` 0 fast and lightweight HTTP server framework.
+- `@stellar/stellar-sdk` 0 official Stellar SDK for interacting with Horizon and building Stellar objects.
+- `axios` 0 HTTP client used for auxiliary requests.
+- `cors` 0 Cross-Origin Resource Sharing support.
+- `dotenv` 0 environment variable loader for configuration.
+- `helmet` 0 security headers to protect against common web vulnerabilities.
+- `hpp` 0 HTTP parameter pollution prevention middleware.
+- `express-rate-limit` 0 rate limiting to protect the API from abuse.
+- `compression` 0 response compression to improve network performance.
+- `morgan` 0 request logging for visibility.
+- `ws` 0 WebSocket support for stream demos and real-time helpers.
+
+Development dependencies include:
+
+- `jest` and `supertest` for test automation.
+- `eslint` for code linting and quality checks.
+- `nodemon` for development auto-restart.
+- `@types/compression` and `@types/ws` for TypeScript type declarations in development.
+
+Application Overview
+--------------------
+
+At its core, StellarKit API is an Express.js server. The entry point is `src/index.js`, where the application is configured, middleware is mounted, routes are registered, and the server listens on a configured port.
+
+The API exposes a small set of endpoints that are designed to cover the most common Stellar developer needs:
+
+- health checks
+- network status
+- fee estimation
+- account lookup
+- payment history
+- transactions and operations
+- asset metadata and search
+
+Those endpoints are implemented in separate route modules to keep the code modular and easy to maintain.
+
+Configuration
+-------------
+
+StellarKit API uses environment variables to determine its runtime behavior. The most important configuration is the selection of the Stellar network.
+
+Supported environment variables include:
+
+- `STELLAR_NETWORK` 0 selects the network environment. Valid values are `testnet` and `mainnet`.
+- `PORT` 0 the port number that the Express server listens on.
+
+The configuration file at `src/config/stellar.js` reads the environment variable and returns the correct Horizon server instance via the Stellar SDK. This makes it simple to switch the API between testnet and mainnet.
+
+Architecture
+------------
+
+The API architecture is intentionally layered:
+
+1. `src/index.js` initializes the application and attaches shared middleware.
+2. `src/config/stellar.js` encapsulates network configuration and Horizon server connection.
+3. `src/routes/` contains route-specific handlers.
+4. `src/utils/` contains helpers for formatting Stellar data, validating input, caching responses, and consistent response payloads.
+5. `src/middleware/` provides shared middleware for request hygiene and error handling.
+6. `tests/` validate the behavior of routes and middleware.
+
+This separation makes it easier to add new routes, swap out middleware, or change how Stellar data is queried without affecting unrelated sections of the codebase.
+
+Middleware and Security
+-----------------------
+
+The project includes several middleware layers to protect the API and keep responses predictable:
+
+- `contentTypeValidator.js` ensures clients send requests with accepted content types.
+- `rateLimiter.js` protects the service from excessive requests; it is especially important when the API is used as a public or shared service.
+- `errorHandler.js` catches exceptions and returns structured error responses rather than raw stack traces.
+
+In addition to the project-specific middleware, the API also uses third-party middleware:
+
+- `helmet` sets HTTP headers such as `X-DNS-Prefetch-Control`, `X-Frame-Options`, and others to mitigate common attacks.
+- `cors` governs cross-origin requests.
+- `hpp` prevents malicious parameter pollution.
+- `compression` reduces response body size for improved performance.
+- `morgan` logs incoming requests for debugging and operational visibility.
+
+Routes and Endpoints
+--------------------
+
+StellarKit API exposes the following endpoint categories:
+
+1. Root and health endpoints
+2. Network and fee endpoints
+3. Account endpoints
+4. Transaction and operation endpoints
+5. Asset endpoints
+
+Below is a comprehensive explanation of the route responsibilities and example behavior.
+
+### Root and Health Endpoints
+
+#### `GET /`
+
+The root endpoint returns a small directory of the supported API features. It is useful for humans and automated clients to see whether the service is running and what endpoints are available.
+
+#### `GET /health`
+
+This endpoint returns a simple service health object. It is intentionally lightweight and can be used by automated monitors, load balancers, or uptime checkers.
+
+Response example:
+
+```
+{
+  "success": true,
+  "data": {
+    "status": "ok",
+    "service": "StellarKit API",
+    "version": "1.0.0",
+    "network": "testnet"
+  }
+}
+```
+
+### Network and Fee Endpoints
+
+#### `GET /network-status`
+
+This endpoint provides a snapshot of the current Stellar network state. It queries Horizon for the most recent ledger and fee data, and it returns an object that includes:
+
+- selected network name (`testnet` or `mainnet`)
+- latest ledger sequence
+- ledger close time
+- transaction and operation counts
+- current base fee and base fee converted into XLM
+- current protocol version
+
+This is valuable for client applications that need to know whether the network is healthy and what fee levels they should use.
+
+#### `GET /fee-estimate`
+
+Stellar transaction fees depend on the number of operations and the current network base fee. This endpoint computes fee estimates for a requested number of operations and provides values for different priority tiers.
+
+The estimate is computed using the currently observed base fee from Horizon, which means the API returns realistic values rather than hard-coded assumptions.
+
+The response includes the following categories:
+
+- economy
+- standard
+- priority
+
+Each category includes a per-operation cost and a total fee for the requested operation count.
+
+Example response:
+
+```
+{
+  "success": true,
+  "data": {
+    "operationCount": 3,
+    "perOperation": {
+      "economy": { "stroops": 100, "xlm": "0.0000100" },
+      "standard": { "stroops": 200, "xlm": "0.0000200" },
+      "priority": { "stroops": 500, "xlm": "0.0000500" }
+    },
+    "totalFee": {
+      "economy": { "stroops": 300, "xlm": "0.0000300" },
+      "standard": { "stroops": 600, "xlm": "0.0000600" },
+      "priority": { "stroops": 1500, "xlm": "0.0001500" }
+    }
+  }
+}
+```
+
+This endpoint makes it easier for wallet providers and transaction builders to select an appropriate fee level.
+
+### Account Endpoints
+
+The account endpoints are among the most useful parts of StellarKit API. They expose the details developers need when displaying account dashboards or validating account state.
+
+#### `GET /account/:id`
+
+Returns a complete view of a Stellar account by public key. The information includes:
+
+- account balances for native XLM and all trustline assets
+- signers and their weights
+- account thresholds (low, medium, high)
+- account flags such as `auth_required` or `auth_revocable`
+- spendable balance and inflation state
+
+This endpoint includes enough detail for an account explorer or wallet to display the state of an address.
+
+#### `GET /account/:id/balances`
+
+Provides a focused response containing only balance information. This is ideal for clients that want to fetch balance details without the full account payload.
+
+For each balance, the response includes:
+
+- asset type (`native`, `credit_alphanum4`, or `credit_alphanum12`)
+- asset code and issuer for non-native assets
+- balance amount
+- limit values for trustlines
+- flags such as `authorized` and `authorized_to_maintain_liabilities`
+
+#### `GET /account/:id/summary`
+
+Returns a compact summary suitable for dashboards or quick views. The summary endpoint is optimized for front-end displays where only key account values are needed.
+
+The response may include:
+
+- total XLM balance
+- count of assets held
+- number of signers
+- whether the account is authorized
+- whether the account is locked or requires multi-signature
+
+#### `GET /account/:id/payments`
+
+Returns recent payment operations involving the specified account. Stellar payments are the most common way to transfer tokens between accounts, and this endpoint surfaces payment details such as:
+
+- asset moved
+- source account
+- destination account
+- amount
+- transaction hash
+- payment type
+
+This route helps wallet and transaction viewer apps show the history of transfers.
+
+### Transaction and Operation Endpoints
+
+Stellar has both transactions and operations. A transaction may contain multiple operations, so StellarKit API provides endpoints to retrieve both perspectives.
+
+#### `GET /transactions/:id`
+
+This endpoint returns transaction history for an account. It is paginated to support accounts with many transactions. The response includes:
+
+- transaction hashes
+- creation timestamps
+- operation counts per transaction
+- result codes and memo fields
+- ledger sequence references
+
+Supporting pagination ensures the API remains scalable as account history grows.
+
+#### `GET /transactions/:id/operations`
+
+Returns operation-level history for an account. Unlike the transaction endpoint, this endpoint breaks each transaction into operations to make it easier to analyze behavior such as trustline changes, offers, payments, and account merges.
+
+The response may include information such as:
+
+- operation type
+- source account
+- destination account
+- asset details
+- amount
+
+Operation streams are especially useful for analytic applications and activity feeds.
+
+### Asset Endpoints
+
+Asset discovery and metadata are important for token-aware applications. StellarKit API provides endpoints for both direct asset lookup and asset search.
+
+#### `GET /asset/:code/:issuer`
+
+Returns metadata for a specific asset by code and issuer. This includes:
+
+- asset code
+- issuer account ID
+- asset type
+- asset statistics such as number of accounts and amount issued
+- issuer metadata where available
+
+This endpoint is useful for token information pages and asset trustline validation.
+
+#### `GET /asset/search?code=:code`
+
+Searches for assets by code and returns matching results. Because multiple issuers can issue the same asset code, the search response provides a list of possible matches and issuer details.
+
+This is valuable for wallet applications and explorers that need to help users discover or verify token issuers.
+
+Utility Modules
+---------------
+
+Several utility modules help keep the code clean and reusable.
+
+### `src/utils/cache.js`
+
+This module provides in-memory caching logic for expensive or frequently repeated requests. Since Stellar data such as network status changes slowly, caching can reduce Horizon API calls and improve performance.
+
+The cache utilities can be used in route handlers to store responses for a short period of time and serve them faster for subsequent requests.
+
+### `src/utils/formatTransaction.js`
+
+This helper formats Stellar transaction data into a normalized shape. Stellar Horizon responses are comprehensive, but applications often need smaller, easier to consume objects. The formatter helps produce consistent transaction payloads.
+
+### `src/utils/response.js`
+
+This module enforces a consistent response wrapper across the entire API. Every successful response uses a structure like:
+
+```
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+Errors are similarly wrapped with:
+
+```
+{
+  "success": false,
+  "error": {
+    "message": "...",
+    "status": 400,
+    "details": { ... }
+  }
+}
+```
+
+This consistent contract helps client applications avoid ad hoc parsing logic.
+
+### `src/utils/validators.js`
+
+Input validation is critical when accepting public keys, asset codes, and numeric parameters. This module centralizes validation rules for:
+
+- Stellar account IDs
+- memo values
+- asset codes and issuers
+- pagination parameters
+- query strings
+
+By validating inputs in one place, route handlers remain concise and the API avoids invalid Horizon requests.
+
+Middleware Details
+------------------
+
+The middleware modules enforce request hygiene and centralized error handling.
+
+### `src/middleware/contentTypeValidator.js`
+
+This middleware checks the `Content-Type` header of incoming requests. Because the API expects JSON-style requests and query parameters, the validator ensures requests include valid content types such as `application/json` where appropriate.
+
+### `src/middleware/rateLimiter.js`
+
+Rate limiting is important for protecting public APIs against accidental misuse and abuse. This middleware typically limits the number of requests per IP address over a short interval.
+
+Using `express-rate-limit`, the API can be configured to reject clients that exceed the allowed threshold with a standard 429 response.
+
+### `src/middleware/errorHandler.js`
+
+Errors that occur during route processing are captured by the centralized error handler. This ensures the API always returns a structured JSON error rather than exposing stack traces or HTTP internals.
+
+The handler also logs errors for debugging and can be extended to send alerts or metrics in production.
+
+Stellar Network Configuration
+-----------------------------
+
+The Stellar network has multiple environments. In this project, the configuration logic in `src/config/stellar.js` is responsible for selecting the correct Horizon endpoint based on the environment.
+
+For `testnet`, the project connects to the Stellar test network, which is ideal for development and experimentation. For `mainnet`, the production Stellar network is used.
+
+Because the network selection is centralized in one module, it is easy to extend the project to support additional networks, custom Horizon endpoints, or federation servers in the future.
+
+WebSocket Support
+-----------------
+
+The `src/websocket.js` module provides WebSocket support for streaming or demo use cases. While the primary API is REST-based, WebSocket support is useful for showing how Stellar data can be streamed in real time.
+
+This module can be used to connect to the Horizon streaming endpoints, broadcast service events, or power live dashboards. It is also useful for testing and demonstration scripts.
+
+Scripts
+-------
+
+The `scripts/` directory contains helper scripts that support development and data seeding.
+
+### `scripts/seed-testnet.js`
+
+This script is intended to seed the testnet environment with sample data or test accounts. It may create transactions, fund test accounts, or configure assets so developers can exercise the API without manually building Stellar transactions.
+
+### `scripts/ws-client-demo.js`
+
+A WebSocket client demo that showcases how to connect to a Stellar streaming endpoint or the APIs own WebSocket helper. It is useful for learning how to build real-time integrations.
+
+Testing and Quality
+-------------------
+
+Automated testing is included under `tests/` to verify the behavior of the API and prevent regressions.
+
+### Test Types
+
+- `tests/api.test.js` 0 end-to-end API tests using `supertest` to validate routes and HTTP responses.
+- `tests/rateLimiter.test.js` 0 tests around rate limiting behavior, ensuring the service correctly limits requests.
+- `tests/websocket.test.js` 0 WebSocket tests for streaming or socket handling.
+- `tests/stream/transactions.test.js` 0 transaction stream tests specifically focused on transaction history and pagination.
+
+Testing is run with Jest and includes coverage reporting.
+
+### Running Tests
+
+Execute the test suite with:
+
+```
+npm test
+```
+
+This runs Jest and produces coverage output for the project.
+
+Linting
+-------
+
+This project uses ESLint to enforce code quality and consistent style.
+
+Run linting with:
+
+```
+npm run lint
+```
+```
+
+And automatically fix fixable issues with:
+
+```
+npm run lint:fix
+```
+```
+
+Development Workflow
+--------------------
+
+### Install
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/stellarkit-lab-devtools/stellarkit-api.git
+cd stellarkit-api
+```
+
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Copy or create environment configuration:
+
+```bash
+copy .env.example .env
+```
+
+4. Edit `.env` and set values, for example:
+
+```env
+STELLAR_NETWORK=testnet
+PORT=3000
+```
+
+### Run in Development
+
+Start the server with nodemon for live reload:
+
+```bash
+npm run dev
+```
+
+Then open the API at `http://localhost:3000`.
+
+### Run in Production
+
+Start the server directly with:
+
+```bash
+npm start
+```
+
+The server will read the environment configuration and serve the API at the configured port.
+
+TypeScript Support
+------------------
+
+Although the main codebase is JavaScript, the project provides TypeScript type declarations in `types/index.d.ts`. These declarations make it possible for TypeScript consumers to import response types and model definitions.
+
+Example usage in a TypeScript client:
+
+```typescript
+import type { AccountResponse, ApiError, NetworkStatusResponse } from 'stellarkit-api'
+
+async function fetchAccount(accountId: string) {
+  const response = await fetch(`http://localhost:3000/account/${accountId}`)
+  const payload = await response.json()
+
+  if (!response.ok) {
+    const errorPayload = payload as ApiError
+    throw new Error(errorPayload.error.message)
+  }
+
+  return payload as AccountResponse
+}
+```
+
+This makes it easy to work with the API safely in typed applications.
+
+Request and Response Patterns
+-----------------------------
+
+StellarKit API follows consistent request and response patterns to make client integration simpler.
+
+### Query Parameters
+
+Many endpoints support query parameters for pagination and filtering. Common pagination parameters include `limit` and `cursor`, which mirror Horizons own paging style.
+
+The API ensures that numeric values are validated and that invalid requests receive structured errors.
+
+### Success Responses
+
+Successful responses are always wrapped in a JSON object with a `success` flag. This makes client-side error checking straightforward.
+
+Example:
+
+```
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+### Error Responses
+
+Errors are returned in a normalized structure:
+
+```
+{
+  "success": false,
+  "error": {
+    "message": "Invalid account id",
+    "status": 400,
+    "details": {
+      "accountId": "Account ID must be a valid Stellar public key"
+    }
+  }
+}
+```
+
+By using the same error envelope across all routes, client code can safely differentiate success and failure conditions.
+
+Detailed Route Behavior
+-----------------------
+
+This section provides a deeper look into each endpoint and the intended business behavior.
+
+### `GET /`
+
+The root endpoint is the APIs self-documenting directory. It should return a small object or list that describes the supported resources.
+
+It is useful for:
+
+- verifying the service is available
+- discovering API capabilities
+- providing a landing point for documentation
+
+### `GET /health`
+
+Health checks are often called by monitoring systems and uptime services. This endpoint should be fast and stable.
+
+It is expected to return values such as:
+
+- service status
+- version
+- network environment
+- optionally minimal uptime or ping metadata
+
+### `GET /network-status`
+
+This route is ideal for clients that must respond to network conditions. For example, a wallet may want to show an alert if the ledger close time is too old, or if the protocol version changes.
+
+The route uses Horizon's root endpoint or `ledgers` endpoints to read:
+
+- ledger sequence numbers
+- closed_at timestamps
+- base fee information
+- current protocol version
+
+It converts the base fee into both `stroops` and `XLM` for developer convenience.
+
+### `GET /fee-estimate`
+
+When a user builds a transaction, they need to choose a fee. This endpoint offers fee estimates for different priority levels.
+
+Since the Stellar base fee may change, the endpoint computes fees dynamically instead of using a static value. This makes fee selection safer and more accurate.
+
+The API supports multiple fee tiers so that clients can balance cost and speed.
+
+### `GET /account/:id`
+
+Most Stellar applications need full account details for a public key. This endpoint fetches Horizon account data and returns a normalized view.
+
+The response typically includes:
+
+- account ID
+- sequence number
+- balances
+- thresholds
+- signers
+- flags such as `auth_required` and `auth_revocable`
+- inflation destination
+- data entry counts
+
+This is the primary endpoint for account explorers and wallet dashboards.
+
+### `GET /account/:id/balances`
+
+Balance details are a frequent client requirement. This endpoint returns only the balance portion of the account response, including:
+
+- native balance
+- credit asset balances
+- trustline limits and authorization statuses
+
+This separation reduces payload size for clients that only need balances.
+
+### `GET /account/:id/summary`
+
+A summary endpoint is useful for fast dashboard cards or account lists. It provides only the essential account indicators.
+
+Typical values include:
+
+- usable XLM balance
+- total asset count
+- number of trustlines
+- whether the account has multi-signature enabled
+
+This is a convenience route that helps front-end apps avoid extra logic.
+
+### `GET /account/:id/payments`
+
+Payments are the most common form of Stellar activity. This endpoint provides a history of payment operations related to the account.
+
+Each payment item includes:
+
+- source account
+- destination account
+- asset code and issuer
+- amount
+- transaction hash
+- created_at timestamp
+
+Applications can use this endpoint to build payment history feeds, balance activity views, or notification services.
+
+### `GET /transactions/:id`
+
+Transaction history is returned in a paginated format. This route is designed to help applications display past transactions while avoiding large payloads.
+
+Transaction entries may include:
+
+- transaction hash
+- ledger sequence
+- source account
+- memo content and type
+- created_at timestamp
+- number of operations
+- success or failure status
+
+This route can power activity history pages, reconciliation tools, and analytic dashboards.
+
+### `GET /transactions/:id/operations`
+
+Operations are the atomic actions within a Stellar transaction. This endpoint returns operation-level data so that applications can see exactly what happened.
+
+Supported operation types may include:
+
+- `payment`
+- `create_account`
+- `path_payment`
+- `manage_offer`
+- `change_trust`
+- and others
+
+Operation-level detail is important when precise behavior matters, for example in financial reconciliation, compliance systems, or activity feeds.
+
+### `GET /asset/:code/:issuer`
+
+Assets are defined by code and issuer. This endpoint returns asset metadata including issuer statistics and potentially trustline details.
+
+It is especially useful for token explorers and wallet asset metadata pages.
+
+### `GET /asset/search?code=:code`
+
+Asset search helps determine which issuers are associated with a given asset code. Because Stellar allows the same code to be issued by multiple accounts, search results return a list of candidates.
+
+Applications can use this endpoint to help users find the correct asset before trusting it.
+
+Type Declaration Details
+------------------------
+
+The `types/index.d.ts` file exports reusable TypeScript type definitions that describe API response payloads. This file enables TypeScript projects to consume the API with static typing and better tooling support.
+
+Typical type definitions include:
+
+- `ApiResponse<T>`
+- `ApiError`
+- `AccountResponse`
+- `NetworkStatusResponse`
+- `FeeEstimateResponse`
+- `AssetResponse`
+
+Using these types improves developer experience and reduces runtime bugs.
+
+Deployment Notes
+----------------
+
+This project is suitable for deployment to any Node.js hosting environment. It can be deployed as a containerized service, a Platform-as-a-Service app, or a traditional server.
+
+Recommended deployment considerations:
+
+- Use environment variables to configure `STELLAR_NETWORK` and `PORT`.
+- Protect the server with TLS/HTTPS in production.
+- Add an external caching layer if the API is expected to handle very high traffic.
+- Optionally add authentication or API keys if the service is consumed by private clients.
+- Monitor request logs and rate limiter activity to detect abuse.
+
+Example `.env` file:
+
+```
+STELLAR_NETWORK=testnet
+PORT=3000
+```
+
+How to Use the API
+------------------
+
+Here are examples of how a client might use StellarKit API in JavaScript.
+
+### Fetch network status
+
+```javascript
+const response = await fetch('http://localhost:3000/network-status')
+const payload = await response.json()
+
+if (!payload.success) {
+  throw new Error(payload.error.message)
+}
+
+console.log(payload.data)
+```
+
+### Fetch an account summary
+
+```javascript
+const accountId = 'GCFX...'
+const response = await fetch(`http://localhost:3000/account/${accountId}/summary`)
+const summary = await response.json()
+
+if (summary.success) {
+  console.log('Balance', summary.data.balance)
+  console.log('Assets', summary.data.assetCount)
+}
+```
+
+### Search for an asset
+
+```javascript
+const response = await fetch('http://localhost:3000/asset/search?code=USDC')
+const payload = await response.json()
+
+if (payload.success) {
+  payload.data.forEach(asset => {
+    console.log(asset.code, asset.issuer)
+  })
+}
+```
+
+Project Maintenance
+-------------------
+
+To keep StellarKit API healthy, maintainers should regularly review the following areas:
+
+- dependency updates, especially the Stellar SDK and security-related middleware
+- Horizon API changes or Stellar protocol upgrades
+- performance under load, including response latency and cache hit rates
+- test coverage for endpoints and validation logic
+- documentation updates for new routes and API behavior
+
+Because the project is intended as a developer utility, documentation quality is especially important. API consumers should be able to understand the available routes and payload shapes without reading the application source.
+
+Extending the Project
+---------------------
+
+StellarKit API is designed to be extended. Common extension points include:
+
+- adding new Stellar routes such as account data entries, effects, or offers
+- exposing Stellar federation or SEP-24 endpoints
+- supporting custom Horizon server URLs
+- adding authentication and API keys
+- integrating with external databases for caching or analytics
+- adding webhook support for account notifications
+
+When extending the project, keep the existing layering in mind: route handlers should remain thin, and shared logic should be moved to `src/utils/` or `src/middleware/` as appropriate.
+
+Contribution Guidelines
+-----------------------
+
+This repository welcomes contributions from the community. Contributors should follow the conventions described in `CONTRIBUTING.md`.
+
+General contribution guidance:
+
+- open an issue before implementing a major feature or architectural change
+- keep commits focused and descriptive
+- follow the existing code style and ESLint rules
+- add tests for new routes or behavior
+- document any new configuration options or environment variables
+
+Because the project can be used by many developers as an API layer, stability and backward compatibility are important.
+
+License
+-------
+
+StellarKit API is released under the MIT License. This means the software is free to use, modify, and distribute with minimal restrictions, while still including a requirement to preserve the license notice.
+
+Closing Summary
+---------------
+
+StellarKit API is a developer-focused API wrapper for the Stellar Horizon blockchain. It abstracts common Horizon workflows into easy-to-consume REST endpoints while adding validation, response normalization, security middleware, and TypeScript-friendly declarations.
+
+The project is built for rapid development and production readiness. It is an ideal starting point for teams building wallets, explorers, dashboards, token issuers, or financial applications on Stellar.
+
+By providing a clear route structure, robust middleware, and a modular codebase, StellarKit API helps developers move faster while retaining control over Stellar-specific behavior.
+
+Whether you are testing on Stellar testnet or deploying to mainnet, this repository supports both networks and provides the tools needed to build reliable Stellar integrations.
+
+If you want to contribute, add new functionality, or customize the behavior, the codebase is structured to make it easy to extend while maintaining a consistent API contract.

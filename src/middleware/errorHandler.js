@@ -2,11 +2,33 @@
  * Centralised error handler middleware.
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  */
+
+/**
+ * Logs 4xx and 5xx responses to the console.
+ * Suppressed when NODE_ENV=test to keep test output clean.
+ *
+ * @param {number} status - HTTP status code
+ * @param {import('express').Request} req - Express request object
+ * @param {string} message - Human-readable error message
+ */
+function logError(status, req, message) {
+  if (process.env.NODE_ENV === "test") return;
+  if (status >= 400) {
+    const label = status >= 500 ? "ERROR" : "WARN";
+    console.error(
+      `[${label}] ${req.method} ${req.path} → ${status} | ${message}`
+    );
+  }
+}
+
 function errorHandler(err, req, res, next) {
   // Stellar / Horizon specific errors
   if (err.response && err.response.data) {
     const horizonError = err.response.data;
-    return res.status(err.response.status || 400).json({
+    const status = err.response.status || 400;
+    const message = horizonError.detail || horizonError.title || "Horizon Error";
+    logError(status, req, message);
+    return res.status(status).json({
       success: false,
       error: {
         type: "HorizonError",
@@ -18,8 +40,23 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // Payload too large errors from body parsers
+  if (err.type === "entity.too.large" || err.status === 413) {
+    const maxBodySize = process.env.MAX_BODY_SIZE || "10kb";
+    const message = `Payload too large. Maximum request body size is ${maxBodySize}.`;
+    logError(413, req, message);
+    return res.status(413).json({
+      success: false,
+      error: {
+        type: "PayloadTooLargeError",
+        message,
+      },
+    });
+  }
+
   // Validation errors (thrown manually)
   if (err.isValidation) {
+    logError(400, req, err.message);
     return res.status(400).json({
       success: false,
       error: {
@@ -31,14 +68,16 @@ function errorHandler(err, req, res, next) {
 
   // Generic errors
   const status = err.status || err.statusCode || 500;
+  const message =
+    process.env.NODE_ENV === "production"
+      ? "An unexpected error occurred."
+      : err.message;
+  logError(status, req, err.message);
   return res.status(status).json({
     success: false,
     error: {
       type: "ServerError",
-      message:
-        process.env.NODE_ENV === "production"
-          ? "An unexpected error occurred."
-          : err.message,
+      message,
     },
   });
 }
