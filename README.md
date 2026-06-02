@@ -144,6 +144,20 @@ Visit `http://localhost:3000` after startup.
 
 ---
 
+
+## Optional API Key Authentication (Issue #198)
+
+StellarKit API supports optional API key protection using environment variables:
+
+```env
+REQUIRE_API_KEY=true
+API_KEYS=key1,key2,key3
+```
+
+When `REQUIRE_API_KEY` is enabled, clients must send the API key in the `X-API-Key` request header. The `/health` and `/` endpoints remain public even when authentication is enabled.
+
+This feature is implemented in `src/middleware/apiKey.js` and covered by unit tests in `tests/apiKeyMiddleware.test.js`.
+
 ## FAQ
 
 ### What is the difference between testnet and mainnet?
