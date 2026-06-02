@@ -61,6 +61,7 @@ This project is ideal for:
 | GET    | `/utils/friendbot/:accountId`  | Funds a testnet account via Friendbot           |
 | GET    | `/utils/memo`                  | Decodes Horizon memo data                       |
 | GET    | `/utils/base64`                | Encodes or decodes Base64 strings               |
+| GET    | `/utils/convert`               | Converts between XLM and stroops                |
 
 ---
 

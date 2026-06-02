@@ -781,6 +781,56 @@ describe("StellarKit API", () => {
     });
   });
 
+  describe("GET /utils/convert", () => {
+    it("converts XLM to stroops", async () => {
+      const res = await request(app).get("/utils/convert?xlm=1.5");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({
+        xlm: "1.5000000",
+        stroops: 15000000,
+      });
+    });
+
+    it("converts stroops to XLM", async () => {
+      const res = await request(app).get("/utils/convert?stroops=15000000");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({
+        xlm: "1.5000000",
+        stroops: 15000000,
+      });
+    });
+
+    it("returns 400 when no conversion param is provided", async () => {
+      const res = await request(app).get("/utils/convert");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 when both conversion params are provided", async () => {
+      const res = await request(app).get("/utils/convert?xlm=1&stroops=10000000");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for negative values", async () => {
+      const xlmRes = await request(app).get("/utils/convert?xlm=-1");
+      const stroopsRes = await request(app).get("/utils/convert?stroops=-1");
+
+      expect(xlmRes.statusCode).toBe(400);
+      expect(xlmRes.body.success).toBe(false);
+      expect(stroopsRes.statusCode).toBe(400);
+      expect(stroopsRes.body.success).toBe(false);
+    });
+  });
+
   // ── DEX Price ──────────────────────────────────────────────────────────────
   describe("GET /dex/price/:sellAsset/:buyAsset", () => {
     const USDC_ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
@@ -1199,5 +1249,4 @@ describe("GET /account/:id/trustlines", () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
   });
-});
 });

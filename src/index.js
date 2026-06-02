@@ -131,6 +131,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
         { method: "GET", path: "/liquidity-pools/:id/reserve-ratio", description: "Get reserve ratio and drift from equal for a liquidity pool" },
         { method: "GET", path: "/utils/friendbot/:accountId", description: "Fund a testnet account via Friendbot (testnet only)" },
+        { method: "GET", path: "/utils/convert?xlm=:xlm", description: "Convert between XLM and stroops" },
         { method: "GET", path: "/utils/validate-account?id=:id", description: "Validate a Stellar public key format (no Horizon call)" },
         { method: "WS", path: "/stream/ledgers", description: "Real-time stream of live Stellar ledger updates" },
       ],
