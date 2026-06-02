@@ -2,8 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
-const { validateAccountId, validateLimit, validateOrder } = require("../utils/validators");
-
+const { validateAccountId } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
 /**
  * GET /transactions/:id
  * Returns paginated transaction history for a Stellar account.
@@ -69,9 +69,7 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = validateOrder(req.query.order);
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     let query = server
       .transactions()
@@ -188,9 +186,7 @@ router.get("/:id/operations", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = validateOrder(req.query.order);
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     let query = server
       .operations()

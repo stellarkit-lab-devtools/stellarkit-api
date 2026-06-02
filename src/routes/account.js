@@ -7,8 +7,8 @@ const { Asset } = require("@stellar/stellar-sdk");
 const {
   validateAccountId,
   validateAssetCode,
-  validateLimit,
 } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const { buildAccountAgeResponse } = require("../utils/accountAge");
 
@@ -968,11 +968,7 @@ router.get("/:id/payments", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = ["asc", "desc"].includes(req.query.order)
-      ? req.query.order
-      : "desc";
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     let query = server.operations().forAccount(id).limit(limit).order(order);
 
@@ -1113,11 +1109,7 @@ router.get("/:id/offer-history", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = ["asc", "desc"].includes(req.query.order)
-      ? req.query.order
-      : "desc";
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     let query = server
       .operations()
@@ -1193,8 +1185,7 @@ router.get("/:id/timeline", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 50);
-    const cursor = req.query.cursor || undefined;
+    const { limit, cursor } = parsePaginationParams(req.query, 50);
 
     let query = server.operations().forAccount(id).limit(limit).order("desc");
 
@@ -1795,12 +1786,7 @@ router.get("/:id/transactions/search", async (req, res, next) => {
       return next(err);
     }
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order =
-      req.query.order && ["asc", "desc"].includes(req.query.order)
-        ? req.query.order
-        : "desc";
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     // Fetch transactions from Horizon
     // We'll fetch more than requested to account for filtering

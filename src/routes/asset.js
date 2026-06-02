@@ -7,8 +7,8 @@ const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const {
   validateAccountId,
   validateAssetCode,
-  validateLimit,
 } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
 
 function findAssetBalance(account, assetCode, issuer) {
   return (account.balances || []).find(
@@ -57,11 +57,7 @@ router.get(
       validateAccountId(issuer);
 
       const assetCode = code.toUpperCase();
-      const limit = validateLimit(req.query.limit || 10, 200);
-      const order = ["asc", "desc"].includes(req.query.order)
-        ? req.query.order
-        : "desc";
-      const cursor = req.query.cursor || undefined;
+      const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
       let query = server
         .accounts()
