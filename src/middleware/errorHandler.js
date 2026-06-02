@@ -3,6 +3,8 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  */
 
+const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
+
 /**
  * Logs 4xx and 5xx responses to the console.
  * Suppressed when NODE_ENV=test to keep test output clean.
@@ -25,7 +27,15 @@ function errorHandler(err, req, res, next) {
   // Stellar / Horizon specific errors
   if (err.response && err.response.data) {
     const horizonError = err.response.data;
-    const status = err.response.status || 400;
+
+    const resultCode =
+      horizonError?.extras?.result_codes?.transaction ??
+      horizonError?.extras?.result_codes?.operations?.[0] ??
+      null;
+
+    const mappedStatus = mapHorizonErrorToStatus(resultCode);
+    const status = mappedStatus ?? err.response.status ?? 400;
+
     const message = horizonError.detail || horizonError.title || "Horizon Error";
     logError(status, req, message);
     return res.status(status).json({
