@@ -204,4 +204,108 @@ router.get("/transactions/:id", async (req, res, next) => {
   });
 });
 
+/**
+ * GET /stream/payments/:id
+ * SSE endpoint that streams incoming and outgoing payment events for a Stellar account.
+ *
+ * Filters to: payment, create_account operation types.
+ *
+ * SSE Events:
+ *   - payment: JSON with { type, amount, assetCode, from, to, timestamp }
+ *   - heartbeat comment (": ping"): every 30 seconds
+ */
+router.get("/payments/:id", async (req, res, next) => {
+  const { id } = req.params;
+
+  if (!StrKey.isValidEd25519PublicKey(id)) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "ValidationError",
+        message: "Invalid Stellar account ID",
+        detail: "Must be a valid G... address",
+      },
+    });
+  }
+
+  try {
+    await server.loadAccount(id);
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "Account not found",
+          detail: "No Stellar account exists for this public key",
+        },
+      });
+    }
+    if (process.env.NODE_ENV !== "test") {
+      console.warn(`[WARN] Account check failed for ${id}:`, err.message);
+    }
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  let closeStream;
+  let heartbeatInterval;
+
+  const PAYMENT_TYPES = new Set(["payment", "create_account"]);
+
+  try {
+    closeStream = server
+      .payments()
+      .forAccount(id)
+      .cursor("now")
+      .stream({
+        onmessage: (op) => {
+          if (res.writableEnded || res.destroyed) {
+            closeStream && closeStream();
+            return;
+          }
+
+          if (!PAYMENT_TYPES.has(op.type)) return;
+
+          const payload = {
+            type: op.type,
+            amount: op.amount || op.starting_balance || null,
+            assetCode: op.asset_type === "native" ? "XLM" : (op.asset_code || null),
+            from: op.from || op.funder || op.source_account || null,
+            to: op.to || op.account || null,
+            timestamp: op.created_at || null,
+          };
+
+          res.write(`event: payment\n`);
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        },
+        onerror: () => {
+          if (!res.writableEnded && !res.destroyed) res.end();
+          closeStream && closeStream();
+          clearInterval(heartbeatInterval);
+        },
+      });
+  } catch {
+    if (!res.writableEnded && !res.destroyed) res.end();
+    return;
+  }
+
+  heartbeatInterval = setInterval(() => {
+    if (res.writableEnded || res.destroyed) {
+      clearInterval(heartbeatInterval);
+      return;
+    }
+    res.write(": ping\n\n");
+  }, 30_000);
+
+  req.on("close", () => {
+    clearInterval(heartbeatInterval);
+    closeStream && closeStream();
+  });
+});
+
 module.exports = router;
