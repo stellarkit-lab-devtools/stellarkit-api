@@ -53,7 +53,7 @@ describe("Transaction Batch Status Checker", () => {
         found: true,
         successful: true,
         ledger: 12345,
-        createdAt: "2024-05-28T10:00:00Z",
+        createdAt: "2024-05-28T10:00:00.000Z",
         fee: "100",
       });
       expect(res.body.data[1]).toEqual({
@@ -61,7 +61,7 @@ describe("Transaction Batch Status Checker", () => {
         found: true,
         successful: false,
         ledger: 12346,
-        createdAt: "2024-05-28T10:05:00Z",
+        createdAt: "2024-05-28T10:05:00.000Z",
         fee: "200",
       });
     });

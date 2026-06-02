@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { server, fetchAccountCreation } = require("../config/stellar");
-const { success } = require("../utils/response");
+const { success, toISOTimestamp } = require("../utils/response");
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
 const { Asset } = require("@stellar/stellar-sdk");
@@ -157,9 +157,9 @@ router.get("/:id/analytics", async (req, res, next) => {
     const successfulTransactions = transactions.filter(
       (transaction) => transaction.successful !== false,
     );
-    const firstSeen = successfulTransactions[0]?.created_at || null;
+    const firstSeen = toISOTimestamp(successfulTransactions[0]?.created_at) || null;
     const lastSeen =
-      successfulTransactions[successfulTransactions.length - 1]?.created_at ||
+      toISOTimestamp(successfulTransactions[successfulTransactions.length - 1]?.created_at) ||
       null;
     const activeDays =
       firstSeen && lastSeen
@@ -580,7 +580,7 @@ router.get("/:id/inactivity", async (req, res, next) => {
     }
 
     const lastTx = txResponse.records[0];
-    const lastTransactionAt = lastTx.created_at;
+    const lastTransactionAt = toISOTimestamp(lastTx.created_at);
     const lastTransactionHash = lastTx.hash;
 
     const lastTxDate = new Date(lastTransactionAt);
@@ -995,7 +995,7 @@ router.get("/:id/payments", async (req, res, next) => {
           },
           sender: isPayment ? op.from : op.funder,
           receiver: isPayment ? op.to : op.account,
-          createdAt: op.created_at,
+          createdAt: toISOTimestamp(op.created_at),
         });
         lastPaymentIndex = idx;
       }
@@ -1160,7 +1160,7 @@ router.get("/:id/offer-history", async (req, res, next) => {
           buyingAsset: formatAsset(op.buying_asset_type, op.buying_asset_code, op.buying_asset_issuer),
           amount: op.amount,
           price: op.price,
-          timestamp: op.created_at,
+          timestamp: toISOTimestamp(op.created_at),
           transactionHash: op.transaction_hash,
         };
       });
