@@ -71,6 +71,19 @@ All methods return `Promise<data>` where `data` is the `data` field from the API
 
 Non-2xx responses throw `StellarKitError`:
 
+### Issue #204: JavaScript Client SDK Implementation
+
+This SDK wraps StellarKit API endpoints into documented async methods that return the `data` field from the response. It is designed to simplify integration with the StellarKit API and avoid raw `fetch` usage.
+
+- `new StellarKitClient({ baseUrl, apiKey? })`
+- `getAccount(id)`
+- `getNetworkStatus()`
+- `getFeeEstimate(operations)`
+- `getAsset(code, issuer)`
+
+The SDK implementation lives at `sdk/stellarkit-client.js` and includes error handling via `StellarKitError`.
+
+
 ```js
 err.status   // HTTP status code (e.g. 404)
 err.message  // Human-readable error message from the API
