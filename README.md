@@ -41,6 +41,27 @@ This project is ideal for:
 
 ## API Quick Reference
 
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/` | Lists available API endpoints and descriptions |
+| GET | `/health` | Returns basic service health status |
+| GET | `/network-status` | Returns current Stellar network and ledger info |
+| GET | `/fee-estimate` | Calculates fee estimates for a transaction |
+| GET | `/account/:id` | Retrieves full account details and balances |
+| GET | `/account/:id/balances` | Retrieves XLM and asset balances only |
+| GET | `/account/:id/sequence` | Retrieves the account sequence number |
+| GET | `/account/:id/summary` | Retrieves a compact account summary |
+| GET | `/account/:id/payments` | Lists payment and create_account operations |
+| GET | `/account/:id/sponsorship` | Returns sponsorship relationships for the account (sponsor id and sponsored ledger entries) |
+| GET | `/transactions/:id` | Retrieves paginated transaction history |
+| GET | `/transactions/:id/operations` | Retrieves paginated operation history |
+| GET | `/asset/:code/:issuer` | Retrieves metadata and statistics for an asset |
+| GET | `/asset/:code/:issuer/holders` | Lists holders of an asset trustline |
+| GET | `/asset/search` | Searches assets by code across issuers |
+| GET | `/stream/transactions/:id` | Streams live account transactions via SSE |
+| GET | `/utils/friendbot/:accountId` | Funds a testnet account via Friendbot |
+| GET | `/utils/memo` | Decodes Horizon memo data |
+| GET | `/utils/base64` | Encodes or decodes Base64 strings |
 | Method | Endpoint                       | Description                                     |
 | ------ | ------------------------------ | ----------------------------------------------- |
 | GET    | `/`                            | Lists available API endpoints and descriptions  |
@@ -61,6 +82,7 @@ This project is ideal for:
 | GET    | `/utils/friendbot/:accountId`  | Funds a testnet account via Friendbot           |
 | GET    | `/utils/memo`                  | Decodes Horizon memo data                       |
 | GET    | `/utils/base64`                | Encodes or decodes Base64 strings               |
+| GET    | `/utils/convert`               | Converts between XLM and stroops                |
 
 ---
 
@@ -143,6 +165,20 @@ Visit `http://localhost:3000` after startup.
 
 ---
 
+
+## Optional API Key Authentication (Issue #198)
+
+StellarKit API supports optional API key protection using environment variables:
+
+```env
+REQUIRE_API_KEY=true
+API_KEYS=key1,key2,key3
+```
+
+When `REQUIRE_API_KEY` is enabled, clients must send the API key in the `X-API-Key` request header. The `/health` and `/` endpoints remain public even when authentication is enabled.
+
+This feature is implemented in `src/middleware/apiKey.js` and covered by unit tests in `tests/apiKeyMiddleware.test.js`.
+
 ## FAQ
 
 ### What is the difference between testnet and mainnet?
@@ -168,6 +204,55 @@ A home domain is an optional string attached to a Stellar account that identifie
 
 ### Are there rate limits for StellarKit API?
 Yes. StellarKit API uses a global rate limiter by default to protect the service and the underlying Horizon endpoints. The default limit is 100 requests per IP per 15 minutes, and it can be adjusted with `RATE_LIMIT_MAX`.
+
+---
+
+## Stellar Glossary
+
+This glossary defines key Stellar-specific terms that appear throughout the API responses and Stellar documentation. Use this reference to understand the fundamental concepts of the Stellar ecosystem.
+
+### Base Reserve
+The fundamental unit of account reserve on the Stellar network, currently set to 0.5 XLM. Every account must hold a minimum of 2 base reserves (1 XLM) to exist, and each subentry increases the reserve requirement by 1 base reserve.
+
+### Claimable Balance
+A Stellar ledger entry that holds funds on behalf of one or more future recipients without requiring those recipients to exist on the network. Claimable balances can have predicates that control when funds can be claimed, enabling conditional and deferred transfers.
+
+### DEX
+The Decentralized Exchange built into Stellar's ledger. It allows users to create and fill limit orders for any pair of assets, forming automatic order books without a central operator.
+
+### Home Domain
+An optional string attached to a Stellar account that identifies the account's website or service. Used for branding, federation lookups, and verifying issuer relationships in wallets and anchors.
+
+### Horizon
+Stellar's REST API that provides access to the ledger, transactions, operations, and account data. Horizon is the primary interface for querying the Stellar network state and submitting transactions.
+
+### Ledger
+The main database of the Stellar blockchain that stores all accounts, balances, trustlines, offers, data entries, and other ledger entries. Each ledger closes approximately every 5-6 seconds, creating permanent historical records.
+
+### Liquidity Pool
+An automated market maker (AMM) that holds equal-value reserves of two assets and facilitates swaps between them. Pool shares represent ownership stakes, and traders pay fees that are distributed to share holders.
+
+### Memo
+An optional text, ID, hash, or return value attached to a transaction. Memos help organize and reference transactions but do not affect transaction logic or validation.
+
+### Sequence Number
+A counter maintained for each Stellar account that increments with each transaction. The sequence number ensures transactions are processed in order and prevents transaction replays. Clients must increment the sequence number when building multiple transactions.
+
+### Soroban
+Stellar's smart contract platform that allows developers to write WebAssembly (WASM) programs and execute them on the Stellar ledger. Soroban enables complex business logic beyond traditional Stellar operations.
+
+### Stellar TOML
+A configuration file hosted on an organization's domain that describes its Stellar-enabled services, supported assets, and federation information. Wallets and applications use Stellar TOML to verify issuer authenticity and discover federated addresses.\n\n### Stroop
+The smallest unit of XLM, similar to a cent in traditional currency. One XLM equals 10 million stroops. Fees and small balances are often expressed in stroops internally.
+
+### Subentry
+Any ledger entry owned by an account other than the account itself. Trustlines, open offers, data entries, and additional signers are all subentries. Each subentry increases the account's minimum balance requirement by 1 base reserve (0.5 XLM).
+
+### Trustline
+A connection between an account and a specific asset (identified by code and issuer). An account must establish a trustline before it can hold or receive a non-native asset. Trustlines have limits that control the maximum amount of an asset an account can hold.
+
+### XDR
+External Data Representation; the binary serialization format Stellar uses to encode transactions, operations, and ledger data. XDR ensures compact, deterministic encoding for signing and network transmission.
 
 ---
 
@@ -368,6 +453,64 @@ StellarKit API exposes claimable balance data through two surfaces:
 | `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). |
 
 Use the `/claimable-balances/eligible` endpoint to build dashboards that show users exactly which funds are available to claim today and which are still locked. The API handles predicate evaluation server-side, so clients do not need to implement their own predicate logic.
+
+---
+
+## Understanding Liquidity Pools
+
+Stellar's Liquidity Pools are automated market makers (AMMs) that enable decentralized asset swaps. This guide explains how pools work, how liquidity providers earn fees, and the fundamental concepts behind pool mechanics.
+
+### What is a Liquidity Pool?
+
+A liquidity pool is a smart ledger contract that holds equal-value reserves of two assets and facilitates swaps between them. Instead of relying on a central order book operator, the pool uses an automated pricing algorithm to execute trades and reward liquidity providers.
+
+**Key characteristics:**
+- Holds two assets in a **constant product invariant**: the product of the two reserve amounts remains constant before and after each swap.
+- Issues **pool share tokens** to liquidity providers, representing fractional ownership of both reserves.
+- Charges a **trading fee** (typically 0.3%) on every swap, which accrues to share holders.
+- Operates on Stellar's native ledger without requiring external oracles or complicated governance.
+
+### Pool Shares and Ownership
+
+When you deposit assets into a liquidity pool, you receive **pool share tokens** proportional to your contribution. These shares represent your ownership stake in both reserves.
+
+**Example:**
+If you deposit 1,000 XLM and 50,000 USDC into an empty pool, you receive 7,071 pool shares (calculated as $\sqrt{1000 \times 50000}$). Your ownership is 100% of the pool. If you later withdraw your shares, you receive your proportional share of both reserves plus any fees earned.
+
+If the pool price changes and another user deposits at a different ratio, your percentage ownership dilutes — but the total value of your shares typically increases because of accumulated fees.
+
+### Reserve Ratios and the 50/50 Rule
+
+Stellar liquidity pools maintain a **50/50 reserve ratio** by value. This means the total value of reserve A should equal the total value of reserve B at all times.
+
+When a user swaps one asset for another, the pool adjusts prices according to the constant product formula, driving the ratio back toward 50/50. This self-correcting mechanism ensures the pool remains balanced and prevents depletion of either reserve.
+
+**Why 50/50?**
+- Minimizes impermanent loss for liquidity providers by keeping prices stable.
+- Ensures neither reserve can be exhausted by extreme trades.
+- Creates natural price discovery through the swap mechanism.
+
+### Fee Mechanics
+
+Every swap in a liquidity pool incurs a **trading fee**, typically **0.3%** (expressed as 30 basis points). This fee is taken from the input amount and distributed to all pool share holders in proportion to their ownership.
+
+**Example:**
+If you hold 10% of a pool's shares and the pool earns 100 USDC in fees over a period, you automatically receive 10 USDC when you withdraw or check your position. Fees are not claimed separately — they accrue directly to your share's proportional value.
+
+The fee mechanism incentivizes liquidity provision: share holders earn passive income simply by holding their shares and allowing others to trade through the pool.
+
+### Liquidity Pool Endpoints in StellarKit API
+
+StellarKit API provides several endpoints to interact with and analyze liquidity pools:
+
+| Endpoint                                  | Description                                                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `GET /liquidity-pools`                    | Retrieves a list of all liquidity pools on the network with reserve details and fee information.                |
+| `GET /liquidity-pools/:id`                | Fetches detailed information about a specific pool, including reserves, share count, and fee basis points.      |
+| `GET /account/:id/pool-positions`         | Returns all liquidity pool positions for an account with calculated share values and equivalent reserves.       |
+| `GET /dex/pool-share-value/:poolId/:shares` | Calculates the equivalent value of a specific number of pool shares in both reserve assets.                    |
+
+Use these endpoints to build pool analysis dashboards, calculate LP returns, and help users decide when to provide or withdraw liquidity.
 
 ---
 
@@ -646,6 +789,193 @@ The following StellarKit API endpoints support cursor-based pagination:
 
 ---
 
+## Asset Format Reference
+
+Stellar represents assets in different formats depending on the context. This reference explains how native and non-native assets are formatted in API responses and request parameters.
+
+### Native XLM Representation
+
+XLM, the native asset of Stellar, is represented in one of two ways:
+
+**In most API responses:**
+```json
+{
+  "asset_type": "native"
+}
+```
+
+**In CODE:ISSUER format (used in DEX and path endpoints):**
+```
+XLM:native
+```
+
+The keyword `native` is always used in place of an issuer for XLM, since XLM has no issuer — it is the platform's native currency.
+
+### Alphanum4 Format
+
+Assets with 4-character or shorter codes are formatted as **alphanum4**. Examples include USD, EUR, CNY, and custom codes like JPY or EURT.
+
+**In API responses:**
+```json
+{
+  "asset_type": "credit_alphanum4",
+  "asset_code": "USD",
+  "asset_issuer": "GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIYU2IYLLU2DENJCAHE4WREQDFT"
+}
+```
+
+**In CODE:ISSUER format:**
+```
+USD:GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIYU2IYLLU2DENJCAHE4WREQDFT
+```
+
+### Alphanum12 Format
+
+Assets with codes longer than 4 characters (up to 12) are formatted as **alphanum12**. Examples include yXLM, abcdef123xyz, and longer custom asset codes.
+
+**In API responses:**
+```json
+{
+  "asset_type": "credit_alphanum12",
+  "asset_code": "yXLM",
+  "asset_issuer": "GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE"
+}
+```
+
+**In CODE:ISSUER format:**
+```
+yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
+```
+
+### Common Asset Examples
+
+| Asset | CODE:ISSUER Format | Description |
+| --- | --- | --- |
+| **XLM (Native)** | `XLM:native` | Stellar's native asset |
+| **USDC (USD Coin)** | `USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` | Stablecoin issued by Circle |
+| **yXLM (Yield XLM)** | `yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE` | Yield-bearing XLM wrapper |
+| **EUR (Euro)** | `EUR:GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIYU2IYLLU2DENJCAHE4WREQDFT` | Fiat-backed asset |
+| **BTC (Bitcoin)** | `BTC:GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ65JJLDHKHRUZI3EUEKMTCH` | Bitcoin-backed asset |
+
+### Using Asset Formats in API Requests
+
+**DEX Endpoints:**
+When querying DEX endpoints like `/dex/orderbook`, `/dex/depth`, or `/dex/spread`, always use the CODE:ISSUER format:
+
+```
+GET /dex/orderbook?buyingAsset=USDC:GBBD47IF...&sellingAsset=XLM:native
+GET /dex/spread?buyingAsset=yXLM:GARDN...&sellingAsset=USDC:GBBD...
+```
+
+**Asset Lookup Endpoints:**
+When querying specific asset information via `/asset/:code/:issuer`, use the path parameters directly:
+
+```
+GET /asset/USDC/GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+GET /asset/yXLM/GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
+```
+
+---
+
+## Stellar Memo Types Reference
+
+Stellar transactions can include an optional memo field to help identify and organize payments. Each memo type serves a specific use case, and understanding when to use each type is important for building reliable payment systems.
+
+### MEMO_NONE
+
+**Max Size:** N/A (no memo)
+
+**Use Case:**
+No memo is attached to the transaction. Use this when the transaction is self-documenting or when no reference is needed. Most system-to-system transfers or internal account movements use MEMO_NONE.
+
+**Example:**
+```
+Transfer: Internal wallet sweep between accounts
+```
+
+### MEMO_TEXT
+
+**Max Size:** 28 bytes (approximately 28 ASCII characters)
+
+**Use Case:**
+Attach human-readable text that describes the transaction purpose. Common for payment references, invoice numbers, order IDs, or short descriptions. Useful for customer support and transaction reconciliation.
+
+**Example:**
+```
+memo: "INV-2024-0512"
+memo: "Salary June 2024"
+memo: "Airbot withdrawal"
+```
+
+### MEMO_ID
+
+**Max Size:** 64-bit unsigned integer (0 to 18,446,744,073,709,551,615)
+
+**Use Case:**
+Attach a numeric identifier to a transaction. Use this when you want to reference a specific transaction against a numeric database ID or unique number. Many payment processors use memo IDs to link blockchain transactions to internal records.
+
+**Example:**
+```
+memo_id: 123456789        // Links to customer ID in payment processor
+memo_id: 987654321        // References an internal invoice number
+memo_id: 1234567890123456 // Unique transaction identifier
+```
+
+### MEMO_HASH
+
+**Max Size:** 32 bytes (SHA-256 hash digest)
+
+**Use Case:**
+Attach a cryptographic hash to represent a document, contract, or data commitment. Use this when you need to prove a transaction relates to specific data without disclosing the data itself, or when you want to anchor a transaction to a specific document hash.
+
+**Example:**
+```
+memo_hash: "8f7c4b8c3f8c9e7f4c1a2b3c4d5e6f7g"  // Hash of a contract
+memo_hash: "sha256(order_data)"                 // Hash of order details
+```
+
+### MEMO_RETURN
+
+**Max Size:** 32 bytes (return hash for payment errors)
+
+**Use Case:**
+Used by receivers to send a payment back to the sender, typically when a payment cannot be processed. The memo_return value echoes the hash from the original transaction. This is most common in automated return/refund flows.
+
+**Example:**
+```
+Original transaction memo_hash: "abc123def456"
+Return transaction memo_return: "abc123def456"  // Echoes original to link refund
+```
+
+### Choosing a Memo Type
+
+Use this decision tree to select the right memo type for your use case:
+
+| Scenario | Recommended Type | Reason |
+| --- | --- | --- |
+| No reference needed | MEMO_NONE | Simplest, no overhead |
+| Readable invoice or order reference | MEMO_TEXT | Human-friendly, easy to track |
+| Link to numeric database ID | MEMO_ID | Efficient, indexed database lookups |
+| Cryptographic proof of document | MEMO_HASH | Immutable, non-repudiable commitment |
+| Automated refund or return flow | MEMO_RETURN | Tracks original transaction |
+
+### Querying Transactions by Memo
+
+Use the `GET /account/:id/transactions/search` endpoint to find transactions by memo content. The endpoint supports filtering by memo type:
+
+```
+GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=INV-2024-0512&memo_type=text
+GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=123456789&memo_type=id
+```
+
+Also use the `GET /utils/memo` endpoint to decode raw memo data from transaction responses:
+
+```
+GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
+```
+
+---
+
 ## Example Responses
 
 ### Health
@@ -876,6 +1206,21 @@ GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
     "assets": [...],
     "signers": [...],
     "flags": {...}
+
+### Understanding Account Sponsorship
+
+Account sponsorship in Stellar allows one account (the sponsor) to cover the base reserve and associated subentry reserves for ledger entries owned or created for another account. Sponsorship makes it possible for custodial services, marketplaces, or onboarding flows to pay ledger costs on behalf of users while sponsorship is active.
+
+- What it means: sponsorship ties specific ledger entries (accounts, trustlines, signers, data entries, offers, claimable balances, etc.) to a sponsoring account that pays the associated reserve while the sponsorship exists.
+- Sponsored reserves: while sponsorship is active, the sponsor is responsible for the base reserve required by those sponsored ledger entries. If sponsorship ends, the sponsored account must meet the reserve requirements itself or the network may require cleanup or disallow some entries.
+- Why it exists: to simplify onboarding, reduce friction for new users, and enable managed services to cover ledger costs temporarily or indefinitely.
+
+Using this API:
+
+- Inspect sponsorship relationships using `GET /account/:id/sponsorship`. This endpoint helps determine whether an account or its ledger entries are sponsored, who the sponsor is, and which entries are covered — useful for UI indicators, billing reconciliation, or migration workflows.
+
+Note: This repository documents the sponsorship inspection endpoint; it does not change any runtime behavior or add sponsorship logic.
+
   }
 }
 ```

@@ -2,7 +2,9 @@ const express = require("express");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
-const { feeEstimateCache } = require("../utils/cache");
+const cache = require("../services/cache");
+
+const CACHE_TTL = 5; // seconds
 
 /**
  * GET /fee-estimate
@@ -23,7 +25,7 @@ router.get("/", async (req, res, next) => {
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
-      const cached = feeEstimateCache.get(cacheKey);
+      const cached = cache.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
         return success(res, cached);
@@ -32,8 +34,9 @@ router.get("/", async (req, res, next) => {
 
     // Cache miss or fresh=true - fetch from Horizon
     const feeStats = await server.feeStats();
+    const ledgerHistory = await server.ledgers().order("desc").limit(5).call();
+    const ledgerHistoryRecords = ledgerHistory.records || [];
 
-    const base = parseInt(feeStats.fee_charged.p10);
     const recommended = parseInt(feeStats.fee_charged.p50);
     const priority = parseInt(feeStats.fee_charged.p95);
 
@@ -80,6 +83,13 @@ router.get("/", async (req, res, next) => {
         p95: feeStats.fee_charged.p95,
         p99: feeStats.fee_charged.p99,
       },
+      history: ledgerHistoryRecords.map((ledger) => ({
+        ledger: parseInt(ledger.sequence, 10),
+        baseFee: parseInt(ledger.base_fee_in_stroops || ledger.base_fee, 10) || 0,
+        capacityUsage: parseFloat(
+          Math.min((ledger.successful_transaction_count || 0) / 1000, 1.0).toFixed(4)
+        ),
+      })),
       // New fields
       context: "Stroops are the smallest unit of XLM; 1 XLM = 10,000,000 stroops.",
       networkCongestion: (function () {
@@ -97,7 +107,7 @@ router.get("/", async (req, res, next) => {
     };
 
     // Cache the response
-    feeEstimateCache.set(cacheKey, data);
+    cache.set(cacheKey, data, CACHE_TTL);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -123,7 +133,7 @@ router.get("/surge-status", async (req, res, next) => {
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
-      const cached = feeEstimateCache.get(cacheKey);
+      const cached = cache.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
         return success(res, cached);
@@ -201,7 +211,7 @@ router.get("/surge-status", async (req, res, next) => {
     };
 
     // Cache the response (surge status can be cached briefly since it's analyzed data)
-    feeEstimateCache.set(cacheKey, data);
+    cache.set(cacheKey, data, CACHE_TTL);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

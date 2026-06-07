@@ -1,5 +1,4 @@
 const request = require("supertest");
-const app = require("../src/index");
 
 jest.mock("../src/config/stellar", () => {
     const originalModule = jest.requireActual("../src/config/stellar");
@@ -12,14 +11,15 @@ jest.mock("../src/config/stellar", () => {
     };
 });
 
+const app = require("../src/index");
 const { server } = require("../src/config/stellar");
-const { feeEstimateCache } = require("../src/utils/cache");
+const cache = require("../src/services/cache");
 
 describe("Fee Surge Status API", () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        // Clear the cache
-        feeEstimateCache.clear();
+        // Clear the actual route cache
+        cache.flush();
     });
 
     it("returns isSurging: false when average capacity usage is low", async () => {

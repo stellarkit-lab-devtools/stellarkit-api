@@ -1,3 +1,5 @@
+const { toISOTimestamp } = require("./response");
+
 /**
  * Formats a Horizon transaction record into a clean SSE payload.
  *
@@ -9,7 +11,7 @@ function formatTransaction(tx) {
     id: tx.id,
     hash: tx.hash,
     ledger: tx.ledger,
-    created_at: tx.created_at,
+    created_at: toISOTimestamp(tx.created_at),
     source_account: tx.source_account,
     fee_charged: tx.fee_charged,
     operation_count: tx.operation_count,

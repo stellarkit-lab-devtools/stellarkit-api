@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const { server } = require("../config/stellar");
-const { success } = require("../utils/response");
-const { validateAccountId, validateLimit, validateOrder } = require("../utils/validators");
-
+const { success, toISOTimestamp } = require("../utils/response");
+const { validateAccountId } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
 /**
  * GET /transactions/:id
  * Returns paginated transaction history for a Stellar account.
@@ -69,9 +69,7 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = validateOrder(req.query.order);
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     let query = server
       .transactions()
@@ -95,7 +93,7 @@ router.get("/:id", async (req, res, next) => {
         id: tx.id,
         hash: tx.hash,
         ledger: tx.ledger,
-        createdAt: tx.created_at,
+        createdAt: toISOTimestamp(tx.created_at),
         sourceAccount: tx.source_account,
         fee: {
           charged: tx.fee_charged,
@@ -188,9 +186,7 @@ router.get("/:id/operations", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = validateOrder(req.query.order);
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
     let query = server
       .operations()
@@ -206,7 +202,7 @@ router.get("/:id/operations", async (req, res, next) => {
       const base = {
         id: op.id,
         type: op.type,
-        createdAt: op.created_at,
+        createdAt: toISOTimestamp(op.created_at),
         transactionHash: op.transaction_hash,
         transactionSuccessful: op.transaction_successful,
         sourceAccount: op.source_account,
@@ -316,7 +312,7 @@ router.post("/batch-status", async (req, res, next) => {
             found: true,
             successful: tx.successful,
             ledger: tx.ledger,
-            createdAt: tx.created_at,
+            createdAt: toISOTimestamp(tx.created_at),
             fee: tx.fee_charged,
           };
         } catch (err) {
