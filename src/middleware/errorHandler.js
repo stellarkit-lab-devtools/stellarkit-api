@@ -2,6 +2,9 @@
  * Centralised error handler middleware.
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  */
+const { translateHorizonError } = require("../utils/horizonErrors");
+
+const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 
 /**
  * Logs 4xx and 5xx responses to the console.
@@ -25,7 +28,15 @@ function errorHandler(err, req, res, next) {
   // Stellar / Horizon specific errors
   if (err.response && err.response.data) {
     const horizonError = err.response.data;
-    const status = err.response.status || 400;
+
+    const resultCode =
+      horizonError?.extras?.result_codes?.transaction ??
+      horizonError?.extras?.result_codes?.operations?.[0] ??
+      null;
+
+    const mappedStatus = mapHorizonErrorToStatus(resultCode);
+    const status = mappedStatus ?? err.response.status ?? 400;
+
     const message = horizonError.detail || horizonError.title || "Horizon Error";
     logError(status, req, message);
     return res.status(status).json({
@@ -36,6 +47,8 @@ function errorHandler(err, req, res, next) {
         detail: horizonError.detail || "An error occurred with the Stellar network.",
         status: horizonError.status || err.response.status,
         extras: horizonError.extras || null,
+        ...(code && { code }),
+        ...(humanMessage && { message: humanMessage }),
       },
     });
   }
@@ -62,6 +75,9 @@ function errorHandler(err, req, res, next) {
       error: {
         type: "ValidationError",
         message: err.message,
+        field: err.field,
+        receivedValue: err.receivedValue,
+        expectedFormat: err.expectedFormat,
       },
     });
   }

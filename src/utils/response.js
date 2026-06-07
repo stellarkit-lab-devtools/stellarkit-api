@@ -15,15 +15,26 @@ function success(res, data, meta = {}) {
 }
 
 /**
- * Formats a Stellar timestamp into a readable ISO string.
+ * Converts any timestamp value to an ISO 8601 string.
  *
- * @param {string|number|Date|null|undefined} ts - The timestamp to format.
- * @returns {string|null} ISO string or null when timestamp is falsy.
+ * Handles:
+ *   - Unix timestamps in seconds (number < 1e12)
+ *   - Unix timestamps in milliseconds (number >= 1e12)
+ *   - Stellar date strings (e.g. "2024-07-01T12:00:00Z")
+ *   - JavaScript Date objects
+ *   - Falsy values → null
+ *
+ * @param {string|number|Date|null|undefined} value - The timestamp to format.
+ * @returns {string|null} ISO 8601 string or null when value is falsy.
  */
-function formatTimestamp(ts) {
-  if (!ts) return null;
-  return new Date(ts).toISOString();
+function toISOTimestamp(value) {
+  if (!value && value !== 0) return null;
+  const ms = typeof value === "number" && value < 1e12 ? value * 1000 : value;
+  return new Date(ms).toISOString();
 }
+
+/** @deprecated Use toISOTimestamp instead */
+const formatTimestamp = toISOTimestamp;
 
 /**
  * Strips unnecessary Horizon _links fields from a record.
@@ -37,4 +48,4 @@ function stripLinks(obj) {
   return rest;
 }
 
-module.exports = { success, formatTimestamp, stripLinks };
+module.exports = { success, toISOTimestamp, formatTimestamp, stripLinks };

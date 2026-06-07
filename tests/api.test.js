@@ -1,5 +1,7 @@
 const request = require("supertest");
+const axios = require("axios");
 const app = require("../src/index");
+const { server } = require("../src/config/stellar");
 const { networkStatusCache, feeEstimateCache } = require("../src/utils/cache");
 const { server } = require("../src/config/stellar");
 
@@ -43,30 +45,151 @@ describe("StellarKit API", () => {
 
   // ── Validation ─────────────────────────────────────────────────────────────
   describe("GET /account/:id — validation", () => {
-    it("returns 400 for an invalid account ID", async () => {
+    it("returns 400 for an invalid account ID with field-level details", async () => {
       const res = await request(app).get("/account/NOT_A_VALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.field).toBe("accountId");
+      expect(res.body.error.receivedValue).toBe("NOT_A_VALID_KEY");
+      expect(res.body.error.expectedFormat).toBeDefined();
+    });
+  });
+
+  describe("GET /account/:id/trustlines", () => {
+    const MOCK_ACCOUNT = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+    const MOCK_ISSUER = "GC3C6BRSPTJTJ4DI7ELZ2J4Y3Z5OCN7R2VIX5FQY3Y5QIN3QAKXUQY5R";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns non-native trustlines with resolved TOML metadata", async () => {
+      const accountResponse = {
+        id: MOCK_ACCOUNT,
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "TEST",
+            asset_issuer: MOCK_ISSUER,
+            balance: "100.0000000",
+            limit: "1000.0000000",
+            buying_liabilities: "0.0000000",
+            selling_liabilities: "0.0000000",
+            is_authorized: true,
+            is_clawback_enabled: false,
+          },
+        ],
+        sequence: "1",
+        subentry_count: 1,
+        signers: [],
+        thresholds: {},
+        flags: {},
+        last_modified_ledger: 1,
+      };
+
+      const issuerResponse = {
+        id: MOCK_ISSUER,
+        home_domain: "example.com",
+      };
+
+      jest.spyOn(server, "loadAccount").mockImplementation(async (id) => {
+        if (id === MOCK_ACCOUNT) return accountResponse;
+        if (id === MOCK_ISSUER) return issuerResponse;
+        throw new Error(`Unexpected account load for ${id}`);
+      });
+
+      jest.spyOn(axios, "get").mockResolvedValue({
+        data: `[[CURRENCIES]]
+code = "TEST"
+issuer = "${MOCK_ISSUER}"
+name = "Test Asset"
+desc = "A test asset"
+image = "https://example.com/test.png"
+`,
+      });
+
+      const res = await request(app).get(`/account/${MOCK_ACCOUNT}/trustlines`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveProperty("accountId", MOCK_ACCOUNT);
+      expect(res.body.data).toHaveProperty("assetCount", 1);
+      expect(res.body.data.assets).toHaveLength(1);
+      expect(res.body.data.assets[0]).toMatchObject({
+        assetCode: "TEST",
+        assetIssuer: MOCK_ISSUER,
+        toml: {
+          name: "Test Asset",
+          description: "A test asset",
+          image: "https://example.com/test.png",
+        },
+      });
+    });
+
+    it("returns null TOML metadata when issuer resolution is not available", async () => {
+      const accountResponse = {
+        id: MOCK_ACCOUNT,
+        balances: [
+          {
+            asset_type: "credit_alphanum4",
+            asset_code: "NONE",
+            asset_issuer: MOCK_ISSUER,
+            balance: "42.0000000",
+            limit: "1000.0000000",
+            buying_liabilities: "0.0000000",
+            selling_liabilities: "0.0000000",
+            is_authorized: false,
+            is_clawback_enabled: false,
+          },
+        ],
+        sequence: "1",
+        subentry_count: 1,
+        signers: [],
+        thresholds: {},
+        flags: {},
+        last_modified_ledger: 1,
+      };
+
+      const issuerResponse = {
+        id: MOCK_ISSUER,
+        home_domain: null,
+      };
+
+      jest.spyOn(server, "loadAccount").mockImplementation(async (id) => {
+        if (id === MOCK_ACCOUNT) return accountResponse;
+        if (id === MOCK_ISSUER) return issuerResponse;
+        throw new Error(`Unexpected account load for ${id}`);
+      });
+
+      const res = await request(app).get(`/account/${MOCK_ACCOUNT}/trustlines`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.assets[0].toml).toBeNull();
     });
   });
 
   describe("GET /transactions/:id — validation", () => {
-    it("returns 400 for an invalid account ID", async () => {
+    it("returns 400 for an invalid account ID with field-level details", async () => {
       const res = await request(app).get("/transactions/BADKEY123");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
+      expect(res.body.error.field).toBe("accountId");
+      expect(res.body.error.receivedValue).toBe("BADKEY123");
     });
 
-    it("returns 400 for an invalid limit param", async () => {
+    it("returns 400 for an invalid limit param with field-level details", async () => {
       const res = await request(app).get(
-        "/transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=999999",
+        "/transactions/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?limit=999999",
       );
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
+      expect(res.body.error.field).toBe("limit");
+      expect(res.body.error.receivedValue).toBe("999999");
     });
 
-    it("returns 400 for an invalid order param", async () => {
+    it("returns 400 for an invalid order param with field-level details", async () => {
       const res = await request(app).get(
         "/transactions/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?order=invalid",
       );
@@ -74,11 +197,13 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.message).toContain("asc");
       expect(res.body.error.message).toContain("desc");
+      expect(res.body.error.field).toBe("order");
+      expect(res.body.error.receivedValue).toBe("invalid");
     });
   });
 
   describe("GET /transactions/:id/operations — validation", () => {
-    it("returns 400 for an invalid order param", async () => {
+    it("returns 400 for an invalid order param with field-level details", async () => {
       const res = await request(app).get(
         "/transactions/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/operations?order=invalid",
       );
@@ -86,6 +211,8 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.message).toContain("asc");
       expect(res.body.error.message).toContain("desc");
+      expect(res.body.error.field).toBe("order");
+      expect(res.body.error.receivedValue).toBe("invalid");
     });
   });
 
@@ -781,6 +908,106 @@ describe("StellarKit API", () => {
     });
   });
 
+  describe("GET /utils/convert", () => {
+    it("converts XLM to stroops", async () => {
+      const res = await request(app).get("/utils/convert?xlm=1.5");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({
+        xlm: "1.5000000",
+        stroops: 15000000,
+      });
+    });
+
+    it("converts stroops to XLM", async () => {
+      const res = await request(app).get("/utils/convert?stroops=15000000");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({
+        xlm: "1.5000000",
+        stroops: 15000000,
+      });
+    });
+
+    it("returns 400 when no conversion param is provided", async () => {
+      const res = await request(app).get("/utils/convert");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 when both conversion params are provided", async () => {
+      const res = await request(app).get("/utils/convert?xlm=1&stroops=10000000");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for negative values", async () => {
+      const xlmRes = await request(app).get("/utils/convert?xlm=-1");
+      const stroopsRes = await request(app).get("/utils/convert?stroops=-1");
+
+      expect(xlmRes.statusCode).toBe(400);
+      expect(xlmRes.body.success).toBe(false);
+      expect(stroopsRes.statusCode).toBe(400);
+      expect(stroopsRes.body.success).toBe(false);
+    });
+  });
+
+  describe("GET /utils/ledger-date", () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns estimated ledger close date for a valid sequence", async () => {
+      const stellarConfig = require("../src/config/stellar");
+      jest.spyOn(stellarConfig.server, "ledgers").mockReturnValue({
+        order: () => ({
+          limit: () => ({
+            call: async () => ({
+              records: [
+                {
+                  sequence: "12350",
+                  closed_at: "2026-06-02T12:00:00Z",
+                },
+              ],
+            }),
+          }),
+        }),
+      });
+
+      const res = await request(app).get("/utils/ledger-date?sequence=12345");
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveProperty("sequence", 12345);
+      expect(res.body.data).toHaveProperty("estimatedDate");
+      expect(res.body.data.estimatedDate).toBe("2026-06-02T11:59:35.000Z");
+      expect(res.body.data).toHaveProperty("note");
+      expect(res.body.data.note).toContain("approximation");
+    });
+
+    it("returns 400 for non-positive sequence values", async () => {
+      const res = await request(app).get("/utils/ledger-date?sequence=0");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns 400 for invalid sequence format", async () => {
+      const res = await request(app).get("/utils/ledger-date?sequence=abc");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+  });
+
   // ── DEX Price ──────────────────────────────────────────────────────────────
   describe("GET /dex/price/:sellAsset/:buyAsset", () => {
     const USDC_ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
@@ -1199,5 +1426,4 @@ describe("GET /account/:id/trustlines", () => {
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
   });
-});
 });

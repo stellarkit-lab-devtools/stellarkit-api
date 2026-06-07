@@ -1,8 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { server, horizonUrl, NETWORK } = require("../config/stellar");
-const { success } = require("../utils/response");
-const { networkStatusCache } = require("../utils/cache");
+const { success, toISOTimestamp } = require("../utils/response");
+const cache = require("../services/cache");
+
+const CACHE_TTL = 5; // seconds
 
 /**
  * GET /network-status
@@ -18,7 +20,7 @@ router.get("/", async (req, res, next) => {
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
-      const cached = networkStatusCache.get(cacheKey);
+      const cached = cache.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
         return success(res, cached);
@@ -34,7 +36,7 @@ router.get("/", async (req, res, next) => {
       horizonUrl,
       latestLedger: {
         sequence: latest.sequence,
-        closedAt: latest.closed_at,
+        closedAt: toISOTimestamp(latest.closed_at),
         transactionCount: latest.successful_transaction_count,
         operationCount: latest.operation_count,
         totalCoins: latest.total_coins,
@@ -52,7 +54,7 @@ router.get("/", async (req, res, next) => {
     };
 
     // Cache the response
-    networkStatusCache.set(cacheKey, data);
+    cache.set(cacheKey, data, CACHE_TTL);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

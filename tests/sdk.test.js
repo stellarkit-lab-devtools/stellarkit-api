@@ -1,6 +1,6 @@
 "use strict";
 
-const { StellarKitClient, StellarKitError } = require("../sdk/stellarkit-client");
+const StellarKitClient = require("../sdk/stellarkit-client");
 
 // Mock global fetch
 global.fetch = jest.fn();
@@ -42,7 +42,7 @@ describe("StellarKitClient", () => {
   describe("Error handling", () => {
     it("throws StellarKitError on non-200 response", async () => {
       mockFetch(404, { success: false, error: { message: "Account not found" } });
-      await expect(client.getAccount("GABC")).rejects.toThrow(StellarKitError);
+      await expect(client.getAccount("GABC")).rejects.toThrow();
     });
 
     it("StellarKitError has correct status and message", async () => {
@@ -50,32 +50,31 @@ describe("StellarKitClient", () => {
       try {
         await client.getAccount("GABC");
       } catch (err) {
-        expect(err).toBeInstanceOf(StellarKitError);
+        expect(err.name).toBe("StellarKitError");
         expect(err.status).toBe(404);
         expect(err.message).toBe("Account not found");
-        expect(err.name).toBe("StellarKitError");
       }
     });
   });
 
   describe("API key header", () => {
-    it("sends X-API-Key header when apiKey is set", async () => {
+    it("sends x-api-key header when apiKey is set", async () => {
       const c = new StellarKitClient({ baseUrl: BASE_URL, apiKey: "test-key" });
       mockFetch(200, { success: true, data: { status: "ok" } });
       await c.getHealth();
       expect(global.fetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          headers: expect.objectContaining({ "X-API-Key": "test-key" }),
+          headers: expect.objectContaining({ "x-api-key": "test-key" }),
         })
       );
     });
 
-    it("omits X-API-Key header when no apiKey", async () => {
+    it("omits x-api-key header when no apiKey", async () => {
       mockFetch(200, { success: true, data: { status: "ok" } });
       await client.getHealth();
       const headers = global.fetch.mock.calls[0][1].headers;
-      expect(headers["X-API-Key"]).toBeUndefined();
+      expect(headers["x-api-key"]).toBeUndefined();
     });
   });
 
@@ -101,7 +100,7 @@ describe("StellarKitClient", () => {
     it("calls /fee-estimate without operations", async () => {
       mockFetch(200, { success: true, data: { operationCount: 1 } });
       await client.getFeeEstimate();
-      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/fee-estimate`, expect.any(Object));
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/fee-estimate?operations=1`, expect.any(Object));
     });
 
     it("calls /fee-estimate with operations param", async () => {
@@ -121,11 +120,68 @@ describe("StellarKitClient", () => {
     });
   });
 
-  describe("getTransactions", () => {
+  describe("getAccountAge", () => {
+    it("calls /account/:id/age", async () => {
+      const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+      mockFetch(200, { success: true, data: { ageInDays: 100 } });
+      const result = await client.getAccountAge(id);
+      expect(result.ageInDays).toBe(100);
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/account/${id}/age`, expect.any(Object));
+    });
+  });
+
+  describe("getAccountXlmEquivalentBalances", () => {
+    it("calls /account/:id/balances/xlm-equivalent", async () => {
+      const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+      mockFetch(200, { success: true, data: { totalXlmEquivalent: "100" } });
+      const result = await client.getAccountXlmEquivalentBalances(id);
+      expect(result.totalXlmEquivalent).toBe("100");
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/account/${id}/balances/xlm-equivalent`, expect.any(Object));
+    });
+  });
+
+  describe("getAccountRiskScore", () => {
+    it("calls /account/:id/risk-score", async () => {
+      const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+      mockFetch(200, { success: true, data: { score: 80 } });
+      const result = await client.getAccountRiskScore(id);
+      expect(result.score).toBe(80);
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/account/${id}/risk-score`, expect.any(Object));
+    });
+  });
+
+  describe("getAccountTrustlineHealth", () => {
+    it("calls /account/:id/trustline-health", async () => {
+      const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+      mockFetch(200, { success: true, data: { trustlineCount: 2 } });
+      const result = await client.getAccountTrustlineHealth(id);
+      expect(result.trustlineCount).toBe(2);
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/account/${id}/trustline-health`, expect.any(Object));
+    });
+  });
+
+  describe("getAccountVolume", () => {
+    it("calls /account/:id/volume with default days", async () => {
+      const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+      mockFetch(200, { success: true, data: { totalTransactions: 10 } });
+      const result = await client.getAccountVolume(id);
+      expect(result.totalTransactions).toBe(10);
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/account/${id}/volume?days=30`, expect.any(Object));
+    });
+
+    it("calls /account/:id/volume with custom days", async () => {
+      const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+      mockFetch(200, { success: true, data: { totalTransactions: 5 } });
+      await client.getAccountVolume(id, 7);
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/account/${id}/volume?days=7`, expect.any(Object));
+    });
+  });
+
+  describe("getTransactionHistory", () => {
     it("calls /transactions/:id with pagination params", async () => {
       const id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
       mockFetch(200, { success: true, data: [] });
-      await client.getTransactions(id, { limit: 5, order: "asc" });
+      await client.getTransactionHistory(id, { limit: 5, order: "asc" });
       expect(global.fetch).toHaveBeenCalledWith(
         `${BASE_URL}/transactions/${id}?limit=5&order=asc`,
         expect.any(Object)
@@ -145,7 +201,7 @@ describe("StellarKitClient", () => {
     it("calls /asset/search?code=:code", async () => {
       mockFetch(200, { success: true, data: [] });
       await client.searchAssets("USDC");
-      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/asset/search?code=USDC`, expect.any(Object));
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/asset/search?code=USDC&limit=10`, expect.any(Object));
     });
   });
 });

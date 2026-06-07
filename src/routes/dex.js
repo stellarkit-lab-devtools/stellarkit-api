@@ -17,6 +17,13 @@ router.get("/arbitrage/:assetCode/:assetIssuer", async (req, res, next) => {
   try {
     const { assetCode, assetIssuer } = req.params;
 
+    // Validate asset code and issuer (if not native)
+    if (assetCode.toUpperCase() !== "XLM" || assetIssuer.toLowerCase() !== "native") {
+      // Validate inputs using shared validators
+      validateAssetCode(assetCode);
+      validateAccountId(assetIssuer);
+    }
+
     const asset = (assetCode.toUpperCase() === "XLM" && assetIssuer.toLowerCase() === "native")
       ? Asset.native()
       : new Asset(assetCode.toUpperCase(), assetIssuer);

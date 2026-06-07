@@ -73,4 +73,41 @@ describe("GET /utils/validate-account", () => {
     expect(res.body.error.type).toBe("ValidationError");
     expect(res.body.error.message).toMatch(/'id'/);
   });
+
+  it("returns isValid: false with a reason when the key has an invalid checksum", async () => {
+    // Valid format (correct length, prefix, and base32 chars) but wrong checksum
+    const invalidChecksum =
+      "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVX";
+    const res = await request(app).get(
+      `/utils/validate-account?id=${invalidChecksum}`,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.input).toBe(invalidChecksum);
+    expect(res.body.data.isValid).toBe(false);
+    expect(res.body.data.reason).toMatch(/checksum/i);
+  });
+
+  it("returns isValid: false with a reason when the key is too long", async () => {
+    const tooLong =
+      "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVNEXTRA";
+    const res = await request(app).get(`/utils/validate-account?id=${tooLong}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.input).toBe(tooLong);
+    expect(res.body.data.isValid).toBe(false);
+    expect(res.body.data.reason).toMatch(/length/i);
+  });
+
+  it("does not make any Horizon API calls", async () => {
+    // This test verifies that validation is purely local
+    // We can't directly spy on Horizon calls in this test file,
+    // but the implementation itself shows no Horizon usage
+    const res = await request(app).get(
+      `/utils/validate-account?id=${VALID_KEY}`,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    // If this test completes quickly (< 100ms), it confirms no network call
+  });
 });

@@ -4,9 +4,74 @@ const router = express.Router();
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const { Transaction, Networks, Keypair } = require("@stellar/stellar-sdk");
+const { server } = require("../config/stellar");
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
+const STROOPS_PER_XLM = 10000000n;
+const AVERAGE_LEDGER_CLOSE_SECONDS = 5;
 const { decodeMemo } = require("../utils/memo");
+
+function createValidationError(message) {
+  const err = new Error(message);
+  err.statusCode = 400;
+  err.isValidation = true;
+  return err;
+}
+
+function parseXlmToStroops(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw createValidationError("Query parameter 'xlm' must be a non-negative number.");
+  }
+
+  if (value.startsWith("-")) {
+    throw createValidationError("Query parameter 'xlm' cannot be negative.");
+  }
+
+  if (!/^\d+(?:\.\d{1,7})?$/.test(value)) {
+    throw createValidationError(
+      "Query parameter 'xlm' must be a decimal with no more than 7 fractional digits."
+    );
+  }
+
+  const [whole, fractional = ""] = value.split(".");
+  const stroops =
+    BigInt(whole) * STROOPS_PER_XLM +
+    BigInt(fractional.padEnd(7, "0"));
+
+  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw createValidationError("Converted stroop value exceeds the safe integer range.");
+  }
+
+  return Number(stroops);
+}
+
+function parseStroops(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw createValidationError("Query parameter 'stroops' must be a non-negative integer.");
+  }
+
+  if (value.startsWith("-")) {
+    throw createValidationError("Query parameter 'stroops' cannot be negative.");
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw createValidationError("Query parameter 'stroops' must be an integer.");
+  }
+
+  const stroops = BigInt(value);
+  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw createValidationError("Query parameter 'stroops' exceeds the safe integer range.");
+  }
+
+  return Number(stroops);
+}
+
+function formatStroopsToXlm(stroops) {
+  const stroopValue = BigInt(stroops);
+  const whole = stroopValue / STROOPS_PER_XLM;
+  const fractional = (stroopValue % STROOPS_PER_XLM).toString().padStart(7, "0");
+  return `${whole}.${fractional}`;
+}
 
 /**
  * GET /utils/friendbot/:accountId
@@ -134,6 +199,91 @@ router.get("/base64", (req, res, next) => {
       input: decode,
       decoded: Buffer.from(decode, "base64").toString("utf8"),
       mode: "decode",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /utils/convert?xlm={amount}
+ * GET /utils/convert?stroops={amount}
+ * Convert between XLM and stroops without hitting Horizon.
+ */
+router.get("/convert", (req, res, next) => {
+  try {
+    const { xlm, stroops } = req.query;
+    const hasXlm = xlm !== undefined;
+    const hasStroops = stroops !== undefined;
+
+    if (hasXlm && hasStroops) {
+      throw createValidationError("Provide only one of 'xlm' or 'stroops', not both.");
+    }
+
+    if (!hasXlm && !hasStroops) {
+      throw createValidationError("Provide either 'xlm' or 'stroops' query param.");
+    }
+
+    if (hasXlm) {
+      const convertedStroops = parseXlmToStroops(xlm);
+      return success(res, {
+        xlm: formatStroopsToXlm(convertedStroops),
+        stroops: convertedStroops,
+      });
+    }
+
+    const convertedStroops = parseStroops(stroops);
+    return success(res, {
+      xlm: formatStroopsToXlm(convertedStroops),
+      stroops: convertedStroops,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+function parseLedgerSequence(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw createValidationError("Query parameter 'sequence' is required and must be a positive integer.");
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw createValidationError("Query parameter 'sequence' must be a positive integer.");
+  }
+
+  const sequence = Number(value);
+  if (sequence <= 0 || !Number.isSafeInteger(sequence)) {
+    throw createValidationError("Query parameter 'sequence' must be a positive integer.");
+  }
+
+  return sequence;
+}
+
+/**
+ * GET /utils/ledger-date?sequence={sequence}
+ * Estimate the approximate date and time a Stellar ledger sequence was closed.
+ */
+router.get("/ledger-date", async (req, res, next) => {
+  try {
+    const sequence = parseLedgerSequence(req.query.sequence);
+    const latestResponse = await server.ledgers().order("desc").limit(1).call();
+    const latestLedger = latestResponse.records && latestResponse.records[0];
+
+    if (!latestLedger || !latestLedger.closed_at || !latestLedger.sequence) {
+      throw new Error("Unable to determine the latest ledger from Horizon.");
+    }
+
+    const latestSequence = Number(latestLedger.sequence);
+    const latestClosedAt = new Date(latestLedger.closed_at);
+    const sequenceDelta = latestSequence - sequence;
+    const estimatedDate = new Date(
+      latestClosedAt.getTime() - sequenceDelta * AVERAGE_LEDGER_CLOSE_SECONDS * 1000,
+    );
+
+    return success(res, {
+      sequence,
+      estimatedDate: estimatedDate.toISOString(),
+      note: "This date is an approximation based on an average Stellar ledger close time of ~5 seconds.",
     });
   } catch (err) {
     next(err);
@@ -346,4 +496,3 @@ router.get("/keypair", (req, res, next) => {
 });
 
 module.exports = router;
-

@@ -1,85 +1,75 @@
 const { StrKey } = require("@stellar/stellar-sdk");
 
-/**
- * Validate a Stellar account ID.
- *
- * @param {string} accountId - The Stellar account ID to validate.
- * @throws {Error} If the account ID is missing or invalid.
- */
+function makeValidationError(message, field, receivedValue, expectedFormat) {
+  const err = new Error(message);
+  err.isValidation = true;
+  err.field = field;
+  err.receivedValue = receivedValue !== undefined ? String(receivedValue).slice(0, 50) : undefined;
+  err.expectedFormat = expectedFormat;
+  return err;
+}
+
 function validateAccountId(accountId) {
   if (!accountId) {
-    const err = new Error("Account ID is required.");
-    err.isValidation = true;
-    throw err;
+    throw makeValidationError(
+      "Account ID is required.",
+      "accountId",
+      accountId,
+      "G... (valid Ed25519 public key)"
+    );
   }
   if (!StrKey.isValidEd25519PublicKey(accountId)) {
-    const err = new Error(
-      `Invalid Stellar account ID: "${accountId}". Must be a valid Ed25519 public key starting with "G".`,
+    throw makeValidationError(
+      `Invalid Stellar account ID. Must be a valid Ed25519 public key starting with "G".`,
+      "accountId",
+      accountId,
+      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
     );
-    err.isValidation = true;
-    throw err;
   }
 }
 
-/**
- * Validate an asset code.
- *
- * @param {string} code - The asset code to validate.
- * @throws {Error} If the asset code is missing or invalid.
- */
 function validateAssetCode(code) {
   if (!code) {
-    const err = new Error("Asset code is required.");
-    err.isValidation = true;
-    throw err;
+    throw makeValidationError(
+      "Asset code is required.",
+      "assetCode",
+      code,
+      "USDC"
+    );
   }
   if (!/^[A-Z0-9]{1,12}$/.test(code.toUpperCase())) {
-    const err = new Error(
-      `Invalid asset code: "${code}". Must be 1–12 uppercase alphanumeric characters.`,
+    throw makeValidationError(
+      `Invalid asset code. Must be 1–12 uppercase alphanumeric characters.`,
+      "assetCode",
+      code,
+      "USDC"
     );
-    err.isValidation = true;
-    throw err;
   }
 }
 
-/**
- * Validate a numeric limit and return it as an integer.
- *
- * @param {number|string} limit - The limit value to validate.
- * @param {number} [max=200] - The maximum allowed limit.
- * @returns {number} The parsed limit value.
- * @throws {Error} If the limit is not a number or is out of range.
- */
 function validateLimit(limit, max = 200) {
   const parsed = parseInt(limit);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
-    const err = new Error(`Limit must be a number between 1 and ${max}.`);
-    err.isValidation = true;
-    throw err;
+    throw makeValidationError(
+      `Limit must be a number between 1 and ${max}.`,
+      "limit",
+      limit,
+      `1–${max}`
+    );
   }
   return parsed;
 }
 
-/**
- * Validate the order query parameter.
- *
- * @param {string} order - The order value to validate ("asc" or "desc").
- * @returns {string} The validated order value.
- * @throws {Error} If the order is not "asc" or "desc".
- */
 function validateOrder(order) {
-  if (!order) {
-    // order is optional, default to "desc"
-    return "desc";
-  }
-
+  if (!order) return "desc";
   const lowerOrder = String(order).toLowerCase();
   if (!["asc", "desc"].includes(lowerOrder)) {
-    const err = new Error(
-      `Invalid order parameter: "${order}". Valid values are "asc" or "desc".`
+    throw makeValidationError(
+      `Invalid order parameter. Valid values are "asc" or "desc".`,
+      "order",
+      order,
+      "asc or desc"
     );
-    err.isValidation = true;
-    throw err;
   }
   return lowerOrder;
 }
