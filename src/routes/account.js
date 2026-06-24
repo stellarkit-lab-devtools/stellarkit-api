@@ -736,7 +736,6 @@ router.get("/:id/trustlines", async (req, res, next) => {
   }
 });
 
-router.get("/:id/summary", async (req, res, next) => {
 /**
  * GET /account/:id/sponsorship
  * Resolves the full sponsorship structure of a Stellar account.
@@ -917,8 +916,7 @@ router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => 
   } catch (err) {
     handleAccountNotFound(err, next);
   }
-},
-);
+});
 
 /**
  * GET /account/:id/trustlines

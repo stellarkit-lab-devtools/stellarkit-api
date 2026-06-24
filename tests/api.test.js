@@ -2,8 +2,7 @@ const request = require("supertest");
 const axios = require("axios");
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
-const { networkStatusCache, feeEstimateCache } = require("../src/utils/cache");
-const { server } = require("../src/config/stellar");
+const cacheService = require("../src/services/cache");
 
 describe("StellarKit API", () => {
   // Clear caches before each test
