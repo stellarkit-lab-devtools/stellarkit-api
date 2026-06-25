@@ -2,6 +2,7 @@
  * Centralised error handler middleware.
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  */
+// TODO: wire up translateHorizonError — see issue #22
 const { translateHorizonError } = require("../utils/horizonErrors");
 
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
