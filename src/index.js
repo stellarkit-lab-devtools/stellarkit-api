@@ -32,7 +32,8 @@ const PORT = process.env.PORT || 3000;
 
 // ── Security & Parsing ──────────────────────────────────────────────────────
 app.use(helmet());
-app.use(compression({ threshold: 0 }));
+// Compress responses ≥ 1 KB — skip tiny payloads where gzip headers add overhead
+app.use(compression({ threshold: 1024 }));
 app.use(cors());
 app.use(contentTypeValidator);
 app.use(bodySizeLimit);
