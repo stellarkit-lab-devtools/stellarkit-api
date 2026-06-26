@@ -36,9 +36,11 @@ function errorHandler(err, req, res, next) {
 
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const status = mappedStatus ?? err.response.status ?? 400;
+    const code = resultCode;
+    const humanMessage = translateHorizonError(resultCode);
 
     const message = horizonError.detail || horizonError.title || "Horizon Error";
-    logError(status, req, message);
+    logError(status, req, humanMessage || message);
     return res.status(status).json({
       success: false,
       error: {
@@ -47,8 +49,6 @@ function errorHandler(err, req, res, next) {
         detail: horizonError.detail || "An error occurred with the Stellar network.",
         status: horizonError.status || err.response.status,
         extras: horizonError.extras || null,
-        ...(code && { code }),
-        ...(humanMessage && { message: humanMessage }),
       },
     });
   }
