@@ -3,6 +3,7 @@ const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS, 10) / 1000 || 5;
 
 /**
  * GET /fee-estimate
@@ -23,7 +24,7 @@ router.get("/", async (req, res, next) => {
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
-      const cached = cache.get(cacheKey);
+      const cached = cacheService.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
         return success(res, cached);
@@ -105,7 +106,7 @@ router.get("/", async (req, res, next) => {
     };
 
     // Cache the response
-    cache.set(cacheKey, data, CACHE_TTL);
+    cacheService.set(cacheKey, data, CACHE_TTL);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -131,7 +132,7 @@ router.get("/surge-status", async (req, res, next) => {
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
-      const cached = cache.get(cacheKey);
+      const cached = cacheService.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
         return success(res, cached);
@@ -209,7 +210,7 @@ router.get("/surge-status", async (req, res, next) => {
     };
 
     // Cache the response (surge status can be cached briefly since it's analyzed data)
-    cache.set(cacheKey, data, CACHE_TTL);
+    cacheService.set(cacheKey, data, CACHE_TTL);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { server, horizonUrl, NETWORK } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
-const cache = require("../services/cache");
+const cacheService = require("../services/cache");
 
 const CACHE_TTL = 5; // seconds
 
