@@ -586,6 +586,72 @@ export interface AssetSearchParams {
   limit?: number
 }
 
+/**
+ * Response from GET /account/:id/signers (derived from GET /account/:id)
+ * Returns the list of signers and thresholds for a Stellar account.
+ */
+export interface AccountSignersResponse {
+  success: true
+  data: {
+    accountId: StellarPublicKey
+    signers: Signer[]
+    thresholds: Thresholds
+  }
+}
+
+/**
+ * Single trustline entry with optional TOML metadata
+ */
+export interface TrustlineEntry {
+  assetCode: string
+  assetIssuer: StellarPublicKey
+  assetType: 'credit_alphanum4' | 'credit_alphanum12'
+  balance: StellarAmount
+  limit: StellarAmount
+  buyingLiabilities: StellarAmount
+  sellingLiabilities: StellarAmount
+  isAuthorized: boolean
+  isClawbackEnabled: boolean
+  toml: unknown | null
+}
+
+/**
+ * Response from GET /account/:id/trustlines
+ * Returns all trustlines for an account with resolved TOML metadata.
+ */
+export interface AccountTrustlinesResponse {
+  success: true
+  data: TrustlineEntry[]
+  meta: {
+    count: number
+    accountId: StellarPublicKey
+  }
+}
+
+/**
+ * A single risk factor contributing to an account's risk score
+ */
+export interface RiskFactor {
+  name: string
+  value: string
+  impact: 'positive' | 'negative' | 'neutral'
+  detail: string
+}
+
+/**
+ * Response from GET /account/:id/risk-score
+ * Returns a computed risk score and contributing factors for a Stellar account.
+ */
+export interface AccountRiskScoreResponse {
+  success: true
+  data: {
+    accountId: StellarPublicKey
+    score: number
+    label: string
+    factors: RiskFactor[]
+  }
+}
+
 // ============================================================
 // MODULE DECLARATION
 // ============================================================
