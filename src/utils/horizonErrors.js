@@ -1,34 +1,47 @@
 /**
- * Plain-English translations for common Horizon error codes.
+ * Expanded Horizon operation result code translations.
+ * Covers the full set of common Stellar operation result codes.
  */
-const HORIZON_ERROR_MESSAGES = {
-  tx_bad_seq: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
-  tx_insufficient_fee: "Transaction fee is too low. Increase the fee or use the current base fee from Horizon multiplied by the number of operations.",
-  tx_bad_auth: "Transaction is missing a required signature or has an invalid signature. Sign with all required signers and verify the network passphrase.",
-  tx_no_source_account: "The source account does not exist on the network.",
-  tx_bad_auth_extra: "Transaction has too many signatures. Remove unnecessary signatures.",
-  tx_internal_error: "An internal Horizon error occurred. Try again later.",
-  tx_not_supported: "This transaction type is not supported on the current network.",
-  tx_fee_bump_inner_failed: "The inner transaction in a fee-bump transaction failed.",
-  op_no_destination: "The destination account does not exist. Create the account first with a createAccount operation.",
-  op_no_trust: "The destination account does not have a trustline for this asset. The destination must create a trustline before receiving the asset.",
-  op_line_full: "The destination trustline is full. The destination account must raise its trustline limit or reduce the payment amount.",
-  op_underfunded: "The source account does not have enough funds. Add funds or reduce the operation amount.",
-  op_low_reserve: "The operation would leave the account below the minimum XLM reserve. Keep more XLM in the account or remove unused subentries.",
-  op_bad_auth: "The operation is missing a required authorization or has an invalid signature.",
-  op_no_account: "The account does not exist on the network.",
-  op_not_authorized: "The source account is not authorized to perform this operation on the given asset.",
-  op_malformed: "The operation is malformed or contains invalid parameters.",
+
+const horizonErrors = {
+  // Payment / path payment
+  op_malformed: { code: 'op_malformed', message: 'Operation is malformed', hint: 'Check operation parameters are valid' },
+  op_underfunded: { code: 'op_underfunded', message: 'Source account has insufficient balance', hint: 'Add funds to your account' },
+  op_src_no_trust: { code: 'op_src_no_trust', message: 'Source account has no trustline for asset', hint: 'Create a trustline before sending this asset' },
+  op_src_not_authorized: { code: 'op_src_not_authorized', message: 'Source account not authorized to send asset', hint: 'Contact the asset issuer to authorize your account' },
+  op_no_destination: { code: 'op_no_destination', message: 'Destination account does not exist', hint: 'Create the destination account first or check the address' },
+  op_no_trust: { code: 'op_no_trust', message: 'Destination has no trustline for asset', hint: 'Ask the recipient to add a trustline for this asset' },
+  op_line_full: { code: 'op_line_full', message: 'Destination trustline is full', hint: 'Recipient cannot receive more of this asset' },
+  op_no_issuer: { code: 'op_no_issuer', message: 'Asset issuer does not exist', hint: 'Check the asset issuer address is valid' },
+  op_not_authorized: { code: 'op_not_authorized', message: 'Account not authorized for this operation', hint: 'Ensure the account has the required authorization flags' },
+  op_low_reserve: { code: 'op_low_reserve', message: 'Account has insufficient XLM reserve', hint: 'Add at least 0.5 XLM per additional subentry' },
+  // Offers / DEX
+  op_cross_self: { code: 'op_cross_self', message: 'Offer would cross one of your existing offers', hint: 'Cancel conflicting offers before placing this one' },
+  op_sell_no_trust: { code: 'op_sell_no_trust', message: 'No trustline for asset being sold', hint: 'Create a trustline for the sell asset' },
+  op_buy_no_trust: { code: 'op_buy_no_trust', message: 'No trustline for asset being bought', hint: 'Create a trustline for the buy asset' },
+  op_sell_not_authorized: { code: 'op_sell_not_authorized', message: 'Not authorized to sell this asset', hint: 'Contact the asset issuer for authorization' },
+  op_buy_not_authorized: { code: 'op_buy_not_authorized', message: 'Not authorized to buy this asset', hint: 'Contact the asset issuer for authorization' },
+  op_offer_not_found: { code: 'op_offer_not_found', message: 'Offer not found', hint: 'The offer may have already been filled or cancelled' },
+  op_offer_low_amount: { code: 'op_offer_low_amount', message: 'Offer amount too low', hint: 'Increase the offer amount' },
+  // Trustlines
+  op_invalid_limit: { code: 'op_invalid_limit', message: 'Invalid trustline limit', hint: 'Limit must be >= current balance and >= 0' },
+  op_low_reserve_change: { code: 'op_low_reserve', message: 'Insufficient reserve for this change', hint: 'Ensure minimum XLM reserve is maintained' },
+  // Account
+  op_already_exists: { code: 'op_already_exists', message: 'Account already exists', hint: 'The destination account has already been created' },
+  op_success: { code: 'op_success', message: 'Operation succeeded', hint: null },
 };
 
 /**
- * Translate a Horizon error code to a plain-English message.
- *
- * @param {string} code - Horizon result code (e.g. "tx_bad_seq")
- * @returns {string|null} Human-readable message, or null if not found
+ * Translate a Horizon operation result code to a human-readable message.
+ * @param {string} code - Horizon result code
+ * @returns {{ code: string, message: string, hint: string|null }}
  */
-function translateHorizonError(code) {
-  return HORIZON_ERROR_MESSAGES[code] || null;
-}
+const translateHorizonError = (code) => {
+  return horizonErrors[code] || {
+    code,
+    message: `Unknown Horizon error: ${code}`,
+    hint: 'Check the Stellar documentation for this result code',
+  };
+};
 
-module.exports = { translateHorizonError, HORIZON_ERROR_MESSAGES };
+module.exports = { translateHorizonError, horizonErrors };
