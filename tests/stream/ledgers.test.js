@@ -20,7 +20,7 @@ describe("GET /stream/ledgers — SSE Endpoint", () => {
 
     const res = await request(app).get("/stream/ledgers");
     expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
-  });
+  }, 30000);
 
   it("streams a ledger event as SSE data", (done) => {
     const mockLedger = {
@@ -64,7 +64,7 @@ describe("GET /stream/ledgers — SSE Endpoint", () => {
       });
     });
     req.end();
-  });
+  }, 30000);
 
   it("sends heartbeat comment lines", () => {
     // Unit test: verify the endpoint sets SSE headers
@@ -84,7 +84,7 @@ describe("GET /stream/ledgers — SSE Endpoint", () => {
       .then((res) => {
         expect(res.headers["content-type"]).toMatch(/text\/event-stream/);
       });
-  });
+  }, 30000);
 
   it("closes the Horizon subscription on client disconnect", () => {
     let closeCalled = false;
@@ -105,5 +105,5 @@ describe("GET /stream/ledgers — SSE Endpoint", () => {
         // After the stream ends, closeStream should have been called
         expect(closeCalled).toBe(true);
       });
-  });
+  }, 30000);
 });

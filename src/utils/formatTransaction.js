@@ -10,7 +10,7 @@ function formatTransaction(tx) {
   return {
     id: tx.id,
     hash: tx.hash,
-    ledger: tx.ledger,
+    ledger: typeof tx.ledger === "number" ? tx.ledger : tx.ledger_attr,
     created_at: toISOTimestamp(tx.created_at),
     source_account: tx.source_account,
     fee_charged: tx.fee_charged,

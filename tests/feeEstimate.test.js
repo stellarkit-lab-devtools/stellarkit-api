@@ -1,5 +1,5 @@
 const request = require('supertest');
-const { feeEstimateCache } = require('../src/utils/cache');
+const cacheService = require('../src/services/cache');
 
 let app;
 let server;
@@ -20,7 +20,7 @@ describe('GET /fee-estimate', () => {
 
     ({ server } = require('../src/config/stellar'));
     app = require('../src/index');
-    feeEstimateCache.clear();
+    cacheService.flush();
   });
 
   it('includes new fields in the response', async () => {

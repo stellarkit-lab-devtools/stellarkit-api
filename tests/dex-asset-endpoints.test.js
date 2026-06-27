@@ -18,7 +18,16 @@ jest.mock("../src/config/stellar", () => {
 });
 
 // Mock axios for stellar.toml fetching
-jest.mock("axios");
+jest.mock("axios", () => ({
+    create: jest.fn(() => ({
+        interceptors: {
+            response: {
+                use: jest.fn(),
+            },
+        },
+    })),
+    get: jest.fn(),
+}));
 const axios = require("axios");
 
 describe("DEX and Asset Endpoints Test Suite", () => {

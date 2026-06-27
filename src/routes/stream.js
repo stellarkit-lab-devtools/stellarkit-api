@@ -308,4 +308,62 @@ router.get("/payments/:id", async (req, res, next) => {
   });
 });
 
+/**
+ * GET /stream/ledgers
+ * Server-Sent Events endpoint that streams real-time live Stellar ledger updates.
+ */
+router.get("/ledgers", async (req, res, next) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+  });
+
+  // Send initial keep-alive comment line
+  res.write(": keep-alive\n\n");
+
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded || res.destroyed) {
+      clearInterval(heartbeat);
+      return;
+    }
+    res.write(": keep-alive\n\n");
+  }, 15000);
+
+  let closeHorizonStream;
+
+  try {
+    closeHorizonStream = server.ledgers().cursor("now").stream({
+      onmessage: (ledger) => {
+        if (res.writableEnded || res.destroyed) return;
+        res.write(`data: ${JSON.stringify({
+          sequence: ledger.sequence,
+          closedAt: ledger.closed_at,
+          baseFee: ledger.base_fee_in_stroops || ledger.base_fee,
+          transactionCount: ledger.successful_transaction_count,
+          operationCount: ledger.operation_count,
+        })}\n\n`);
+      },
+      onerror: (err) => {
+        clearInterval(heartbeat);
+        if (!res.writableEnded && !res.destroyed) res.end();
+        if (typeof closeHorizonStream === "function") {
+          closeHorizonStream();
+        }
+      }
+    });
+  } catch (err) {
+    clearInterval(heartbeat);
+    if (!res.writableEnded && !res.destroyed) res.end();
+    return;
+  }
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    if (typeof closeHorizonStream === "function") {
+      closeHorizonStream();
+    }
+  });
+});
+
 module.exports = router;

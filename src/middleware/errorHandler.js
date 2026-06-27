@@ -34,6 +34,8 @@ function errorHandler(err, req, res, next) {
       horizonError?.extras?.result_codes?.operations?.[0] ??
       null;
 
+    const code = resultCode;
+    const humanMessage = translateHorizonError(resultCode);
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const status = mappedStatus ?? err.response.status ?? 400;
 

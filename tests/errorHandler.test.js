@@ -43,6 +43,8 @@ describe("ErrorHandler Middleware", () => {
           detail: "The transaction failed due to bad sequence.",
           status: 400,
           extras: err.response.data.extras,
+          code: "tx_bad_seq",
+          message: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
         },
       });
     });
@@ -74,6 +76,8 @@ describe("ErrorHandler Middleware", () => {
           detail: "The destination account was not found.",
           status: 400,
           extras: err.response.data.extras,
+          code: "op_no_destination",
+          message: "The destination account does not exist. Create the account first with a createAccount operation.",
         },
       });
     });
@@ -105,6 +109,7 @@ describe("ErrorHandler Middleware", () => {
           detail: "An unknown result code was returned.",
           status: 418,
           extras: err.response.data.extras,
+          code: "tx_unknown_code_example",
         },
       });
     });

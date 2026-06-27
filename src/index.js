@@ -64,6 +64,7 @@ app.use(apiKeyMiddleware);
 
 // ── API Routes ───────────────────────────────────────────────────────────────
 app.use("/network-status", networkStatusRouter);
+app.use("/network", networkStatusRouter);
 app.use("/fee-estimate", feeEstimateRouter);
 const accountCounterpartiesRouter = require("./routes/account.counterparties");
 app.use("/account", accountRouter);

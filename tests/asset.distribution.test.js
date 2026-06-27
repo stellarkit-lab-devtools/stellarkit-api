@@ -61,7 +61,7 @@ describe("Asset Distribution API", () => {
             call: jest.fn().mockResolvedValue({ records: [] }),
         });
 
-        const res = await request(app).get(`/asset/FAKE/GA.../distribution`);
+        const res = await request(app).get(`/asset/FAKE/${ASSET_ISSUER}/distribution`);
         expect(res.statusCode).toBe(404);
     });
 });

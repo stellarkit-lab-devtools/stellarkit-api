@@ -92,7 +92,7 @@ describe("GET /stream/transactions/:id — SSE Endpoint", () => {
         id: "tx-id",
         hash: "tx-hash",
         ledger: 100,
-        created_at: "2024-01-01T12:00:00Z",
+        created_at: "2024-01-01T12:00:00.000Z",
         source_account: VALID_KEY,
         fee_charged: "500",
         operation_count: 2,

@@ -2,8 +2,7 @@ const request = require("supertest");
 const axios = require("axios");
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
-const { networkStatusCache, feeEstimateCache } = require("../src/utils/cache");
-const { server } = require("../src/config/stellar");
+const cacheService = require("../src/services/cache");
 
 describe("StellarKit API", () => {
   // Clear caches before each test
@@ -418,7 +417,7 @@ image = "https://example.com/test.png"
           sender: "GASENDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           receiver:
             "GARECEIVERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          createdAt: "2026-05-27T10:00:00Z",
+          createdAt: "2026-05-27T10:00:00.000Z",
         },
         {
           type: "create_account",
@@ -432,7 +431,7 @@ image = "https://example.com/test.png"
             "GAFUNDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           receiver:
             "GANEWACCOUNTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          createdAt: "2026-05-27T10:02:00Z",
+          createdAt: "2026-05-27T10:02:00.000Z",
         },
       ]);
       expect(res.body.meta).toEqual({

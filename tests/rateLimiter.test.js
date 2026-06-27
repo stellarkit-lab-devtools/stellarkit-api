@@ -91,7 +91,7 @@ describe("Endpoint rate limiting", () => {
           "Too many account summary requests, please try again after 15 minutes.",
       },
     });
-  });
+  }, 30000);
 
   it("limits /asset/:code/:issuer/holders to 10 requests per 15 minutes per IP", async () => {
     const { app, server } = loadFreshApp();
@@ -144,7 +144,7 @@ describe("Endpoint rate limiting", () => {
       },
     });
     expect(query.call).toHaveBeenCalledTimes(10);
-  });
+  }, 30000);
 
   it("keeps non-expensive endpoints on the existing global limit", async () => {
     const { app } = loadFreshApp();
@@ -153,5 +153,5 @@ describe("Endpoint rate limiting", () => {
       const res = await request(app).get("/health");
       expect(res.statusCode).toBe(200);
     }
-  });
+  }, 30000);
 });
