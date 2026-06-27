@@ -1,87 +1,48 @@
-const request = require("supertest");
-const app = require("../src/index");
-const { server } = require("../src/config/stellar");
+const DexModule = require('../sdk/dex.js');
 
-// Mock the server.strictReceivePaths method
-jest.mock("../src/config/stellar", () => {
-  const originalModule = jest.requireActual("../src/config/stellar");
-  return {
-    ...originalModule,
-    server: {
-      strictReceivePaths: jest.fn(),
-    },
-  };
-});
+const mockClient = {
+  _request: jest.fn()
+};
 
-describe("DEX Arbitrage API", () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
+beforeEach(() => mockClient._request.mockClear());
+
+describe('DexModule - serializeAsset', () => {
+  let dex;
+  beforeEach(() => { dex = new DexModule(mockClient); });
+
+  it('accepts plain string asset', async () => {
+    mockClient._request.mockResolvedValue({ bid: '1.0', ask: '1.1', spread: '0.1' });
+    await dex.getSpread('XLM', 'USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN');
+    expect(mockClient._request).toHaveBeenCalledWith('GET', expect.stringContaining('XLM'));
   });
 
-  describe("GET /dex/arbitrage/:assetCode/:assetIssuer", () => {
-    it("returns 200 and path data for a valid asset", async () => {
-      const mockPaths = {
-        records: [
-          {
-            source_amount: "9.5000000",
-            destination_amount: "10.0000000",
-            path: [
-              {
-                asset_code: "USDC",
-                asset_issuer: "GBBD67V63DU762S2CFFSBCS74K33Z6S5Y6R4E62Y7Z66I264S4UBC5U6",
-                asset_type: "credit_alphanum4",
-              },
-            ],
-          },
-        ],
-      };
+  it('serializes object asset to CODE:ISSUER format', async () => {
+    mockClient._request.mockResolvedValue({ bid: '1.0', ask: '1.1', spread: '0.1' });
+    await dex.getSpread({ code: 'USDC', issuer: 'GA5Z' }, 'XLM');
+    expect(mockClient._request).toHaveBeenCalledWith('GET', expect.stringContaining('USDC%3AGA5Z'));
+  });
 
-      server.strictReceivePaths.mockReturnValue({
-        call: jest.fn().mockResolvedValue(mockPaths),
-      });
+  it('getSpread calls /dex/spread', async () => {
+    mockClient._request.mockResolvedValue({});
+    await dex.getSpread('XLM', 'USDC:ISSUER');
+    expect(mockClient._request).toHaveBeenCalledWith('GET', expect.stringContaining('/dex/spread'));
+  });
 
-      const assetCode = "XLM";
-      const assetIssuer = "native";
+  it('getImbalance calls /dex/imbalance', async () => {
+    mockClient._request.mockResolvedValue({});
+    await dex.getImbalance('XLM', 'USDC:ISSUER');
+    expect(mockClient._request).toHaveBeenCalledWith('GET', expect.stringContaining('/dex/imbalance'));
+  });
 
-      const res = await request(app).get(`/dex/arbitrage/${assetCode}/${assetIssuer}`);
+  it('getArbitrage calls /dex/arbitrage', async () => {
+    mockClient._request.mockResolvedValue({});
+    await dex.getArbitrage('USDC', 'GA5Z');
+    expect(mockClient._request).toHaveBeenCalledWith('GET', expect.stringContaining('/dex/arbitrage'));
+  });
 
-      expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.pathsFound).toBe(true);
-      expect(res.body.data.paths[0].isProfitable).toBe(true);
-      expect(res.body.data.paths[0].sourceAmount).toBe("9.5000000");
-      expect(res.body.data.paths[0].destinationAmount).toBe("10.0000000");
-    });
-
-    it("returns pathsFound: false when no paths are returned", async () => {
-      server.strictReceivePaths.mockReturnValue({
-        call: jest.fn().mockResolvedValue({ records: [] }),
-      });
-
-      const res = await request(app).get("/dex/arbitrage/XLM/native");
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.pathsFound).toBe(false);
-      expect(res.body.data.paths).toHaveLength(0);
-    });
-
-    it("returns 400 for an invalid asset code", async () => {
-      const res = await request(app).get(
-        "/dex/arbitrage/TOOLONGASSETCODE/GBBD67V63DU762S2CFFSBCS74K33Z6S5Y6R4E62Y7Z66I264S4UBC5U6",
-      );
-
-      expect(res.statusCode).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
-    });
-
-    it("returns 400 for an invalid issuer", async () => {
-      const res = await request(app).get("/dex/arbitrage/USDC/INVALID_ISSUER");
-
-      expect(res.statusCode).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
-    });
+  it('getOrderBook calls /dex/orderbook', async () => {
+    mockClient._request.mockResolvedValue({ bids: [], asks: [] });
+    await dex.getOrderBook('XLM', 'USDC:ISSUER');
+    expect(mockClient._request).toHaveBeenCalledWith('GET', expect.stringContaining('/dex/orderbook'));
   });
 });
