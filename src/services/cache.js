@@ -1,56 +1,89 @@
-const NodeCache = require("node-cache");
+/**
+ * In-memory cache service for StellarKit.
+ *
+ * Strategy: simple key-value store with TTL-based expiry.
+ * Keys are strings — callers use a consistent naming convention
+ * such as `endpoint:param1:param2` (e.g. `account:GABC:balance`).
+ * Values are stored as serialised JSON to allow any payload type.
+ *
+ * Limitations:
+ * - Single-process only (no shared cache across instances)
+ * - No persistence across restarts
+ * - Memory grows until keys expire; no max-size eviction
+ */
+const cache = new Map();
 
 /**
- * Centralised in-memory TTL cache service.
- * Used to cache Horizon responses and other frequently requested data.
+ * Store a value in the cache under the given key.
+ *
+ * @param {string} key   - Cache key, format: `scope:identifier[...params]`
+ * @param {*}      value - Any JSON-serialisable value to cache
+ * @param {number} ttlMs - Time-to-live in milliseconds; the entry is
+ *                         automatically removed after this duration.
+ *                         Use 0 to cache indefinitely (not recommended
+ *                         for live Horizon data that changes frequently).
  */
-class CacheService {
-  constructor(defaultTtlSeconds = 60) {
-    this.cache = new NodeCache({
-      stdTTL: defaultTtlSeconds,
-      checkperiod: defaultTtlSeconds * 0.2,
-      useClones: false, // For performance since we're just caching JSON response data
-    });
-  }
-
-  /**
-   * Get a value from the cache.
-   * 
-   * @param {string} key - Cache key
-   * @returns {any|undefined} Cached value or undefined if missing/expired
-   */
-  get(key) {
-    return this.cache.get(key);
-  }
-
-  /**
-   * Set a value in the cache with a specific TTL.
-   * 
-   * @param {string} key - Cache key
-   * @param {any} value - Value to cache
-   * @param {number} ttlSeconds - TTL in seconds
-   * @returns {boolean} True if successfully set
-   */
-  set(key, value, ttlSeconds) {
-    return this.cache.set(key, value, ttlSeconds);
-  }
-
-  /**
-   * Delete a specific key from the cache.
-   * 
-   * @param {string} key - Cache key
-   */
-  delete(key) {
-    this.cache.del(key);
-  }
-
-  /**
-   * Flush all data from the cache.
-   */
-  flush() {
-    this.cache.flushAll();
+export function set(key, value, ttlMs) {
+  const expiresAt = ttlMs > 0 ? Date.now() + ttlMs : Infinity;
+  cache.set(key, { value, expiresAt });
+  if (ttlMs > 0) {
+    // Schedule removal so the map never grows without bound.
+    // clearTimeout is not called on overwrite; the stale timer fires
+    // harmlessly on an already-removed key.
+    setTimeout(() => cache.delete(key), ttlMs);
   }
 }
 
-// Export a singleton instance
-module.exports = new CacheService();
+/**
+ * Retrieve a cached value.
+ *
+ * Returns `undefined` if the key does not exist or has expired.
+ * Expired entries are deleted on first access to free memory eagerly.
+ *
+ * @param {string} key - Cache key to look up
+ * @returns {*} The cached value, or `undefined` on miss/expiry
+ */
+export function get(key) {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) {
+    // Eager eviction: remove the expired entry so it does not
+    // accumulate memory beyond its TTL if the setTimeout fires late.
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+/**
+ * Remove a single entry from the cache.
+ *
+ * Useful for explicit invalidation after a write operation,
+ * for example after an account mutation to force a fresh fetch.
+ *
+ * @param {string} key - Cache key to delete
+ */
+export function del(key) {
+  cache.delete(key);
+}
+
+/**
+ * Remove all entries from the cache.
+ *
+ * Use with care in production — this will cause a thundering-herd
+ * of Horizon requests immediately after the flush.
+ */
+export function flush() {
+  cache.clear();
+}
+
+/**
+ * Return the number of entries currently held in the cache.
+ * Includes entries that have logically expired but not yet been
+ * evicted by a get() call or their setTimeout.
+ *
+ * @returns {number}
+ */
+export function size() {
+  return cache.size;
+}
