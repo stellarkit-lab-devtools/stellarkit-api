@@ -47,12 +47,7 @@ function errorHandler(err, req, res, next) {
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const httpStatus = mappedStatus ?? err.response.status ?? 400;
 
-    const code = resultCode || null;
-    const humanMessage = translateHorizonError(resultCode);
-
-    const message = horizonError.detail || horizonError.title || "Horizon Error";
-    logError(status, req, message);
-    return res.status(status).json({
+    const body = {
       success: false,
       error: {
         type: "HorizonError",
