@@ -166,11 +166,39 @@ describe("StellarKit API", () => {
     it("returns API info and endpoint list", async () => {
       const res = await request(app).get("/");
       expect(res.statusCode).toBe(200);
+
       expect(res.body.success).toBe(true);
-      expect(res.body.data.endpoints).toBeInstanceOf(Array);
-      expect(res.body.data.endpoints.length).toBeGreaterThan(0);
+      expect(res.body).toHaveProperty("data");
+
+      const { data } = res.body;
+      expect(data).toHaveProperty("name");
+      expect(typeof data.name).toBe("string");
+
+      expect(data).toHaveProperty("description");
+      expect(typeof data.description).toBe("string");
+
+      expect(data).toHaveProperty("version");
+      expect(typeof data.version).toBe("string");
+      expect(data.version.length).toBeGreaterThan(0);
+
+      expect(data).toHaveProperty("network");
+      expect(["testnet", "mainnet"]).toContain(data.network);
+
+      expect(data).toHaveProperty("endpoints");
+      expect(Array.isArray(data.endpoints)).toBe(true);
+      expect(data.endpoints.length).toBeGreaterThan(0);
+
+      // Validate endpoint entries shape (at least one entry)
+      const first = data.endpoints[0];
+      expect(first).toHaveProperty("method");
+      expect(typeof first.method).toBe("string");
+      expect(first).toHaveProperty("path");
+      expect(typeof first.path).toBe("string");
+      expect(first).toHaveProperty("description");
+      expect(typeof first.description).toBe("string");
     });
   });
+
 
   // ── 404 ───────────────────────────────────────────────────────────────────
   describe("Unknown routes", () => {

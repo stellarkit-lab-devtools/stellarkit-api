@@ -71,6 +71,15 @@ try {
     }
     getAge(id) { return this._get(`/account/${id}/age`); }
     getRiskScore(id) { return this._get(`/account/${id}/risk-score`); }
+    getAccountData(id) { return this.getAccount(id); }
+    getOffers(id, options) {
+      const params = new URLSearchParams();
+      if (options?.limit !== undefined) params.set("limit", String(options.limit));
+      if (options?.cursor) params.set("cursor", options.cursor);
+      const query = params.toString();
+      const path = `/account/${id}/offers${query ? `?${query}` : ""}`;
+      return this._get(path);
+    }
   };
 }
 
@@ -156,6 +165,21 @@ const PAYMENTS_DATA = {
   total: 1,
   limit: 10,
   cursor: "12345",
+};
+
+const OFFERS_DATA = {
+  items: [
+    {
+      id: "123",
+      selling: { assetType: "native", assetCode: "XLM", assetIssuer: null, amount: "100.0000000" },
+      buying: { assetType: "credit_alphanum4", assetCode: "USDC", assetIssuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" },
+      price: "1.5",
+      lastModifiedLedger: 12345,
+    },
+  ],
+  total: 1,
+  limit: 10,
+  cursor: "54321",
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -378,6 +402,56 @@ describe("AccountModule", () => {
     it("throws StellarKitError on failure", async () => {
       mockFetch(500, { success: false, error: { message: "Server error", type: "SERVER_ERROR" } });
       await expect(module.getRiskScore(ACCOUNT_ID)).rejects.toThrow(StellarKitError);
+    });
+  });
+
+  // ── getAccountData ────────────────────────────────────────────────────────
+
+  describe("getAccountData", () => {
+    it("calls GET /account/:id and resolves data (alias for getAccount)", async () => {
+      mockFetch(200, { success: true, data: ACCOUNT_DATA });
+      const data = await module.getAccountData(ACCOUNT_ID);
+      expect(data.accountId).toBe(ACCOUNT_ID);
+      expect(data.signers).toHaveLength(1);
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}`,
+        expect.any(Object),
+      );
+    });
+
+    it("throws StellarKitError on failure", async () => {
+      mockFetch(404, { success: false, error: { message: "Not found", type: "NOT_FOUND" } });
+      await expect(module.getAccountData(ACCOUNT_ID)).rejects.toThrow(StellarKitError);
+    });
+  });
+
+  // ── getOffers ──────────────────────────────────────────────────────────────
+
+  describe("getOffers", () => {
+    it("calls GET /account/:id/offers and resolves data", async () => {
+      mockFetch(200, { success: true, data: OFFERS_DATA });
+      const data = await module.getOffers(ACCOUNT_ID);
+      expect(data.items).toHaveLength(1);
+      expect(data.total).toBe(1);
+      expect(data.items[0].id).toBe("123");
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/offers`,
+        expect.any(Object),
+      );
+    });
+
+    it("passes limit and cursor as query params", async () => {
+      mockFetch(200, { success: true, data: OFFERS_DATA });
+      await module.getOffers(ACCOUNT_ID, { limit: 50, cursor: "abc123" });
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/offers?limit=50&cursor=abc123`,
+        expect.any(Object),
+      );
+    });
+
+    it("throws StellarKitError on failure", async () => {
+      mockFetch(404, { success: false, error: { message: "Not found", type: "NOT_FOUND" } });
+      await expect(module.getOffers(ACCOUNT_ID)).rejects.toThrow(StellarKitError);
     });
   });
 

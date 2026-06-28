@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 
 const { server, fetchAccountCreation, NETWORK } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
@@ -20,10 +22,10 @@ const { Asset } = require("@stellar/stellar-sdk");
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
 
-function validateLimit(limit, max = 200) {
+function validateLimit(limit, max = 100) {
   const n = Number(limit);
   if (!Number.isInteger(n) || n <= 0 || n > max) {
-    const err = new Error(`limit must be an integer between 1 and ${max}`);
+    const err = new Error(`limit must be between 1 and ${max}`);
     err.status = 400;
     err.field = "limit";
     err.receivedValue = String(limit);
@@ -224,13 +226,22 @@ router.get("/:id/sequence", async (req, res, next) => {
 
 /**
  * GET /account/:id/payments
+ * Returns payment and create_account operations with full asset detail (including TOML metadata).
  */
 router.get("/:id/payments", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
 
-    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+
+    // Optional asset filters — both are independently optional:
+    //   ?assetCode=USDC              → match any issuer of USDC
+    //   ?assetCode=USDC&assetIssuer=GA... → exact asset match
+    const filterCode = req.query.assetCode
+      ? req.query.assetCode.toUpperCase()
+      : null;
+    const filterIssuer = req.query.assetIssuer || null;
 
     let query = server.operations().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
@@ -238,32 +249,78 @@ router.get("/:id/payments", async (req, res, next) => {
     const opResponse = await query.call();
     const rawRecords = opResponse.records || [];
 
+    const issuerCache = new Map();
+    const tomlCache = new Map();
+
     const paymentOps = [];
-    rawRecords.forEach((op) => {
+    for (const op of rawRecords) {
       if (op.type === "payment" || op.type === "create_account") {
         const isPayment = op.type === "payment";
+        const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
+        const assetIssuer = isPayment ? op.asset_issuer || null : null;
+
+        // Apply assetCode filter (case-insensitive, already uppercased above)
+        if (filterCode && assetCode.toUpperCase() !== filterCode) return;
+
+        // Apply assetIssuer filter only when both params are provided
+        if (filterCode && filterIssuer && assetIssuer !== filterIssuer) return;
+        const assetType = isPayment ? op.asset_type || "native" : "native";
+
+        let assetDetail = {
+          code: assetCode,
+          issuer: assetIssuer,
+          type: assetType,
+        };
+
+        if (assetType !== "native" && assetIssuer) {
+          if (!issuerCache.has(assetIssuer)) {
+            issuerCache.set(
+              assetIssuer,
+              server
+                .loadAccount(assetIssuer)
+                .then((a) => a.home_domain || null)
+                .catch(() => null),
+            );
+          }
+
+          const homeDomain = await issuerCache.get(assetIssuer);
+
+          if (homeDomain) {
+            if (!tomlCache.has(homeDomain)) {
+              tomlCache.set(homeDomain, homeDomain);
+            }
+            try {
+              const toml = await getAssetMetadataFromToml(homeDomain, assetCode);
+              if (toml) {
+                assetDetail = { ...assetDetail, toml };
+              }
+            } catch (_) {
+              // TOML resolution failed, keep basic asset detail
+            }
+          }
+        }
+
         paymentOps.push({
           type: op.type,
           amount: isPayment ? op.amount : op.starting_balance,
           asset: {
-            code: isPayment ? op.asset_code || "XLM" : "XLM",
-            issuer: isPayment ? op.asset_issuer || null : null,
+            code: assetCode,
+            issuer: assetIssuer,
             type: isPayment ? op.asset_type || "native" : "native",
           },
+          asset: assetDetail,
           sender: isPayment ? op.from : op.funder,
           receiver: isPayment ? op.to : op.account,
           createdAt: toISOTimestamp(op.created_at),
         });
       }
-    });
+    }
 
     const lastIdx = rawRecords.length ? rawRecords.length - 1 : -1;
     const nextCursor =
       rawRecords[lastIdx] && rawRecords[lastIdx].paging_token
         ? rawRecords[lastIdx].paging_token
         : null;
-
-    const hasMore = rawRecords.length === limit;
 
     return success(res, {
       items: paymentOps,
@@ -284,7 +341,7 @@ router.get("/:id/offers", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
+    const limit = validateLimit(req.query.limit ?? 20);
     const cursor = req.query.cursor || undefined;
 
     let query = server.offers().forAccount(id).limit(limit);
@@ -292,6 +349,7 @@ router.get("/:id/offers", async (req, res, next) => {
 
     const offerResponse = await query.call();
     const offers = (offerResponse.records || []).map((offer) => {
+      // Normalise asset fields to a consistent camelCase shape.
       const buildAsset = (assetType, assetCode, assetIssuer) => {
         if (assetType === "native") {
           return { assetType: "native", assetCode: "XLM", assetIssuer: null };
@@ -299,22 +357,36 @@ router.get("/:id/offers", async (req, res, next) => {
         return { assetType, assetCode, assetIssuer };
       };
 
+      // Derive a single decimal price string from price_r (n/d fraction) when
+      // available, falling back to the pre-computed price string from Horizon.
+      // Always format to 7 decimal places for consistency with other amounts.
+      let priceDecimal;
+      if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+        priceDecimal = (Number(offer.price_r.n) / Number(offer.price_r.d)).toFixed(7);
+      } else {
+        priceDecimal = parseFloat(offer.price || "0").toFixed(7);
+      }
+
       return {
         id: offer.id,
+        seller: offer.seller,
         selling: {
           ...buildAsset(
             offer.selling_asset_type,
             offer.selling_asset_code,
             offer.selling_asset_issuer,
           ),
-          amount: offer.amount,
+          // Format to 7 decimal places (Stellar precision standard)
+          amount: parseFloat(offer.amount || "0").toFixed(7),
         },
         buying: buildAsset(
           offer.buying_asset_type,
           offer.buying_asset_code,
           offer.buying_asset_issuer,
         ),
-        price: offer.price,
+        // price is a 7-decimal string derived from the price_r fraction
+        price: priceDecimal,
+        // camelCase rename of last_modified_ledger
         lastModifiedLedger: offer.last_modified_ledger,
       };
     });
@@ -327,6 +399,118 @@ router.get("/:id/offers", async (req, res, next) => {
     return success(res, {
       items: offers,
       total: offers.length,
+      limit,
+      cursor: nextCursor,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/claimable-balances
+ * Returns claimable balances for an account, categorized by claimability.
+ */
+router.get("/:id/claimable-balances", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limit = validateLimit(req.query.limit || 200, 200);
+    const cursor = req.query.cursor || undefined;
+
+    let query = server.claimableBalances().forClaimant(id).limit(limit);
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    function evaluatePredicate(predicate) {
+      if (predicate.unconditional) {
+        return { canClaim: true, reason: "The balance is claimable unconditionally." };
+      }
+
+      if (predicate.not) {
+        const res = evaluatePredicate(predicate.not);
+        return { canClaim: !res.canClaim, reason: `NOT (${res.reason})` };
+      }
+
+      if (predicate.and) {
+        const results = predicate.and.map(p => evaluatePredicate(p));
+        const canClaim = results.every(r => r.canClaim);
+        return {
+          canClaim,
+          reason: canClaim ? `All conditions met` : `Some conditions failed`,
+        };
+      }
+
+      if (predicate.or) {
+        const results = predicate.or.map(p => evaluatePredicate(p));
+        const canClaim = results.some(r => r.canClaim);
+        return { canClaim, reason: canClaim ? `At least one condition met` : `No conditions met` };
+      }
+
+      if (predicate.abs_before) {
+        const deadline = Math.floor(new Date(predicate.abs_before).getTime() / 1000);
+        const canClaim = nowSeconds < deadline;
+        return {
+          canClaim,
+          reason: canClaim ? `Before deadline ${predicate.abs_before}` : `Deadline passed`,
+        };
+      }
+
+      if (predicate.abs_after) {
+        const startTime = Math.floor(new Date(predicate.abs_after).getTime() / 1000);
+        const canClaim = nowSeconds >= startTime;
+        return {
+          canClaim,
+          reason: canClaim ? `After start time ${predicate.abs_after}` : `Not yet started`,
+        };
+      }
+
+      return { canClaim: false, reason: "Unknown predicate type" };
+    }
+
+    const claimable = [];
+    const notYetClaimable = [];
+    const expired = [];
+
+    for (const balance of records) {
+      const claimant = balance.claimants.find(c => c.destination === id);
+      if (!claimant) continue;
+
+      const evaluation = evaluatePredicate(claimant.predicate);
+
+      const balanceEntry = {
+        id: balance.id,
+        asset: balance.asset,
+        amount: balance.amount,
+        sponsor: balance.sponsor || null,
+        lastModifiedLedger: balance.last_modified_ledger,
+        predicate: claimant.predicate,
+        claimability: evaluation.reason,
+      };
+
+      if (evaluation.canClaim) {
+        claimable.push(balanceEntry);
+      } else if (evaluation.reason.includes("Not yet started")) {
+        notYetClaimable.push(balanceEntry);
+      } else if (evaluation.reason.includes("Deadline passed")) {
+        expired.push(balanceEntry);
+      } else {
+        notYetClaimable.push(balanceEntry);
+      }
+    }
+
+    const nextCursor = records.length === limit ? (records[records.length - 1]?.paging_token || null) : null;
+
+    return success(res, {
+      eligible: claimable,
+      notYetClaimable,
+      expired,
+      total: records.length,
       limit,
       cursor: nextCursor,
     });
@@ -398,7 +582,7 @@ router.get("/:id/analytics", async (req, res, next) => {
 });
 
 /**
- * GET /account/:id — reserveBreakdown (must satisfy tests)
+ * GET /account/:id — full account details
  */
 router.get("/:id", async (req, res, next) => {
   try {
@@ -416,20 +600,230 @@ router.get("/:id", async (req, res, next) => {
     const toXLM = (xlm) => xlm.toFixed(7);
     const toStroops = (xlm) => Math.round(xlm * STROOPS_PER_XLM);
 
+    const xlmBalance = (account.balances || []).find((b) => b.asset_type === "native");
+    const assets = (account.balances || [])
+      .filter((b) => b.asset_type !== "native")
+      .map((b) => ({
+        assetCode: b.asset_code,
+        assetIssuer: b.asset_issuer,
+        assetType: b.asset_type,
+        balance: b.balance,
+        limit: b.limit,
+        buyingLiabilities: b.buying_liabilities,
+        sellingLiabilities: b.selling_liabilities,
+        isAuthorized: b.is_authorized,
+        isClawbackEnabled: b.is_clawback_enabled,
+      }));
+
     return success(res, {
       accountId: account.id,
+      sequence: account.sequence,
+      subentryCount: account.subentry_count,
+      xlm: {
+        balance: xlmBalance ? formatBalance(xlmBalance.balance) : formatBalance("0.0000000"),
+        buyingLiabilities: xlmBalance ? formatBalance(xlmBalance.buying_liabilities) : formatBalance("0"),
+        sellingLiabilities: xlmBalance ? formatBalance(xlmBalance.selling_liabilities) : formatBalance("0"),
+      },
+      assets,
+      assetCount: assets.length,
+      signers: account.signers,
+      thresholds: account.thresholds,
+      flags: account.flags,
+      homeDomain: account.home_domain || null,
+      lastModifiedLedger: account.last_modified_ledger,
       reserveBreakdown: {
         baseReserve: { xlm: toXLM(baseReserve), stroops: toStroops(baseReserve) },
         accountReserve: { xlm: toXLM(accountReserve), stroops: toStroops(accountReserve) },
         subentryReserve: { xlm: toXLM(subentryReserve), stroops: toStroops(subentryReserve) },
         totalLocked: { xlm: toXLM(totalLocked), stroops: toStroops(totalLocked) },
         spendable: {
-          xlm: toXLM(parseFloat((account.balances || []).find((b) => b.asset_type === "native")?.balance || "0") - totalLocked),
-          stroops: toStroops(
-            parseFloat((account.balances || []).find((b) => b.asset_type === "native")?.balance || "0") - totalLocked,
-          ),
+          xlm: toXLM(parseFloat(xlmBalance?.balance || "0") - totalLocked),
+          stroops: toStroops(parseFloat(xlmBalance?.balance || "0") - totalLocked),
         },
       },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/risk-score
+ */
+router.get("/:id/risk-score", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    // Get first operation to calculate account age
+    const firstOpResponse = await server.operations()
+      .forAccount(id)
+      .order("asc")
+      .limit(1)
+      .call();
+    const firstOp = firstOpResponse.records[0];
+
+    // Get recent transactions
+    const recentTxResponse = await server.transactions()
+      .forAccount(id)
+      .order("desc")
+      .limit(60)
+      .call();
+    const recentTxs = recentTxResponse.records;
+
+    const factors = [];
+    let score = 50;
+
+    // Factor 1: Account age
+    if (firstOp) {
+      const createdAt = new Date(firstOp.created_at);
+      const now = new Date();
+      const daysOld = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+      
+      if (daysOld > 365) {
+        score += 15;
+        factors.push({
+          name: "Account Age",
+          value: `${daysOld} days`,
+          impact: "positive",
+          detail: "Account is over 1 year old, established reputation"
+        });
+      } else if (daysOld > 30) {
+        score += 10;
+        factors.push({
+          name: "Account Age",
+          value: `${daysOld} days`,
+          impact: "positive",
+          detail: "Account is over 1 month old"
+        });
+      } else {
+        score -= 15;
+        factors.push({
+          name: "Account Age",
+          value: `${daysOld} days`,
+          impact: "negative",
+          detail: "Account is very new (less than 1 month)"
+        });
+      }
+    } else {
+      score -= 10;
+      factors.push({
+        name: "Account Age",
+        value: "No operations found",
+        impact: "neutral",
+        detail: "No operations history found for account"
+      });
+    }
+
+    // Factor 2: Home domain
+    if (account.home_domain) {
+      score += 10;
+      factors.push({
+        name: "Home Domain",
+        value: account.home_domain,
+        impact: "positive",
+        detail: "Account has a home domain set"
+      });
+    } else {
+      score -= 5;
+      factors.push({
+        name: "Home Domain",
+        value: "Not set",
+        impact: "neutral",
+        detail: "No home domain configured"
+      });
+    }
+
+    // Factor 3: Multi-sig
+    if (account.signers.length > 1) {
+      score += 10;
+      factors.push({
+        name: "Multi-signature",
+        value: `${account.signers.length} signers`,
+        impact: "positive",
+        detail: "Account uses multi-signature security"
+      });
+    } else {
+      factors.push({
+        name: "Multi-signature",
+        value: "Single signer",
+        impact: "neutral",
+        detail: "Account uses single signature"
+      });
+    }
+
+    // Factor 4: Number of trustlines
+    const trustlineCount = (account.balances || []).filter(b => b.asset_type !== "native").length;
+    if (trustlineCount > 30) {
+      score -= 15;
+      factors.push({
+        name: "Trustline Count",
+        value: `${trustlineCount} trustlines`,
+        impact: "negative",
+        detail: "High number of trustlines may indicate risky behavior"
+      });
+    } else if (trustlineCount > 10) {
+      score -= 5;
+      factors.push({
+        name: "Trustline Count",
+        value: `${trustlineCount} trustlines`,
+        impact: "neutral",
+        detail: "Moderate number of trustlines"
+      });
+    } else {
+      score += 5;
+      factors.push({
+        name: "Trustline Count",
+        value: `${trustlineCount} trustlines`,
+        impact: "positive",
+        detail: "Low number of trustlines"
+      });
+    }
+
+    // Factor 5: Recent activity
+    if (recentTxs.length > 50) {
+      score -= 10;
+      factors.push({
+        name: "Recent Activity",
+        value: `${recentTxs.length} transactions in last limit`,
+        impact: "negative",
+        detail: "Very high recent transaction activity"
+      });
+    } else if (recentTxs.length > 20) {
+      score -= 5;
+      factors.push({
+        name: "Recent Activity",
+        value: `${recentTxs.length} transactions in last limit`,
+        impact: "neutral",
+        detail: "Moderate recent transaction activity"
+      });
+    } else {
+      score += 5;
+      factors.push({
+        name: "Recent Activity",
+        value: `${recentTxs.length} transactions in last limit`,
+        impact: "positive",
+        detail: "Low recent transaction activity"
+      });
+    }
+
+    // Clamp score between 0 and 100
+    score = Math.max(0, Math.min(100, score));
+
+    // Determine rating
+    let rating;
+    if (score >= 70) rating = "low";
+    else if (score >= 40) rating = "medium";
+    else rating = "high";
+
+    return success(res, {
+      accountId: account.id,
+      score,
+      label: rating, // For backwards compatibility with tests
+      rating,
+      factors
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -884,7 +1278,7 @@ router.get("/:id/offer-history", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
 
     let query = server.operations().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);

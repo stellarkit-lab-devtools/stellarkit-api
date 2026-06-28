@@ -16,22 +16,16 @@ function makeAccountNotFoundError(accountId, network) {
   return err;
 }
 
-/**
- * Creates a structured ClaimableBalanceNotFound error for Horizon 404 responses.
- *
- * @param {string} balanceId - Claimable balance ID that was not found
- * @param {string} network - Network name ("testnet" or "mainnet")
- * @returns {Error}
- */
-function makeClaimableBalanceNotFoundError(balanceId, network) {
+function makeAssetNotFoundError(code, issuer, network) {
   const err = new Error(
-    `Claimable balance ${balanceId} was not found on the Stellar ${network} network.`
+    `Asset ${code}:${issuer} was not found on the Stellar ${network} network.`
   );
-  err.isClaimableBalanceNotFound = true;
-  err.balanceId = balanceId;
+  err.isAssetNotFound = true;
+  err.assetCode = code;
+  err.assetIssuer = issuer;
   err.network = network;
   err.status = 404;
   return err;
 }
 
-module.exports = { makeAccountNotFoundError, makeClaimableBalanceNotFoundError };
+module.exports = { makeAccountNotFoundError, makeAssetNotFoundError };

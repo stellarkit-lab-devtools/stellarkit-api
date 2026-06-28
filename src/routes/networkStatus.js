@@ -10,8 +10,12 @@ const CACHE_TTL = 5; // seconds
  * GET /network-status
  * Returns current Stellar network info: latest ledger, base fee, network passphrase.
  *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
  * @example
  * GET /network-status
+ * GET /network-status?fresh=true
  */
 router.get("/", async (req, res, next) => {
   try {

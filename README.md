@@ -246,6 +246,8 @@ Visit `http://localhost:3000` after startup.
 | `NODE_ENV`        | `development`                      | Runtime environment. Set to `production` to enable combined HTTP logging and sanitised error messages. Set to `test` to suppress console output during test runs. | ⬜ No    |
 | `RATE_LIMIT_MAX`  | `100`                              | Maximum number of requests allowed per IP address per 15-minute window. Applies to the global rate limiter.                                                       | ⬜ No    |
 | `CACHE_TTL_MS`    | `5000`                             | Cache time-to-live in milliseconds for the `/network-status` and `/fee-estimate` endpoints.                                                                       | ⬜ No    |
+| `REQUIRE_API_KEY` | `false`                            | Enables API key authentication. When true, clients must provide a valid API key via X-API-Key header.                                                             | ⬜ No    |
+| `API_KEYS`        | _(empty)_                          | Comma-separated list of valid API keys. Required when REQUIRE_API_KEY=true.                                                                                       | ⬜ No    |
 
 > All variables are optional — the server starts with sensible defaults when none are set. Set `STELLAR_NETWORK=mainnet` explicitly before deploying to production to avoid accidentally pointing at testnet.
 
@@ -1566,7 +1568,40 @@ GET /asset/search?code=USDC
 
 Establishes a live, real-time WebSocket connection to stream Stellar ledger updates. As new ledgers are closed on the Stellar blockchain, the API receives them via the Stellar Horizon SDK subscription, parses them, and immediately broadcasts them to connected WebSocket clients.
 
-#### Client Connection Example (Vanilla JS)
+#### Message Format
+
+Each ledger update is broadcast as a JSON object containing:
+
+```json
+{
+  "sequence": 51234567,
+  "closedAt": "2026-05-26T20:15:00Z",
+  "baseFee": 100,
+  "transactionCount": 54
+}
+```
+
+**Fields:**
+- `sequence` — The ledger sequence number (incremental counter)
+- `closedAt` — ISO 8601 timestamp when the ledger closed
+- `baseFee` — Base fee in stroops for transactions in this ledger
+- `transactionCount` — Number of successful transactions in this ledger
+
+#### CLI Example (wscat)
+
+Install wscat globally if you don't have it:
+```bash
+npm install -g wscat
+```
+
+Connect to the ledger stream:
+```bash
+wscat -c ws://localhost:3000/stream/ledgers
+```
+
+You'll immediately start receiving live ledger updates as they close on the network.
+
+#### Browser WebSocket API Example
 
 ```javascript
 const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
@@ -1578,13 +1613,8 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const ledger = JSON.parse(event.data);
   console.log("New ledger closed:", ledger);
-  // Example output:
-  // {
-  //   "sequence": 51234567,
-  //   "closedAt": "2026-05-26T20:15:00Z",
-  //   "baseFee": 100,
-  //   "transactionCount": 54
-  // }
+  console.log(`Ledger ${ledger.sequence} closed at ${ledger.closedAt}`);
+  console.log(`Transactions: ${ledger.transactionCount}, Base Fee: ${ledger.baseFee} stroops`);
 };
 
 ws.onerror = (error) => {
@@ -1594,6 +1624,31 @@ ws.onerror = (error) => {
 ws.onclose = () => {
   console.log("WebSocket connection closed.");
 };
+```
+
+#### Node.js Example
+
+```javascript
+const WebSocket = require("ws");
+
+const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
+
+ws.on("open", () => {
+  console.log("Connected to StellarKit ledger stream!");
+});
+
+ws.on("message", (data) => {
+  const ledger = JSON.parse(data.toString());
+  console.log("New ledger:", ledger);
+});
+
+ws.on("error", (error) => {
+  console.error("WebSocket error:", error);
+});
+
+ws.on("close", () => {
+  console.log("Connection closed");
+});
 ```
 
 ---
