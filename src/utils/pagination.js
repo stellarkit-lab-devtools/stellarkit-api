@@ -8,7 +8,7 @@ const { validateLimit, validateOrder } = require("./validators");
  * pagination logic across multiple routes.
  *
  * @param {object} query - Express req.query object
- * @param {number} [maxLimit=200] - Maximum allowed limit value
+ * @param {number} [maxLimit=100] - Maximum allowed limit value
  * @returns {object} Validated pagination object with shape:
  *   {
  *     limit: number,      // Validated limit (1 to maxLimit)
@@ -24,9 +24,9 @@ const { validateLimit, validateOrder } = require("./validators");
  *   // Now use limit, order, cursor with Horizon API
  * });
  */
-function parsePaginationParams(query = {}, maxLimit = 200) {
-  // Parse limit with default of 10
-  const limit = validateLimit(query.limit || 10, maxLimit);
+function parsePaginationParams(query = {}, maxLimit = 100) {
+  // Parse limit with default of 20
+  const limit = validateLimit(query.limit ?? 20, maxLimit);
 
   // Parse order with default of "desc"
   const order = validateOrder(query.order);

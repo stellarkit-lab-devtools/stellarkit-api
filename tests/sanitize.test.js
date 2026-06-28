@@ -119,5 +119,66 @@ describe("Sanitize Middleware", () => {
         done(new Error("next() should not have been called"));
       });
     });
+
+    // req.body sanitization tests (issue #258)
+    it("trims leading/trailing whitespace from body string values", (done) => {
+      const req = { params: {}, query: {}, body: { name: "  Alice  ", note: "  hello  " } };
+      const res = {};
+      sanitize(req, res, () => {
+        expect(req.body.name).toBe("Alice");
+        expect(req.body.note).toBe("hello");
+        done();
+      });
+    });
+
+    it("strips null bytes from body string values", (done) => {
+      const req = { params: {}, query: {}, body: { name: "Ali\0ce", token: "abc\0def" } };
+      const res = {};
+      sanitize(req, res, () => {
+        expect(req.body.name).toBe("Alice");
+        expect(req.body.token).toBe("abcdef");
+        done();
+      });
+    });
+
+    it("returns 400 when a body string value exceeds 500 characters", (done) => {
+      const req = { params: {}, query: {}, body: { data: "X".repeat(501) } };
+      const res = {
+        status(code) { this._code = code; return this; },
+        json(body) {
+          expect(this._code).toBe(400);
+          expect(body.success).toBe(false);
+          expect(body.error.type).toBe("ValidationError");
+          expect(body.error.message).toContain("500");
+          done();
+        },
+      };
+      sanitize(req, res, () => {
+        done(new Error("next() should not have been called"));
+      });
+    });
+
+    it("recursively sanitizes nested object body values", (done) => {
+      const req = {
+        params: {},
+        query: {},
+        body: {
+          outer: "  trim me  ",
+          nested: {
+            inner: "  deep  ",
+            arr: ["  a  ", "  b  "],
+            deep: { value: "  deeper\0  " },
+          },
+        },
+      };
+      const res = {};
+      sanitize(req, res, () => {
+        expect(req.body.outer).toBe("trim me");
+        expect(req.body.nested.inner).toBe("deep");
+        expect(req.body.nested.arr).toEqual(["a", "b"]);
+        expect(req.body.nested.deep.value).toBe("deeper");
+        done();
+      });
+    });
   });
 });

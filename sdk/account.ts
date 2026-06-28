@@ -33,6 +33,18 @@ export class StellarKitError extends Error {
 }
 
 /**
+ * Native XLM balance details returned by GET /account/:id/native-balance.
+ */
+export interface NativeBalance {
+  /** Current XLM balance as a seven-decimal string (e.g. "9.9999800"). */
+  balance: string;
+  /** XLM reserved for buying liabilities. */
+  buyingLiabilities: string;
+  /** XLM reserved for selling liabilities. */
+  sellingLiabilities: string;
+}
+
+/**
  * AccountModule wraps all `/account/:id/*` routes of the StellarKit API
  * into fully-typed async methods.
  *
@@ -72,12 +84,39 @@ export class AccountModule {
   /**
    * Get full account details including XLM balance, assets, signers, thresholds, and flags.
    *
-   * @param id - Stellar account public key.
+   * @param id - Stellar account public key (non-empty string).
    * @returns Resolves to the account data payload.
-   * @throws {StellarKitError} On non-2xx response (e.g. 404 account not found).
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404).
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const details = await account.getAccount("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * console.log(details.xlm.balance); // "9.9999800"
    */
   async getAccount(id: string): Promise<AccountResponse["data"]> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
     return this._get<AccountResponse["data"]>(`/account/${id}`);
+  }
+
+  /**
+   * Get the native XLM balance for an account.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @returns Resolves to XLM balance with liabilities.
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404).
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const native = await account.getNativeBalance("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * console.log(native.balance); // "9.9999800"
+   */
+  async getNativeBalance(id: string): Promise<NativeBalance> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    return this._get<NativeBalance>(`/account/${id}/native-balance`);
   }
 
   /**
@@ -175,5 +214,56 @@ export class AccountModule {
    */
   async getRiskScore(id: string): Promise<AccountRiskScoreResponse["data"]> {
     return this._get<AccountRiskScoreResponse["data"]>(`/account/${id}/risk-score`);
+  }
+
+  /**
+   * Get full account data including balances, signers, and all metadata.
+   *
+   * Alias for getAccount — returns complete account information.
+   *
+   * @param id - Stellar account public key.
+   * @returns Resolves to the full account data payload.
+   * @throws {StellarKitError} On non-2xx response.
+   */
+  async getAccountData(id: string): Promise<AccountResponse["data"]> {
+    return this.getAccount(id);
+  }
+
+  /**
+   * Get all open offers for an account.
+   *
+   * @param id - Stellar account public key.
+   * @param options - Optional pagination and filtering options.
+   * @param options.limit - Maximum number of records to return (default: 10, max: 200).
+   * @param options.cursor - Pagination cursor from a previous response.
+   * @returns Resolves to a paginated response containing offer records.
+   * @throws {StellarKitError} On non-2xx response.
+   *
+   * @example
+   * const offers = await account.getOffers("GAAZI4...");
+   * const page2 = await account.getOffers("GAAZI4...", { limit: 50, cursor: "12345" });
+   */
+  async getOffers(
+    id: string,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<PaginatedResponse<{
+    id: string;
+    selling: { assetType: string; assetCode: string; assetIssuer: string | null; amount: string };
+    buying: { assetType: string; assetCode: string; assetIssuer: string | null };
+    price: string;
+    lastModifiedLedger: number;
+  }>> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", options.cursor);
+    const query = params.toString();
+    const path = `/account/${id}/offers${query ? `?${query}` : ""}`;
+    return this._get<PaginatedResponse<{
+      id: string;
+      selling: { assetType: string; assetCode: string; assetIssuer: string | null; amount: string };
+      buying: { assetType: string; assetCode: string; assetIssuer: string | null };
+      price: string;
+      lastModifiedLedger: number;
+    }>>(path);
   }
 }

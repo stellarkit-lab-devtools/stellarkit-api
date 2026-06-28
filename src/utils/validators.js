@@ -59,11 +59,11 @@ function validateAssetCode(code) {
   }
 }
 
-function validateLimit(limit, max = 200) {
+function validateLimit(limit, max = 100) {
   const parsed = parseInt(limit);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
     throw makeValidationError(
-      qp("limit", `must be an integer between 1 and ${max}.`),
+      qp("limit", `must be between 1 and ${max}.`),
       "limit",
       limit,
       `1–${max}`

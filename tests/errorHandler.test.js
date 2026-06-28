@@ -139,6 +139,120 @@ describe("ErrorHandler Middleware", () => {
         },
       });
     });
+
+    it("should include code and human-readable message for known result codes", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {
+            title: "Transaction Failed",
+            detail: "Bad sequence number.",
+            extras: { result_codes: { transaction: "tx_bad_seq" } },
+          },
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      const body = res.json.mock.calls[0][0];
+      expect(body.success).toBe(false);
+      expect(body.error.type).toBe("HorizonError");
+      expect(body.error.code).toBe("tx_bad_seq");
+      expect(typeof body.error.message).toBe("string");
+      expect(body.error.message.length).toBeGreaterThan(0);
+    });
+
+    it("should include code and message for known operation result codes", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {
+            title: "Transaction Failed",
+            detail: "No destination.",
+            extras: { result_codes: { operations: ["op_no_destination"] } },
+          },
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      const body = res.json.mock.calls[0][0];
+      expect(body.error.type).toBe("HorizonError");
+      expect(body.error.code).toBe("op_no_destination");
+      expect(body.error.message).toBeTruthy();
+    });
+
+    it("should omit code and message for unknown result codes", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {
+            title: "Transaction Failed",
+            detail: "Unknown code.",
+            extras: { result_codes: { transaction: "tx_unknown_xyz" } },
+          },
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      const body = res.json.mock.calls[0][0];
+      expect(body.error.type).toBe("HorizonError");
+      expect(body.error).not.toHaveProperty("message");
+      // code is still present because resultCode is non-null
+      expect(body.error.code).toBe("tx_unknown_xyz");
+    });
+
+    it("should not throw a ReferenceError when handling a HorizonError", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {
+            title: "Transaction Failed",
+            detail: "Some detail.",
+            extras: { result_codes: { transaction: "tx_bad_seq" } },
+          },
+        },
+      };
+
+      expect(() => errorHandler(err, req, res, next)).not.toThrow();
+      expect(res.json).toHaveBeenCalled();
+      expect(res.json.mock.calls[0][0].success).toBe(false);
+    });
+
+    it("should use horizonError.status over err.response.status when present", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {
+            title: "Not Found",
+            detail: "Resource not found.",
+            status: 404,
+          },
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      const body = res.json.mock.calls[0][0];
+      expect(body.error.status).toBe(404);
+    });
+
+    it("should default title and detail when missing from horizonError", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {},
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      const body = res.json.mock.calls[0][0];
+      expect(body.error.title).toBe("Horizon Error");
+      expect(body.error.detail).toBe("An error occurred with the Stellar network.");
+      expect(body.error.extras).toBeNull();
+    });
   });
 
   describe("Validation Errors", () => {
