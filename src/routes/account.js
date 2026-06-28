@@ -224,6 +224,7 @@ router.get("/:id/sequence", async (req, res, next) => {
 
 /**
  * GET /account/:id/payments
+ * Returns payment and create_account operations with full asset detail (including TOML metadata).
  */
 router.get("/:id/payments", async (req, res, next) => {
   try {
@@ -238,24 +239,61 @@ router.get("/:id/payments", async (req, res, next) => {
     const opResponse = await query.call();
     const rawRecords = opResponse.records || [];
 
+    const issuerCache = new Map();
+    const tomlCache = new Map();
+
     const paymentOps = [];
-    rawRecords.forEach((op) => {
+    for (const op of rawRecords) {
       if (op.type === "payment" || op.type === "create_account") {
         const isPayment = op.type === "payment";
+        const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
+        const assetIssuer = isPayment ? op.asset_issuer || null : null;
+        const assetType = isPayment ? op.asset_type || "native" : "native";
+
+        let assetDetail = {
+          code: assetCode,
+          issuer: assetIssuer,
+          type: assetType,
+        };
+
+        if (assetType !== "native" && assetIssuer) {
+          if (!issuerCache.has(assetIssuer)) {
+            issuerCache.set(
+              assetIssuer,
+              server
+                .loadAccount(assetIssuer)
+                .then((a) => a.home_domain || null)
+                .catch(() => null),
+            );
+          }
+
+          const homeDomain = await issuerCache.get(assetIssuer);
+
+          if (homeDomain) {
+            if (!tomlCache.has(homeDomain)) {
+              tomlCache.set(homeDomain, homeDomain);
+            }
+            try {
+              const toml = await getAssetMetadataFromToml(homeDomain, assetCode);
+              if (toml) {
+                assetDetail = { ...assetDetail, toml };
+              }
+            } catch (_) {
+              // TOML resolution failed, keep basic asset detail
+            }
+          }
+        }
+
         paymentOps.push({
           type: op.type,
           amount: isPayment ? op.amount : op.starting_balance,
-          asset: {
-            code: isPayment ? op.asset_code || "XLM" : "XLM",
-            issuer: isPayment ? op.asset_issuer || null : null,
-            type: isPayment ? op.asset_type || "native" : "native",
-          },
+          asset: assetDetail,
           sender: isPayment ? op.from : op.funder,
           receiver: isPayment ? op.to : op.account,
           createdAt: toISOTimestamp(op.created_at),
         });
       }
-    });
+    }
 
     const lastIdx = rawRecords.length ? rawRecords.length - 1 : -1;
     const nextCursor =
@@ -327,6 +365,118 @@ router.get("/:id/offers", async (req, res, next) => {
     return success(res, {
       items: offers,
       total: offers.length,
+      limit,
+      cursor: nextCursor,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/claimable-balances
+ * Returns claimable balances for an account, categorized by claimability.
+ */
+router.get("/:id/claimable-balances", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limit = validateLimit(req.query.limit || 200, 200);
+    const cursor = req.query.cursor || undefined;
+
+    let query = server.claimableBalances().forClaimant(id).limit(limit);
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    function evaluatePredicate(predicate) {
+      if (predicate.unconditional) {
+        return { canClaim: true, reason: "The balance is claimable unconditionally." };
+      }
+
+      if (predicate.not) {
+        const res = evaluatePredicate(predicate.not);
+        return { canClaim: !res.canClaim, reason: `NOT (${res.reason})` };
+      }
+
+      if (predicate.and) {
+        const results = predicate.and.map(p => evaluatePredicate(p));
+        const canClaim = results.every(r => r.canClaim);
+        return {
+          canClaim,
+          reason: canClaim ? `All conditions met` : `Some conditions failed`,
+        };
+      }
+
+      if (predicate.or) {
+        const results = predicate.or.map(p => evaluatePredicate(p));
+        const canClaim = results.some(r => r.canClaim);
+        return { canClaim, reason: canClaim ? `At least one condition met` : `No conditions met` };
+      }
+
+      if (predicate.abs_before) {
+        const deadline = Math.floor(new Date(predicate.abs_before).getTime() / 1000);
+        const canClaim = nowSeconds < deadline;
+        return {
+          canClaim,
+          reason: canClaim ? `Before deadline ${predicate.abs_before}` : `Deadline passed`,
+        };
+      }
+
+      if (predicate.abs_after) {
+        const startTime = Math.floor(new Date(predicate.abs_after).getTime() / 1000);
+        const canClaim = nowSeconds >= startTime;
+        return {
+          canClaim,
+          reason: canClaim ? `After start time ${predicate.abs_after}` : `Not yet started`,
+        };
+      }
+
+      return { canClaim: false, reason: "Unknown predicate type" };
+    }
+
+    const claimable = [];
+    const notYetClaimable = [];
+    const expired = [];
+
+    for (const balance of records) {
+      const claimant = balance.claimants.find(c => c.destination === id);
+      if (!claimant) continue;
+
+      const evaluation = evaluatePredicate(claimant.predicate);
+
+      const balanceEntry = {
+        id: balance.id,
+        asset: balance.asset,
+        amount: balance.amount,
+        sponsor: balance.sponsor || null,
+        lastModifiedLedger: balance.last_modified_ledger,
+        predicate: claimant.predicate,
+        claimability: evaluation.reason,
+      };
+
+      if (evaluation.canClaim) {
+        claimable.push(balanceEntry);
+      } else if (evaluation.reason.includes("Not yet started")) {
+        notYetClaimable.push(balanceEntry);
+      } else if (evaluation.reason.includes("Deadline passed")) {
+        expired.push(balanceEntry);
+      } else {
+        notYetClaimable.push(balanceEntry);
+      }
+    }
+
+    const nextCursor = records.length === limit ? (records[records.length - 1]?.paging_token || null) : null;
+
+    return success(res, {
+      eligible: claimable,
+      notYetClaimable,
+      expired,
+      total: records.length,
       limit,
       cursor: nextCursor,
     });

@@ -176,4 +176,55 @@ export class AccountModule {
   async getRiskScore(id: string): Promise<AccountRiskScoreResponse["data"]> {
     return this._get<AccountRiskScoreResponse["data"]>(`/account/${id}/risk-score`);
   }
+
+  /**
+   * Get full account data including balances, signers, and all metadata.
+   *
+   * Alias for getAccount — returns complete account information.
+   *
+   * @param id - Stellar account public key.
+   * @returns Resolves to the full account data payload.
+   * @throws {StellarKitError} On non-2xx response.
+   */
+  async getAccountData(id: string): Promise<AccountResponse["data"]> {
+    return this.getAccount(id);
+  }
+
+  /**
+   * Get all open offers for an account.
+   *
+   * @param id - Stellar account public key.
+   * @param options - Optional pagination and filtering options.
+   * @param options.limit - Maximum number of records to return (default: 10, max: 200).
+   * @param options.cursor - Pagination cursor from a previous response.
+   * @returns Resolves to a paginated response containing offer records.
+   * @throws {StellarKitError} On non-2xx response.
+   *
+   * @example
+   * const offers = await account.getOffers("GAAZI4...");
+   * const page2 = await account.getOffers("GAAZI4...", { limit: 50, cursor: "12345" });
+   */
+  async getOffers(
+    id: string,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<PaginatedResponse<{
+    id: string;
+    selling: { assetType: string; assetCode: string; assetIssuer: string | null; amount: string };
+    buying: { assetType: string; assetCode: string; assetIssuer: string | null };
+    price: string;
+    lastModifiedLedger: number;
+  }>> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", options.cursor);
+    const query = params.toString();
+    const path = `/account/${id}/offers${query ? `?${query}` : ""}`;
+    return this._get<PaginatedResponse<{
+      id: string;
+      selling: { assetType: string; assetCode: string; assetIssuer: string | null; amount: string };
+      buying: { assetType: string; assetCode: string; assetIssuer: string | null };
+      price: string;
+      lastModifiedLedger: number;
+    }>>(path);
+  }
 }
