@@ -42,6 +42,7 @@ This project is ideal for:
 ## Documentation
 
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
 
 ---
 
@@ -56,6 +57,7 @@ This project is ideal for:
 | GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
 | GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
 | GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
+| GET | `/network/base-fee` | Current network base fee in stroops and XLM | `fresh` |
 
 ### Fees
 
