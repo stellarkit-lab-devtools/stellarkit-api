@@ -277,6 +277,20 @@ class StellarKitClient {
   }
 
   /**
+   * Get all open offers for an account on the Stellar DEX.
+   *
+   * @param {string} accountId - Stellar account public key
+   * @param {Object} [options] - Pagination options
+   * @param {number} [options.limit=10] - Number of records
+   * @param {string} [options.order='desc'] - Sort order
+   * @param {string} [options.cursor] - Pagination cursor
+   * @returns {Promise<Object>} Paginated offers response
+   */
+  async getAccountOffers(accountId, { limit, order, cursor } = {}) {
+    return this._request(`/account/${accountId}/offers`, { params: { limit, order, cursor } });
+  }
+
+  /**
    * Get a consolidated summary of account info, recent transactions, and open offers.
    * 
    * @param {string} accountId - Stellar account public key

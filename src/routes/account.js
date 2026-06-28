@@ -20,18 +20,6 @@ const { Asset } = require("@stellar/stellar-sdk");
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
 
-function validateLimit(limit, max = 200) {
-  const n = Number(limit);
-  if (!Number.isInteger(n) || n <= 0 || n > max) {
-    const err = new Error(`limit must be an integer between 1 and ${max}`);
-    err.status = 400;
-    err.field = "limit";
-    err.receivedValue = String(limit);
-    throw err;
-  }
-  return n;
-}
-
 function handleAccountNotFound(err, next, accountId) {
   if (err && err.response && err.response.status === 404) {
     return next(makeAccountNotFoundError(accountId, NETWORK));
@@ -283,11 +271,9 @@ router.get("/:id/offers", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const cursor = req.query.cursor || undefined;
-
-    let query = server.offers().forAccount(id).limit(limit);
+    let query = server.offers().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
 
     const offerResponse = await query.call();
@@ -300,7 +286,7 @@ router.get("/:id/offers", async (req, res, next) => {
       };
 
       return {
-        id: offer.id,
+        offerId: offer.id,
         selling: {
           ...buildAsset(
             offer.selling_asset_type,
@@ -319,13 +305,12 @@ router.get("/:id/offers", async (req, res, next) => {
       };
     });
 
-    const hasMore = (offerResponse.records || []).length === limit;
-    const nextCursor = hasMore
-      ? (offerResponse.records[offerResponse.records.length - 1] || {}).paging_token
+    const nextCursor = offers.length > 0
+      ? offerResponse.records[offerResponse.records.length - 1].paging_token
       : null;
 
     return success(res, {
-      items: offers,
+      offers,
       total: offers.length,
       limit,
       cursor: nextCursor,

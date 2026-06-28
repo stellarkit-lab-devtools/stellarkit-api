@@ -660,15 +660,15 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data).toHaveProperty("items");
-      expect(res.body.data.items).toBeInstanceOf(Array);
+      expect(res.body.data).toHaveProperty("offers");
+      expect(res.body.data.offers).toBeInstanceOf(Array);
       expect(res.body.data).toHaveProperty("total");
       expect(res.body.data).toHaveProperty("limit");
       expect(res.body.data).toHaveProperty("cursor");
 
-      if (res.body.data.items.length > 0) {
-        const offer = res.body.data.items[0];
-        expect(offer).toHaveProperty("id");
+      if (res.body.data.offers.length > 0) {
+        const offer = res.body.data.offers[0];
+        expect(offer).toHaveProperty("offerId");
         expect(offer).toHaveProperty("selling");
         expect(offer).toHaveProperty("buying");
         expect(offer).toHaveProperty("price");
@@ -691,7 +691,33 @@ image = "https://example.com/test.png"
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.limit).toBe(1);
-      expect(res.body.data.items.length).toBeLessThanOrEqual(1);
+      expect(res.body.data.offers.length).toBeLessThanOrEqual(1);
+    });
+
+    it("respects cursor query param", async () => {
+      const first = await request(app).get(
+        `/account/${VALID_KEY}/offers?limit=1`
+      );
+
+      expect(first.statusCode).toBe(200);
+
+      if (first.body.data.cursor) {
+        const second = await request(app).get(
+          `/account/${VALID_KEY}/offers?limit=1&cursor=${first.body.data.cursor}`
+        );
+
+        expect(second.statusCode).toBe(200);
+        expect(second.body.data.offers).toBeInstanceOf(Array);
+      }
+    });
+
+    it("respects order query param", async () => {
+      const res = await request(app).get(
+        `/account/${VALID_KEY}/offers?order=asc`
+      );
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.offers).toBeInstanceOf(Array);
     });
 
     it("returns 400 for invalid account ID", async () => {
