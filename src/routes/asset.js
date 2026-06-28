@@ -6,7 +6,7 @@ const { success } = require("../utils/response");
 const { formatBalance } = require("../utils/formatBalance");
 const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
-const { validateAccountId, validateAssetCode } = require("../utils/validators");
+const { validateAccountId, validateAssetCode, validateAsset } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
 router.use(normalizeAssetCode);
 
@@ -54,8 +54,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { code, issuer } = req.params;
-      validateAssetCode(code);
-      validateAccountId(issuer);
+      validateAsset(code, issuer);
 
       const assetCode = code.toUpperCase();
       const { limit, order, cursor } = parsePaginationParams(req.query, 200);
@@ -101,8 +100,7 @@ router.get(
 router.get("/:code/:issuer", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
-    validateAssetCode(code);
-    validateAccountId(issuer);
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
     const cacheKey = `asset:${assetCode}:${issuer}`;
@@ -186,8 +184,7 @@ router.get("/:code/:issuer", async (req, res, next) => {
 router.get("/:code/:issuer/distribution", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
-    validateAssetCode(code);
-    validateAccountId(issuer);
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
 
@@ -304,8 +301,7 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
 router.get("/:code/:issuer/supply", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
-    validateAssetCode(code);
-    validateAccountId(issuer);
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
 
@@ -420,15 +416,7 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
 
-    try {
-      validateAssetCode(code);
-      validateAccountId(issuer);
-    } catch (err) {
-      return res.status(400).json({
-        success: false,
-        error: { type: "ValidationError", message: err.message },
-      });
-    }
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
     const axios = require("axios");

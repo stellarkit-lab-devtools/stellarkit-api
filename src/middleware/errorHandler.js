@@ -97,6 +97,19 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // InvalidAsset errors — thrown by validateAsset(code, issuer)
+  if (err.isInvalidAsset) {
+    logError(400, req, err.message);
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "InvalidAsset",
+        message: err.message,
+        suggestion: err.suggestion || null,
+      },
+    });
+  }
+
   // Validation errors (thrown manually)
   if (err.isValidation) {
     const ske = new StellarKitError(
