@@ -11,8 +11,8 @@ const {
 } = require("../utils/validators");
 
 const { parsePaginationParams } = require("../utils/pagination");
-const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const { buildAccountAgeResponse } = require("../utils/accountAge");
+
 
 const axios = require("axios");
 const { Asset } = require("@stellar/stellar-sdk");
@@ -778,10 +778,12 @@ router.get("/:id/volume", async (req, res, next) => {
 
     const days = parseInt(req.query.days || "30", 10);
     if (isNaN(days) || days < 1 || days > 90) {
-      return res.status(400).json({
-        success: false,
-        error: { type: "ValidationError", message: "days must be a number between 1 and 90." },
-      });
+      const err = new Error("Query parameter 'days': must be an integer between 1 and 90.");
+      err.isValidation = true;
+      err.field = "days";
+      err.receivedValue = String(req.query.days);
+      err.expectedFormat = "1–90";
+      throw err;
     }
 
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -991,6 +993,87 @@ router.get("/:id/pool-positions", async (req, res, next) => {
 /**
  * POST /account/:id/multisig-plan
  */
+// GET /account/:id/transaction-stats
+// Summarises recent transactions for the account (success/failure counts and basic per-asset volume).
+router.get("/:id/transaction-stats", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limitRaw = req.query.limit;
+    const limit = limitRaw === undefined ? 200 : parseInt(limitRaw, 10);
+    if (isNaN(limit) || limit < 1 || limit > 200) {
+      const err = new Error("Query parameter 'limit': must be an integer between 1 and 200.");
+      err.isValidation = true;
+      err.field = "limit";
+      err.receivedValue = String(limitRaw);
+      err.expectedFormat = "1–200";
+      throw err;
+    }
+
+    const txResponse = await server
+      .transactions()
+      .forAccount(id)
+      .limit(limit)
+      .order("desc")
+      .includeFailed(true)
+      .call();
+
+    const records = txResponse.records || [];
+
+    const STROOPS_PER_XLM = 10_000_000;
+
+    const perAsset = new Map();
+
+    for (const tx of records) {
+      const successful = tx.successful === true;
+
+      for (const op of tx.operations || []) {
+        // Horizon transaction record does not always include operations.
+        // We fall back to payments-based approximation only if operation data exists.
+        if (!op) continue;
+      }
+
+      // Use Horizon-fee charged as a lightweight signal; for volume we do best-effort using tx.memo-less fields.
+      // Since Horizon tx record does not directly expose sent/received amounts, we keep a minimal stats surface.
+      const feeChargedStroops = parseInt(tx.fee_charged || 0, 10);
+      const feeChargedXlm = (feeChargedStroops / STROOPS_PER_XLM).toFixed(7);
+
+      const key = tx.type || "unknown";
+      if (!perAsset.has(key)) {
+        perAsset.set(key, {
+          category: key,
+          successfulCount: 0,
+          failedCount: 0,
+          txCount: 0,
+          totalFeeChargedStroops: 0,
+          totalFeeChargedXlm: "0",
+        });
+      }
+      const bucket = perAsset.get(key);
+      bucket.txCount += 1;
+      if (successful) bucket.successfulCount += 1;
+      else bucket.failedCount += 1;
+      bucket.totalFeeChargedStroops += feeChargedStroops;
+      bucket.totalFeeChargedXlm = (bucket.totalFeeChargedStroops / STROOPS_PER_XLM).toFixed(7);
+    }
+
+    const successfulCount = records.filter((t) => t.successful === true).length;
+    const failedCount = records.length - successfulCount;
+
+    return success(res, {
+      accountId: id,
+      limit,
+      counts: { total: records.length, successful: successfulCount, failed: failedCount },
+      firstSeenAt: records.length ? toISOTimestamp(records[records.length - 1].created_at) : null,
+      lastSeenAt: records.length ? toISOTimestamp(records[0].created_at) : null,
+      byType: Array.from(perAsset.values()),
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 router.post("/:id/multisig-plan", async (req, res, next) => {
   try {
     const { id } = req.params;

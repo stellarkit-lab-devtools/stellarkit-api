@@ -9,10 +9,15 @@ function makeValidationError(message, field, receivedValue, expectedFormat) {
   return err;
 }
 
+function qp(field, details) {
+  // Keep a consistent template for query validation errors.
+  return `Query parameter '${field}' ${details}`;
+}
+
 function validateAccountId(accountId) {
   if (!accountId) {
     throw makeValidationError(
-      "Account ID is required.",
+      qp("accountId", "is required."),
       "accountId",
       accountId,
       "G... (valid Ed25519 public key)"
@@ -20,7 +25,7 @@ function validateAccountId(accountId) {
   }
   if (!StrKey.isValidEd25519PublicKey(accountId)) {
     throw makeValidationError(
-      `Invalid Stellar account ID. Must be a valid Ed25519 public key starting with "G".`,
+      qp("accountId", 'must be a valid Ed25519 public key starting with "G".'),
       "accountId",
       accountId,
       "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
@@ -31,7 +36,7 @@ function validateAccountId(accountId) {
 function validateAssetCode(code) {
   if (!code) {
     throw makeValidationError(
-      "Asset code is required.",
+      qp("assetCode", "is required."),
       "assetCode",
       code,
       "USDC"
@@ -39,7 +44,7 @@ function validateAssetCode(code) {
   }
   if (!/^[A-Z0-9]{1,12}$/.test(code.toUpperCase())) {
     throw makeValidationError(
-      `Invalid asset code. Must be 1–12 uppercase alphanumeric characters.`,
+      qp("assetCode", "must be 1–12 uppercase alphanumeric characters."),
       "assetCode",
       code,
       "USDC"
@@ -51,7 +56,7 @@ function validateLimit(limit, max = 200) {
   const parsed = parseInt(limit);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
     throw makeValidationError(
-      `Limit must be a number between 1 and ${max}.`,
+      qp("limit", `must be an integer between 1 and ${max}.`),
       "limit",
       limit,
       `1–${max}`
@@ -65,7 +70,7 @@ function validateOrder(order) {
   const lowerOrder = String(order).toLowerCase();
   if (!["asc", "desc"].includes(lowerOrder)) {
     throw makeValidationError(
-      `Invalid order parameter. Valid values are "asc" or "desc".`,
+      qp("order", 'must be either "asc" or "desc".'),
       "order",
       order,
       "asc or desc"

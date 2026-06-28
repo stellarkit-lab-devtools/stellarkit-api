@@ -54,21 +54,27 @@ describe("Sanitize Middleware", () => {
     const sanitize = require("../src/middleware/sanitize");
 
     it("calls next() for valid input", (done) => {
-      const req = { params: { id: "valid" }, query: { foo: "bar" } };
-      const res = {};
+      const req = { params: { id: "valid" }, query: { foo: "bar" }, body: { a: "b" } };
+      const res = { status: () => res, json: () => res };
       sanitize(req, res, () => {
         expect(req.params.id).toBe("valid");
         expect(req.query.foo).toBe("bar");
+        expect(req.body.a).toBe("b");
         done();
       });
     });
 
-    it("trims whitespace from params and query", (done) => {
-      const req = { params: { id: "  hello  " }, query: { q: "  world  " } };
+    it("trims whitespace from params, query, and body", (done) => {
+      const req = {
+        params: { id: "  hello  " },
+        query: { q: "  world  " },
+        body: { nested: { a: "  body  " } },
+      };
       const res = {};
       sanitize(req, res, () => {
         expect(req.params.id).toBe("hello");
         expect(req.query.q).toBe("world");
+        expect(req.body.nested.a).toBe("body");
         done();
       });
     });
