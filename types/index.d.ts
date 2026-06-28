@@ -317,6 +317,37 @@ export interface AccountPaymentsResponse {
 }
 
 /**
+ * Response from GET /account/:id/offers
+ * Returns all open offers for a Stellar account with pagination metadata.
+ */
+export interface AccountOffersResponse {
+  success: true
+  data: {
+    offers: OfferData[]
+    total: number
+    limit: number
+    cursor: string | null
+  }
+}
+
+/** Asset descriptor within an offer (selling or buying side). */
+export interface OfferAsset {
+  assetType: string
+  assetCode: string | null
+  assetIssuer: string | null
+  amount?: string
+}
+
+/** An open offer on the Stellar DEX, normalised from Horizon's offer record. */
+export interface OfferData {
+  offerId: string
+  selling: OfferAsset & { amount: string }
+  buying: OfferAsset
+  price: string
+  lastModifiedLedger: number
+}
+
+/**
  * Response from GET /transactions/:id
  * Returns paginated transaction history for a Stellar account.
  */

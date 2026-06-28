@@ -5,6 +5,7 @@ import type {
   AccountSignersResponse,
   AccountAgeResponse,
   AccountRiskScoreResponse,
+  AccountOffersResponse,
   TrustlineEntry,
   PaymentOperation,
 } from "../types/index.d";
@@ -139,6 +140,34 @@ export class AccountModule {
     const query = params.toString();
     const path = `/account/${id}/payments${query ? `?${query}` : ""}`;
     return this._get<PaginatedResponse<PaymentOperation>>(path);
+  }
+
+  /**
+   * Get all open offers for a Stellar account with pagination support.
+   *
+   * @param id - Stellar account public key.
+   * @param options - Optional pagination options.
+   * @param options.limit - Maximum number of records to return.
+   * @param options.order - Sort order ("asc" or "desc", default "desc").
+   * @param options.cursor - Pagination cursor from a previous response.
+   * @returns Resolves to a paginated response containing open offers.
+   * @throws {StellarKitError} On non-2xx response.
+   *
+   * @example
+   * const offers = await account.getOffers("GAAZI4...");
+   * const page2 = await account.getOffers("GAAZI4...", { limit: 10, cursor: "12345" });
+   */
+  async getOffers(
+    id: string,
+    options?: { limit?: number; order?: string; cursor?: string },
+  ): Promise<AccountOffersResponse["data"]> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.order) params.set("order", options.order);
+    if (options?.cursor) params.set("cursor", options.cursor);
+    const query = params.toString();
+    const path = `/account/${id}/offers${query ? `?${query}` : ""}`;
+    return this._get<AccountOffersResponse["data"]>(path);
   }
 
   /**
