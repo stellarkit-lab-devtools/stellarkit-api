@@ -47,7 +47,12 @@ function errorHandler(err, req, res, next) {
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const httpStatus = mappedStatus ?? err.response.status ?? 400;
 
-    const body = {
+    const code = resultCode || null;
+    const humanMessage = translateHorizonError(resultCode);
+
+    const message = horizonError.detail || horizonError.title || "Horizon Error";
+    logError(status, req, message);
+    return res.status(status).json({
       success: false,
       error: {
         type: "HorizonError",
@@ -106,6 +111,20 @@ function errorHandler(err, req, res, next) {
         message: err.message,
         suggestion:
           "Verify the account address is correct and that the account has been funded.",
+      },
+    });
+  }
+
+  // AssetNotFound errors (asset lookup returned no results)
+  if (err.isAssetNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "AssetNotFound",
+        message: err.message,
+        suggestion:
+          "Verify the asset code and issuer address are correct.",
       },
     });
   }

@@ -248,6 +248,8 @@ Visit `http://localhost:3000` after startup.
 | `NODE_ENV`        | `development`                      | Runtime environment. Set to `production` to enable combined HTTP logging and sanitised error messages. Set to `test` to suppress console output during test runs. | ⬜ No    |
 | `RATE_LIMIT_MAX`  | `100`                              | Maximum number of requests allowed per IP address per 15-minute window. Applies to the global rate limiter.                                                       | ⬜ No    |
 | `CACHE_TTL_MS`    | `5000`                             | Cache time-to-live in milliseconds for the `/network-status` and `/fee-estimate` endpoints.                                                                       | ⬜ No    |
+| `REQUIRE_API_KEY` | `false`                            | Enables API key authentication. When true, clients must provide a valid API key via X-API-Key header.                                                             | ⬜ No    |
+| `API_KEYS`        | _(empty)_                          | Comma-separated list of valid API keys. Required when REQUIRE_API_KEY=true.                                                                                       | ⬜ No    |
 
 > All variables are optional — the server starts with sensible defaults when none are set. Set `STELLAR_NETWORK=mainnet` explicitly before deploying to production to avoid accidentally pointing at testnet.
 

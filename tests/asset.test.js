@@ -55,7 +55,8 @@ describe("Asset Routes", () => {
 
       expect(res.statusCode).toBe(404);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("NotFound");
+      expect(res.body.error.type).toBe("AssetNotFound");
+      expect(res.body.error.suggestion).toBeDefined();
     });
 
     it("returns 400 for invalid asset code or issuer", async () => {

@@ -1,13 +1,17 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { Asset } = require("@stellar/stellar-sdk");
-const { server } = require("../config/stellar");
+const { server, NETWORK } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { formatBalance } = require("../utils/formatBalance");
 const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
 const { validateAccountId, validateAssetCode, validateAsset } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
+const { makeAssetNotFoundError } = require("../utils/errors");
+const cacheService = require("../services/cache");
 router.use(normalizeAssetCode);
 
 
@@ -128,13 +132,7 @@ router.get("/:code/:issuer", async (req, res, next) => {
       !assetsResponse.value.records ||
       assetsResponse.value.records.length === 0
     ) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          type: "NotFound",
-          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
-        },
-      });
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
     const asset = assetsResponse.value.records[0];
@@ -196,13 +194,7 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
       .call();
 
     if (!assetsResponse.records || assetsResponse.records.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          type: "NotFound",
-          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
-        },
-      });
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
     const asset = assetsResponse.records[0];
@@ -312,13 +304,7 @@ router.get("/:code/:issuer/supply", async (req, res, next) => {
       .call();
 
     if (!assetsResponse.records || assetsResponse.records.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          type: "NotFound",
-          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
-        },
-      });
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
     const asset = assetsResponse.records[0];
@@ -475,6 +461,70 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
 
     const verified = Object.values(checks).every((c) => c.passed);
     return success(res, { verified, checks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const CACHE_TTL_ASSET_PRICE = parseInt(process.env.CACHE_TTL_ASSET_PRICE_MS || "5000", 10);
+
+/**
+ * GET /asset/:code/:issuer/price
+ * Returns the current DEX price for an asset quoted in XLM.
+ *
+ * @param {string} code   - Asset code (e.g. USDC)
+ * @param {string} issuer - Issuer account public key (G...)
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/price
+ */
+router.get("/:code/:issuer/price", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const cacheKey = `asset-price:${assetCode}:${issuer}`;
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const asset = new Asset(assetCode, issuer);
+    const amount = "1.0000000";
+
+    const pathsResponse = await server
+      .strictSendPaths(asset, amount, [Asset.native()])
+      .call();
+
+    const records = pathsResponse.records || [];
+
+    if (records.length === 0) {
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
+    }
+
+    const best = records.reduce((a, b) =>
+      parseFloat(a.destination_amount) >= parseFloat(b.destination_amount) ? a : b
+    );
+
+    const data = {
+      assetCode,
+      assetIssuer: issuer,
+      priceInXlm: best.destination_amount,
+      sourceAmount: best.source_amount,
+      quoteAsset: "XLM",
+    };
+
+    const ttlSeconds = CACHE_TTL_ASSET_PRICE / 1000;
+    cacheService.set(cacheKey, data, ttlSeconds);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     next(err);
   }

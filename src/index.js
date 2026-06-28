@@ -17,7 +17,6 @@ const errorHandler = require("./middleware/errorHandler");
 const requestIdMiddleware = require("./middleware/requestId");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
 const sanitize = require("./middleware/sanitize");
-
 const networkStatusRouter = require("./routes/networkStatus");
 const feeEstimateRouter = require("./routes/feeEstimate");
 const accountRouter = require("./routes/account");
@@ -169,6 +168,7 @@ app.use(rateLimiter);
 // ── Input Sanitization ──────────────────────────────────────────────────────
 app.use(sanitize);
 
+
 // ── Health Check ────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({
@@ -252,6 +252,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/dex/spread/:sellAsset/:buyAsset", description: "Calculate bid-ask spread for a DEX trading pair" },
         { method: "GET", path: "/dex/imbalance/:sellAsset/:buyAsset", description: "Detect buy/sell pressure imbalance on a trading pair" },
         { method: "GET", path: "/account/:id/counterparties", description: "Analyze frequent payment counterparties for an account" },
+        { method: "GET", path: "/network/validators", description: "Normalised network validator / ledger info" },
         { method: "GET", path: "/network/ledger-timing", description: "Analyze network ledger close time consistency" },
         { method: "GET", path: "/network/validators", description: "Current validator list grouped by organisation" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },

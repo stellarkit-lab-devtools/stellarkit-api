@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { Asset } = require("@stellar/stellar-sdk");
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");

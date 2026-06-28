@@ -1,6 +1,8 @@
 const express = require("express");
 const axios = require("axios");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const { Transaction, Networks, Keypair } = require("@stellar/stellar-sdk");

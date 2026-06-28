@@ -131,6 +131,15 @@ describe("GET /network/validators", () => {
     expect(validator).toHaveProperty("currentStatus");
   });
 
+  it("has no snake_case fields in the response", async () => {
+    mockFetchForValidators();
+
+    const response = await request(app).get("/network/validators").expect(200);
+
+    const json = JSON.stringify(response.body.data);
+    expect(json).not.toMatch(/"[a-z]+_[a-z]+"\s*:/);
+  });
+
   it("groups validators by organisation", async () => {
     mockFetchForValidators();
 
