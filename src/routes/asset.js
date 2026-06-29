@@ -1,13 +1,18 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { Asset } = require("@stellar/stellar-sdk");
-const { server } = require("../config/stellar");
+const { server, NETWORK } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { formatBalance } = require("../utils/formatBalance");
 const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
-const { validateAccountId, validateAssetCode } = require("../utils/validators");
+const { validateAccountId, validateAssetCode, validateAsset, validateLimit } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
+const { makeAssetNotFoundError } = require("../utils/errors");
+const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
 router.use(normalizeAssetCode);
 
 
@@ -54,11 +59,10 @@ router.get(
   async (req, res, next) => {
     try {
       const { code, issuer } = req.params;
-      validateAssetCode(code);
-      validateAccountId(issuer);
+      validateAsset(code, issuer);
 
       const assetCode = code.toUpperCase();
-      const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+      const { limit, order, cursor } = parsePaginationParams(req.query);
 
       let query = server
         .accounts()
@@ -76,14 +80,11 @@ router.get(
       const lastRecord = records[records.length - 1];
       const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
-      return success(res, holders, {
-        meta: {
-          count: holders.length,
-          limit,
-          order,
-          nextCursor,
-          hasMore: holders.length === limit,
-        },
+      return success(res, {
+        items: holders,
+        total: holders.length,
+        limit,
+        cursor: nextCursor,
       });
     } catch (err) {
       next(err);
@@ -104,8 +105,7 @@ router.get(
 router.get("/:code/:issuer", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
-    validateAssetCode(code);
-    validateAccountId(issuer);
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
     const cacheKey = `asset:${assetCode}:${issuer}`;
@@ -133,13 +133,7 @@ router.get("/:code/:issuer", async (req, res, next) => {
       !assetsResponse.value.records ||
       assetsResponse.value.records.length === 0
     ) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          type: "NotFound",
-          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
-        },
-      });
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
     const asset = assetsResponse.value.records[0];
@@ -168,8 +162,8 @@ router.get("/:code/:issuer", async (req, res, next) => {
       issuer: issuerInfo,
     };
 
-    // Cache the response with 30s TTL
-    cacheService.set(cacheKey, data, 30);
+    // Cache the response
+    cacheService.set(cacheKey, data, cacheTTL.asset);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -189,8 +183,7 @@ router.get("/:code/:issuer", async (req, res, next) => {
 router.get("/:code/:issuer/distribution", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
-    validateAssetCode(code);
-    validateAccountId(issuer);
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
 
@@ -202,13 +195,7 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
       .call();
 
     if (!assetsResponse.records || assetsResponse.records.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          type: "NotFound",
-          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
-        },
-      });
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
     const asset = assetsResponse.records[0];
@@ -307,8 +294,7 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
 router.get("/:code/:issuer/supply", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
-    validateAssetCode(code);
-    validateAccountId(issuer);
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
 
@@ -319,13 +305,7 @@ router.get("/:code/:issuer/supply", async (req, res, next) => {
       .call();
 
     if (!assetsResponse.records || assetsResponse.records.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          type: "NotFound",
-          message: `Asset ${assetCode} issued by ${issuer} was not found on the Stellar network.`,
-        },
-      });
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
     }
 
     const asset = assetsResponse.records[0];
@@ -380,7 +360,7 @@ router.get("/search", async (req, res, next) => {
 
     validateAssetCode(code);
     const assetCode = code.toUpperCase();
-    const limit = Math.min(parseInt(rawLimit) || 10, 50);
+    const limit = validateLimit(rawLimit ?? 20);
 
     const assetsResponse = await server
       .assets()
@@ -397,8 +377,11 @@ router.get("/search", async (req, res, next) => {
       flags: a.flags,
     }));
 
-    return success(res, assets, {
-      meta: { count: assets.length, query: assetCode },
+    return success(res, {
+      items: assets,
+      total: assets.length,
+      limit,
+      cursor: null,
     });
   } catch (err) {
     next(err);
@@ -420,15 +403,7 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
   try {
     const { code, issuer } = req.params;
 
-    try {
-      validateAssetCode(code);
-      validateAccountId(issuer);
-    } catch (err) {
-      return res.status(400).json({
-        success: false,
-        error: { type: "ValidationError", message: err.message },
-      });
-    }
+    validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
     const axios = require("axios");
@@ -487,6 +462,68 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
 
     const verified = Object.values(checks).every((c) => c.passed);
     return success(res, { verified, checks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+
+/**
+ * GET /asset/:code/:issuer/price
+ * Returns the current DEX price for an asset quoted in XLM.
+ *
+ * @param {string} code   - Asset code (e.g. USDC)
+ * @param {string} issuer - Issuer account public key (G...)
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/price
+ */
+router.get("/:code/:issuer/price", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const cacheKey = `asset-price:${assetCode}:${issuer}`;
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const asset = new Asset(assetCode, issuer);
+    const amount = "1.0000000";
+
+    const pathsResponse = await server
+      .strictSendPaths(asset, amount, [Asset.native()])
+      .call();
+
+    const records = pathsResponse.records || [];
+
+    if (records.length === 0) {
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
+    }
+
+    const best = records.reduce((a, b) =>
+      parseFloat(a.destination_amount) >= parseFloat(b.destination_amount) ? a : b
+    );
+
+    const data = {
+      assetCode,
+      assetIssuer: issuer,
+      priceInXlm: best.destination_amount,
+      sourceAmount: best.source_amount,
+      quoteAsset: "XLM",
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.assetPrice);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     next(err);
   }
