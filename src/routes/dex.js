@@ -1,19 +1,16 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { Asset } = require("@stellar/stellar-sdk");
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
-const { validateAssetCode, validateAccountId } = require("../utils/validators");
+const { validateAssetCode, validateAccountId, validateAsset } = require("../utils/validators");
+const { parseStellarAsset } = require("../utils/asset");
 
 /**
- * GET /dex/arbitrage/:assetode/:assetIssuer
+ * GET /dex/arbitrage/:assetCode/:assetIssuer
  * Checks for circular paths back to the same asset to find arbitrage opportunities.
- *
- * Acceptance Criteria:
- * - GET /dex/arbitrage/:asseCtCode/:assetIssuer checks for circular paths back to the same asset
- * - Uses Horizon's strict-receive path finding to find paths from the asset back to itself
- * - Returns { pathsFound: true/false, paths: [...] } with source amount vs destination amount per path
- * - Returns 400 for invalid asset format
  *
  * @example
  * GET /dex/arbitrage/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
@@ -22,30 +19,16 @@ router.get("/arbitrage/:assetCode/:assetIssuer", async (req, res, next) => {
   try {
     const { assetCode, assetIssuer } = req.params;
 
-    // Validate asset format
-    try {
-      if (assetCode.toUpperCase() === "XLM" && assetIssuer.toLowerCase() === "native") {
-        // Native XLM is valid
-      } else {
-        validateAssetCode(assetCode);
-        validateAccountId(assetIssuer);
-      }
-    } catch (err) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          type: "ValidationError",
-          message: err.message,
-        },
-      });
+    // Validate asset code and issuer (if not native)
+    if (assetCode.toUpperCase() !== "XLM" || assetIssuer.toLowerCase() !== "native") {
+      // Validate inputs using shared validators
+      validateAsset(assetCode, assetIssuer);
     }
 
     const asset = (assetCode.toUpperCase() === "XLM" && assetIssuer.toLowerCase() === "native")
       ? Asset.native()
       : new Asset(assetCode.toUpperCase(), assetIssuer);
 
-    // Use a fixed destination amount to check for paths
-    // We use "10.0" as a standard test amount, but it could be anything.
     const destinationAmount = "10.0000000";
 
     const pathsResponse = await server
@@ -63,7 +46,7 @@ router.get("/arbitrage/:assetCode/:assetIssuer", async (req, res, next) => {
         })),
         isProfitable: parseFloat(path.source_amount) < parseFloat(path.destination_amount),
       }))
-      .filter((p) => p.path.length > 0); // Only include actual paths with hops
+      .filter((p) => p.path.length > 0);
 
     return success(res, {
       pathsFound: paths.length > 0,
@@ -77,40 +60,15 @@ router.get("/arbitrage/:assetCode/:assetIssuer", async (req, res, next) => {
 /**
  * GET /dex/spread/:sellAsset/:buyAsset
  * Calculates the bid-ask spread for a trading pair on the Stellar DEX.
- * Helps developers and traders assess market liquidity at a glance.
- *
- * Asset format: CODE:ISSUER or XLM:native
  *
  * @example
  * GET /dex/spread/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
- * GET /dex/spread/USDC:GA5Z.../EURC:GB...
  */
 router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
   try {
     const { sellAsset, buyAsset } = req.params;
 
-    // Parse asset strings (format: CODE:ISSUER)
-    const parseStellarAsset = (assetString) => {
-      const parts = assetString.split(":");
-      if (parts.length !== 2) {
-        throw new Error(`Invalid asset format: "${assetString}". Expected format: CODE:ISSUER`);
-      }
-
-      const [code, issuer] = parts;
-
-      // Validate
-      if (code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native") {
-        return Asset.native();
-      }
-
-      validateAssetCode(code);
-      validateAccountId(issuer);
-
-      return new Asset(code.toUpperCase(), issuer);
-    };
-
     let selling, buying;
-
     try {
       selling = parseStellarAsset(sellAsset);
       buying = parseStellarAsset(buyAsset);
@@ -124,7 +82,6 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
       });
     }
 
-    // Fetch order book from Horizon
     const orderBookResponse = await server
       .orderbook(selling, buying)
       .limit(200)
@@ -133,7 +90,6 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
     const bids = orderBookResponse.bids || [];
     const asks = orderBookResponse.asks || [];
 
-    // Check if order book exists
     if (bids.length === 0 && asks.length === 0) {
       return res.status(404).json({
         success: false,
@@ -144,7 +100,6 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
       });
     }
 
-    // Calculate best bid and ask
     const bestBid = bids.length > 0 ? {
       price: parseFloat(bids[0].price),
       amount: parseFloat(bids[0].amount),
@@ -155,7 +110,6 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
       amount: parseFloat(asks[0].amount),
     } : null;
 
-    // Calculate spread
     let spreadAbsolute = null;
     let spreadPercent = null;
     let midPrice = null;
@@ -170,13 +124,10 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
       midPrice = bestAsk.price;
     }
 
-    // Calculate total order book depth
     const totalBidVolume = bids.reduce((sum, bid) => sum + parseFloat(bid.amount), 0);
     const totalAskVolume = asks.reduce((sum, ask) => sum + parseFloat(ask.amount), 0);
     const totalVolume = totalBidVolume + totalAskVolume;
 
-    // Determine liquidity level
-    // These thresholds can be adjusted based on market conditions
     let liquidity;
     if (totalVolume >= 10000) {
       liquidity = "high";
@@ -208,7 +159,6 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
       },
     });
   } catch (err) {
-    // Handle Horizon errors
     if (err.response && err.response.status === 404) {
       return res.status(404).json({
         success: false,
@@ -216,6 +166,288 @@ router.get("/spread/:sellAsset/:buyAsset", async (req, res, next) => {
           type: "NotFound",
           message: "No order book exists for this trading pair.",
         },
+      });
+    }
+    next(err);
+  }
+});
+
+/**
+ * GET /dex/imbalance/:sellAsset/:buyAsset
+ * Detects significant imbalances between buy and sell pressure on a Stellar DEX trading pair.
+ *
+ * @example
+ * GET /dex/imbalance/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ */
+router.get("/imbalance/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+
+    let selling, buying;
+    try {
+      selling = parseStellarAsset(sellAsset);
+      buying = parseStellarAsset(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: err.message,
+        },
+      });
+    }
+
+    const orderBook = await server.orderbook(selling, buying).limit(200).call();
+
+    const bidVolume = (orderBook.bids || []).reduce((sum, b) => sum + parseFloat(b.amount), 0);
+    const askVolume = (orderBook.asks || []).reduce((sum, a) => sum + parseFloat(a.amount), 0);
+
+    if (bidVolume === 0 && askVolume === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+
+    const imbalanceRatio = askVolume > 0 ? bidVolume / askVolume : (bidVolume > 0 ? 100 : 1);
+    
+    let pressure = "neutral";
+    let signal = "The market is currently balanced between buyers and sellers.";
+
+    if (imbalanceRatio > 1.25) {
+      pressure = "buy";
+      signal = "Strong buy pressure detected. Demand significantly outweighs supply.";
+    } else if (imbalanceRatio < 0.75) {
+      pressure = "sell";
+      signal = "Strong sell pressure detected. Supply significantly outweighs demand.";
+    }
+
+    return success(res, {
+      bidVolume: bidVolume.toFixed(7),
+      askVolume: askVolume.toFixed(7),
+      imbalanceRatio: imbalanceRatio.toFixed(4),
+      pressure,
+      signal,
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+    next(err);
+  }
+});
+
+/**
+ * GET /dex/depth/:sellAsset/:buyAsset
+ * Analyzes the full depth of a Stellar DEX order book for a trading pair.
+ *
+ * Returns a summary of bids and asks, total volumes, top 5 of each,
+ * and a depth rating:
+ * - "deep": total volume >= 50,000
+ * - "moderate": total volume >= 5,000
+ * - "shallow": total volume < 5,000
+ *
+ * Asset format: CODE:ISSUER or XLM:native
+ *
+ * @example
+ * GET /dex/depth/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ */
+router.get("/depth/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+
+    const parseStellarAsset = (assetString) => {
+      const parts = assetString.split(":");
+      if (parts.length !== 2) {
+        throw new Error(`Invalid asset format: "${assetString}". Expected format: CODE:ISSUER`);
+      }
+
+      const [code, issuer] = parts;
+
+      if (code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native") {
+        return Asset.native();
+      }
+
+      validateAssetCode(code);
+      validateAccountId(issuer);
+
+      return new Asset(code.toUpperCase(), issuer);
+    };
+
+    let selling, buying;
+    try {
+      selling = parseStellarAsset(sellAsset);
+      buying = parseStellarAsset(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: err.message,
+        },
+      });
+    }
+
+    const orderBookResponse = await server
+      .orderbook(selling, buying)
+      .limit(200)
+      .call();
+
+    const bids = orderBookResponse.bids || [];
+    const asks = orderBookResponse.asks || [];
+
+    if (bids.length === 0 && asks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+
+    const totalBidVolume = bids.reduce((sum, bid) => sum + parseFloat(bid.amount), 0);
+    const totalAskVolume = asks.reduce((sum, ask) => sum + parseFloat(ask.amount), 0);
+    const totalVolume = totalBidVolume + totalAskVolume;
+
+    let depthRating;
+    if (totalVolume >= 50000) {
+      depthRating = "deep";
+    } else if (totalVolume >= 5000) {
+      depthRating = "moderate";
+    } else {
+      depthRating = "shallow";
+    }
+
+    const formatOrder = (order) => ({
+      price: order.price,
+      amount: order.amount,
+    });
+
+    return success(res, {
+      bidsCount: bids.length,
+      asksCount: asks.length,
+      totalBidVolume: totalBidVolume.toFixed(7),
+      totalAskVolume: totalAskVolume.toFixed(7),
+      top5Bids: bids.slice(0, 5).map(formatOrder),
+      top5Asks: asks.slice(0, 5).map(formatOrder),
+      depthRating,
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "No order book exists for this trading pair.",
+        },
+      });
+    }
+    next(err);
+  }
+});
+
+/**
+ * GET /dex/price/:sellAsset/:buyAsset?amount=:amount
+ * Calculates the effective exchange rate between two assets using the best
+ * available payment path on the Stellar DEX.
+ *
+ * Asset format: CODE:ISSUER or XLM:native
+ * amount query param: amount of sellAsset to convert (default: 1)
+ *
+ * @example
+ * GET /dex/price/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?amount=100
+ */
+router.get("/price/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+    const amount = req.query.amount || "1";
+
+    const parseStellarAsset = (assetString) => {
+      const parts = assetString.split(":");
+      if (parts.length !== 2) {
+        throw new Error(`Invalid asset format: "${assetString}". Expected format: CODE:ISSUER`);
+      }
+      const [code, issuer] = parts;
+      if (code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native") {
+        return Asset.native();
+      }
+      validateAssetCode(code);
+      validateAccountId(issuer);
+      return new Asset(code.toUpperCase(), issuer);
+    };
+
+    // Validate amount
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: "amount must be a positive number." },
+      });
+    }
+
+    let selling, buying;
+    try {
+      selling = parseStellarAsset(sellAsset);
+      buying = parseStellarAsset(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: err.message },
+      });
+    }
+
+    // Use strictSendPaths: given a fixed source amount, find the best destination amount
+    const formattedAmount = parsedAmount.toFixed(7);
+    const pathsResponse = await server
+      .strictSendPaths(selling, formattedAmount, [buying])
+      .call();
+
+    const records = pathsResponse.records || [];
+
+    if (records.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { type: "NotFound", message: "No payment path exists between these two assets." },
+      });
+    }
+
+    // Best path = highest destination amount
+    const best = records.reduce((a, b) =>
+      parseFloat(a.destination_amount) >= parseFloat(b.destination_amount) ? a : b
+    );
+
+    const sellAmount = parseFloat(best.source_amount);
+    const buyAmount = parseFloat(best.destination_amount);
+    const effectiveRate = buyAmount / sellAmount;
+
+    const bestPath = best.path.map((hop) => ({
+      assetCode: hop.asset_code || "XLM",
+      assetIssuer: hop.asset_issuer || "native",
+    }));
+
+    return success(res, {
+      sellAsset,
+      buyAsset,
+      sellAmount: sellAmount.toFixed(7),
+      buyAmount: buyAmount.toFixed(7),
+      effectiveRate: effectiveRate.toFixed(7),
+      bestPath,
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: { type: "NotFound", message: "No payment path exists between these two assets." },
       });
     }
     next(err);

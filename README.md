@@ -39,28 +39,140 @@ This project is ideal for:
 
 ---
 
-## API Quick Reference
+## Documentation
 
-| Method | Endpoint                       | Description                                     |
-| ------ | ------------------------------ | ----------------------------------------------- |
-| GET    | `/`                            | Lists available API endpoints and descriptions  |
-| GET    | `/health`                      | Returns basic service health status             |
-| GET    | `/network-status`              | Returns current Stellar network and ledger info |
-| GET    | `/fee-estimate`                | Calculates fee estimates for a transaction      |
-| GET    | `/account/:id`                 | Retrieves full account details and balances     |
-| GET    | `/account/:id/balances`        | Retrieves XLM and asset balances only           |
-| GET    | `/account/:id/sequence`        | Retrieves the account sequence number           |
-| GET    | `/account/:id/summary`         | Retrieves a compact account summary             |
-| GET    | `/account/:id/payments`        | Lists payment and create_account operations     |
-| GET    | `/transactions/:id`            | Retrieves paginated transaction history         |
-| GET    | `/transactions/:id/operations` | Retrieves paginated operation history           |
-| GET    | `/asset/:code/:issuer`         | Retrieves metadata and statistics for an asset  |
-| GET    | `/asset/:code/:issuer/holders` | Lists holders of an asset trustline             |
-| GET    | `/asset/search`                | Searches assets by code across issuers          |
-| GET    | `/stream/transactions/:id`     | Streams live account transactions via SSE       |
-| GET    | `/utils/friendbot/:accountId`  | Funds a testnet account via Friendbot           |
-| GET    | `/utils/memo`                  | Decodes Horizon memo data                       |
-| GET    | `/utils/base64`                | Encodes or decodes Base64 strings               |
+- [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+
+---
+
+## API Reference
+
+### Network
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/` | Lists available API endpoints | — |
+| GET | `/health` | Service health check | — |
+| GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
+| GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
+| GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
+
+### Fees
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/fee-estimate` | Fee tiers for transaction submission | `operations`, `fresh` |
+| GET | `/fee-estimate/surge-status` | Fee surge detection and recommendations | `fresh` |
+
+### Account
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/account/:id` | Account details, balances, reserve breakdown | — |
+| GET | `/account/:id/age` | Account age and longevity metrics | — |
+| GET | `/account/:id/balances` | XLM and asset balances | — |
+| GET | `/account/:id/sequence` | Current sequence number | — |
+| GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | — |
+| GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor` |
+| GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
+| GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
+| GET | `/account/:id/analytics` | Basic account activity analytics | — |
+| GET | `/account/:id/inactivity` | Days since last transaction and status | — |
+| GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
+| GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
+| GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
+| GET | `/account/:id/subentry-health` | Subentry usage and remaining capacity | — |
+| GET | `/account/:id/sponsorship` | Sponsorship relationships for the account | — |
+| GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
+| GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
+| GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
+| POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
+
+### Transactions
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/transactions/:id` | Paginated transaction history for an account | `limit`, `order`, `cursor` |
+| GET | `/transactions/:id/operations` | Paginated operation history for an account | `limit`, `order`, `cursor` |
+| POST | `/transactions/batch-status` | Check confirmation status of multiple tx hashes | Body: `hashes` |
+
+### Asset
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/asset/:code/:issuer` | Asset metadata and statistics | `fresh` |
+| GET | `/asset/:code/:issuer/holders` | Paginated accounts holding an asset | `limit`, `order`, `cursor` |
+| GET | `/asset/:code/:issuer/distribution` | Holder concentration and Gini coefficient | — |
+| GET | `/asset/:code/:issuer/supply` | Total, circulating, and locked supply breakdown | — |
+| GET | `/asset/:code/:issuer/verify` | Verify issuer via flags, home_domain, and stellar.toml | — |
+| GET | `/asset/search` | Search assets by code across all issuers | `code`, `limit` |
+
+### DEX
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/dex/price/:sellAsset/:buyAsset` | Effective exchange rate via best DEX path | `amount` |
+| GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
+| GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
+| GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
+| GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
+
+### Liquidity Pools
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/liquidity-pools/:id/profitability` | Estimated annualized fee income | — |
+| GET | `/liquidity-pools/:id/reserve-ratio` | Reserve ratio and drift from equal | — |
+
+### Claimable Balances
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/claimable-balances/:id/evaluate/:accountId` | Evaluate claimability for a specific account | — |
+
+### Streaming
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| WS | `/stream/ledgers` | Real-time ledger updates via WebSocket | — |
+| GET | `/stream/transactions/:id` | Live account transactions via SSE | — |
+| GET | `/stream/payments/:id` | Live payment events via SSE | — |
+
+### Stellar TOML
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/stellar-toml/:domain` | Fetch and parse stellar.toml for a domain | — |
+
+### Utilities
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/utils/friendbot/:accountId` | Fund a testnet account via Friendbot | — |
+| GET | `/utils/convert` | Convert between XLM and stroops | `xlm` or `stroops` |
+| GET | `/utils/validate-account` | Validate a Stellar public key format | `id` |
+| GET | `/utils/validate-asset` | Validate a Stellar asset code format | `code` |
+| GET | `/utils/memo` | Decode a raw Horizon memo | `type`, `value` |
+| GET | `/utils/base64` | Encode or decode Base64 strings | `encode` or `decode` |
+| GET | `/utils/ledger-date` | Estimate close date for a ledger sequence | `sequence` |
+| GET | `/utils/keypair` | Generate a random testnet keypair | — |
+| POST | `/utils/decode-xdr` | Decode a transaction XDR envelope to JSON | Body: `xdr` |
+
+### Cache
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/cache/stats` | Cache hit rate and performance statistics | — |
+
+---
+
+## Soroban Smart Contracts
+
+Soroban is Stellar’s smart contract platform for running WebAssembly (WASM) contracts on the Stellar ledger. It differs from traditional Stellar operations because it allows developers to execute programmable contract logic, instead of only submitting payments, trustline updates, account settings, and other built-in ledger operations.
+
+A Soroban contract is referenced by a **contract ID**, which is the address used to invoke the contract after it has been deployed. The contract’s **WASM hash** is the digest of the compiled contract binary and uniquely identifies the contract code that is stored and executed on the network.
+
+StellarKit API currently supports Soroban contract inspection through the `/soroban/contract/:id` endpoint. This endpoint enables developers to look up contract details by contract ID, including the associated WASM hash and contract metadata, making it easier to combine traditional Stellar account workflows with Soroban contract interactions.
 
 ---
 
@@ -74,6 +186,12 @@ This project is ideal for:
 - `src/middleware/` — validation, error handling, rate limiting
 - `tests/` — API and integration tests
 - `types/index.d.ts` — exported TypeScript type definitions
+
+---
+
+## Documentation
+
+- [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
 
 ---
 
@@ -122,14 +240,16 @@ Visit `http://localhost:3000` after startup.
 
 ## Environment Variables Reference
 
-| Variable | Default | Description | Required |
-|----------------------|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|----------|
-| `STELLAR_NETWORK` | `testnet` | Target Stellar network. Accepted values: `testnet` or `mainnet`. Controls which Horizon server is used and gates testnet-only endpoints such as Friendbot. | ⬜ No |
-| `HORIZON_URL` | *(derived from `STELLAR_NETWORK`)* | Override the Horizon server URL. When omitted, defaults to `https://horizon-testnet.stellar.org` for `testnet` and `https://horizon.stellar.org` for `mainnet`. | ⬜ No |
-| `PORT` | `3000` | TCP port the Express server listens on. | ⬜ No |
-| `NODE_ENV` | `development` | Runtime environment. Set to `production` to enable combined HTTP logging and sanitised error messages. Set to `test` to suppress console output during test runs. | ⬜ No |
-| `RATE_LIMIT_MAX` | `100` | Maximum number of requests allowed per IP address per 15-minute window. Applies to the global rate limiter. | ⬜ No |
-| `CACHE_TTL_MS` | `5000` | Cache time-to-live in milliseconds for the `/network-status` and `/fee-estimate` endpoints. | ⬜ No |
+| Variable          | Default                            | Description                                                                                                                                                       | Required |
+| ----------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `STELLAR_NETWORK` | `testnet`                          | Target Stellar network. Accepted values: `testnet` or `mainnet`. Controls which Horizon server is used and gates testnet-only endpoints such as Friendbot.        | ⬜ No    |
+| `HORIZON_URL`     | _(derived from `STELLAR_NETWORK`)_ | Override the Horizon server URL. When omitted, defaults to `https://horizon-testnet.stellar.org` for `testnet` and `https://horizon.stellar.org` for `mainnet`.   | ⬜ No    |
+| `PORT`            | `3000`                             | TCP port the Express server listens on.                                                                                                                           | ⬜ No    |
+| `NODE_ENV`        | `development`                      | Runtime environment. Set to `production` to enable combined HTTP logging and sanitised error messages. Set to `test` to suppress console output during test runs. | ⬜ No    |
+| `RATE_LIMIT_MAX`  | `100`                              | Maximum number of requests allowed per IP address per 15-minute window. Applies to the global rate limiter.                                                       | ⬜ No    |
+| `CACHE_TTL_MS`    | `5000`                             | Cache time-to-live in milliseconds for the `/network-status` and `/fee-estimate` endpoints.                                                                       | ⬜ No    |
+| `REQUIRE_API_KEY` | `false`                            | Enables API key authentication. When true, clients must provide a valid API key via X-API-Key header.                                                             | ⬜ No    |
+| `API_KEYS`        | _(empty)_                          | Comma-separated list of valid API keys. Required when REQUIRE_API_KEY=true.                                                                                       | ⬜ No    |
 
 > All variables are optional — the server starts with sensible defaults when none are set. Set `STELLAR_NETWORK=mainnet` explicitly before deploying to production to avoid accidentally pointing at testnet.
 
@@ -163,6 +283,198 @@ An account's **spendable balance** is the amount of XLM it can freely transfer o
 `Spendable Balance = Total Balance - Minimum Balance - Liabilities`
 
 You don't need to calculate this manually! The `GET /account/:id` endpoint provided by this API automatically computes and returns both the `minimumBalance` and `spendableBalance` for any Stellar account.
+
+---
+
+## Multisig and Account Thresholds
+
+Stellar accounts can be configured with multiple signers and a threshold system that controls which transactions are allowed. Each signer has a **weight**, and the account also has three transaction thresholds:
+
+- **Low threshold** for simple operations like account reads, data updates, and trustline management.
+- **Medium threshold** for typical payment and offer operations.
+- **High threshold** for sensitive actions such as setting account options, adding/removing signers, or changing thresholds.
+
+### Signer Weights and Combined Weight
+
+Each signer on an account contributes its configured weight toward authorizing a transaction. Stellar evaluates the combined weight of all signers that sign a transaction and compares it to the threshold required by the operation.
+
+- If the combined weight is equal to or greater than the operation's threshold, the transaction is valid.
+- If the combined weight is lower than the required threshold, the transaction is rejected.
+
+For example, an account could have:
+
+- signer A with weight `1`
+- signer B with weight `1`
+- signer C with weight `2`
+
+If a medium-threshold operation requires `2`, then either signer C alone or signers A and B together can authorize it.
+
+### Working with Multisig Accounts in StellarKit API
+
+StellarKit API exposes the account's multisignature details through dedicated account endpoints:
+
+- `GET /account/:id/signers` returns the account's current signers and their weights.
+- `GET /account/:id/multisig-plan` returns the account's threshold plan and how signers contribute to low, medium, and high threshold requirements.
+
+These endpoints let developers inspect who can sign transactions, how much combined weight is available, and whether the account is configured correctly for its intended security model.
+
+> Use `GET /account/:id/signers` to verify signer keys and weights, and `GET /account/:id/multisig-plan` to understand the threshold requirements before submitting multisig transactions.
+
+---
+
+## Understanding Claimable Balances
+
+A **claimable balance** is a Stellar ledger entry that holds funds on behalf of one or more future recipients without requiring those recipients to exist on the network or take any action in advance. Think of it as placing money in a secure lockbox and handing out keys — each key can have conditions attached that control _when_ it can be used.
+
+### How Claimable Balances Differ from Regular Payments
+
+With a regular `payment` operation, the destination account must already exist, must have a trustline for non-native assets, and receives the funds immediately. A claimable balance removes all three constraints:
+
+- **No destination account required at creation time.** The recipient's public key is listed as a claimant, but their account does not need to be funded yet. They can create and fund their account later and then claim the balance.
+- **No trustline required in advance.** The claimant does not need a pre-existing trustline for the asset. Stellar creates the necessary trustline automatically when the balance is claimed.
+- **Funds are not delivered instantly.** The balance sits on the ledger until a claimant actively submits a `claimClaimableBalance` operation. This makes claimable balances ideal for deferred, conditional, or opt-in transfers.
+
+The account that creates the claimable balance pays the base reserves to keep the entry on the ledger. Those reserves are returned when the balance is eventually claimed or reclaimed.
+
+### Predicates — Controlling When Funds Can Be Claimed
+
+Every claimant in a claimable balance is paired with a **predicate** — a rule that determines whether the claim is allowed at a given moment. Stellar supports five predicate types that can be nested to build arbitrarily complex conditions.
+
+#### Unconditional
+
+```
+{ "unconditional": true }
+```
+
+The claimant can claim the balance **at any time**, with no restrictions. This is the simplest predicate and is useful when you just want to park funds for someone to pick up whenever they are ready.
+
+#### Time-Based: `abs_before`
+
+```
+{ "abs_before": "2026-12-31T23:59:59Z" }
+```
+
+The claim must happen **before** the specified timestamp. Once the deadline passes, this predicate evaluates to `false` and the claimant can no longer claim through it. Use this to set expiration dates — for example, a promotional reward that expires at the end of the quarter.
+
+#### Time-Based: `abs_after`
+
+```
+{ "abs_after": "2026-06-01T00:00:00Z" }
+```
+
+The claim is only allowed **on or after** the specified timestamp. Before that moment the predicate evaluates to `false`. This is useful for vesting schedules, release dates, or any scenario where funds should be locked until a future date.
+
+#### Compound: `and`
+
+```json
+{
+  "and": [
+    { "abs_after": "2026-06-01T00:00:00Z" },
+    { "abs_before": "2026-12-31T23:59:59Z" }
+  ]
+}
+```
+
+**Both** sub-predicates must be true at the same time. The example above creates a claim window: the funds can only be claimed between June 1 and December 31, 2026. Outside that window the claim is denied.
+
+#### Compound: `or`
+
+```json
+{
+  "or": [{ "abs_after": "2026-06-01T00:00:00Z" }, { "unconditional": true }]
+}
+```
+
+**At least one** sub-predicate must be true. Compound `or` predicates are less common but can model fallback conditions — for example, "claimable after a certain date, _or_ claimable unconditionally by a backup account."
+
+#### Compound: `not`
+
+```json
+{
+  "not": { "abs_before": "2026-06-01T00:00:00Z" }
+}
+```
+
+Inverts the inner predicate. `not(abs_before X)` is logically equivalent to `abs_after X`. While `not` is rarely needed on its own, it becomes powerful when nested inside `and`/`or` trees to express precise business rules.
+
+### Practical Use Cases
+
+| Use Case                         | How Claimable Balances Help                                                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Onboarding new users**         | Send tokens to a public key that does not exist yet. The new user creates their account later and claims the balance — no coordination needed.                                        |
+| **Vesting schedules**            | Create a balance with an `abs_after` predicate set to the vesting date. The employee or contributor can only claim once the date arrives.                                             |
+| **Time-limited promotions**      | Use an `and` predicate combining `abs_after` (start) and `abs_before` (expiry) to define a claim window for airdrops or rewards.                                                      |
+| **Escrow / conditional release** | The sender and a mediator are both listed as claimants. The sender's predicate uses `abs_after` (allowing reclaim after a timeout), while the recipient's predicate is unconditional. |
+| **Recurring grants**             | Create multiple claimable balances with staggered `abs_after` dates to simulate a payment schedule without requiring the recipient to be online.                                      |
+
+### Claimable Balance Endpoints in StellarKit API
+
+StellarKit API exposes claimable balance data through two surfaces:
+
+| Endpoint                                       | Description                                                                                                                                                                                                                                           |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /account/:id/summary`                     | Returns the account's open claimable balances alongside recent transactions, open offers, and account details.                                                                                                                                        |
+| `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). |
+
+Use the `/claimable-balances/eligible` endpoint to build dashboards that show users exactly which funds are available to claim today and which are still locked. The API handles predicate evaluation server-side, so clients do not need to implement their own predicate logic.
+
+---
+
+## Understanding Liquidity Pools
+
+Stellar's Liquidity Pools are automated market makers (AMMs) that enable decentralized asset swaps. This guide explains how pools work, how liquidity providers earn fees, and the fundamental concepts behind pool mechanics.
+
+### What is a Liquidity Pool?
+
+A liquidity pool is a smart ledger contract that holds equal-value reserves of two assets and facilitates swaps between them. Instead of relying on a central order book operator, the pool uses an automated pricing algorithm to execute trades and reward liquidity providers.
+
+**Key characteristics:**
+- Holds two assets in a **constant product invariant**: the product of the two reserve amounts remains constant before and after each swap.
+- Issues **pool share tokens** to liquidity providers, representing fractional ownership of both reserves.
+- Charges a **trading fee** (typically 0.3%) on every swap, which accrues to share holders.
+- Operates on Stellar's native ledger without requiring external oracles or complicated governance.
+
+### Pool Shares and Ownership
+
+When you deposit assets into a liquidity pool, you receive **pool share tokens** proportional to your contribution. These shares represent your ownership stake in both reserves.
+
+**Example:**
+If you deposit 1,000 XLM and 50,000 USDC into an empty pool, you receive 7,071 pool shares (calculated as $\sqrt{1000 \times 50000}$). Your ownership is 100% of the pool. If you later withdraw your shares, you receive your proportional share of both reserves plus any fees earned.
+
+If the pool price changes and another user deposits at a different ratio, your percentage ownership dilutes — but the total value of your shares typically increases because of accumulated fees.
+
+### Reserve Ratios and the 50/50 Rule
+
+Stellar liquidity pools maintain a **50/50 reserve ratio** by value. This means the total value of reserve A should equal the total value of reserve B at all times.
+
+When a user swaps one asset for another, the pool adjusts prices according to the constant product formula, driving the ratio back toward 50/50. This self-correcting mechanism ensures the pool remains balanced and prevents depletion of either reserve.
+
+**Why 50/50?**
+- Minimizes impermanent loss for liquidity providers by keeping prices stable.
+- Ensures neither reserve can be exhausted by extreme trades.
+- Creates natural price discovery through the swap mechanism.
+
+### Fee Mechanics
+
+Every swap in a liquidity pool incurs a **trading fee**, typically **0.3%** (expressed as 30 basis points). This fee is taken from the input amount and distributed to all pool share holders in proportion to their ownership.
+
+**Example:**
+If you hold 10% of a pool's shares and the pool earns 100 USDC in fees over a period, you automatically receive 10 USDC when you withdraw or check your position. Fees are not claimed separately — they accrue directly to your share's proportional value.
+
+The fee mechanism incentivizes liquidity provision: share holders earn passive income simply by holding their shares and allowing others to trade through the pool.
+
+### Liquidity Pool Endpoints in StellarKit API
+
+StellarKit API provides several endpoints to interact with and analyze liquidity pools:
+
+| Endpoint                                  | Description                                                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `GET /liquidity-pools`                    | Retrieves a list of all liquidity pools on the network with reserve details and fee information.                |
+| `GET /liquidity-pools/:id`                | Fetches detailed information about a specific pool, including reserves, share count, and fee basis points.      |
+| `GET /account/:id/pool-positions`         | Returns all liquidity pool positions for an account with calculated share values and equivalent reserves.       |
+| `GET /dex/pool-share-value/:poolId/:shares` | Calculates the equivalent value of a specific number of pool shares in both reserve assets.                    |
+
+Use these endpoints to build pool analysis dashboards, calculate LP returns, and help users decide when to provide or withdraw liquidity.
 
 ---
 
@@ -336,6 +648,298 @@ When an error occurs, the response structure differs:
 
 ---
 
+## Pagination Guide
+
+Several endpoints in the StellarKit API return lists of records and support cursor-based pagination. This allows clients to fetch large datasets efficiently in smaller chunks.
+
+### Query Parameters
+
+When querying a paginated endpoint, the following optional parameters can be used:
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `limit` | number | `10` | The maximum number of records to return in a single page (Max 200, except `/account/:id/timeline` which has a max of 50). |
+| `order` | string | `desc` | The chronological sorting order of the records: `desc` (newest first) or `asc` (oldest first). *(Not supported by `/account/:id/timeline`)*. |
+| `cursor` | string | — | A pointer to a specific location in the dataset from which to resume fetching. |
+
+### How Cursor-based Pagination Works
+
+1. **Initial Request**: Make a request to a paginated endpoint without specifying a `cursor`. You can optionally set the `limit` and `order` parameters.
+2. **Metadata Inspection**: The successful response contains a `meta` object.
+   - If `nextCursor` has a string value (and `hasMore` is `true`), there is more data available.
+   - If `nextCursor` is `null` (or not present), you have reached the end of the dataset.
+3. **Subsequent Request**: To fetch the next page of results, make the same API call but include the `nextCursor` value as the `cursor` query parameter.
+
+### Step-by-Step Example
+
+Below is a step-by-step example showing how to paginate through transaction history for an account.
+
+#### Step 1: Fetch the first page
+Request a page of transactions with a `limit` of 2:
+```http
+GET /transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=2
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "51234567-001",
+      "hash": "8f8c4bc6f...",
+      "ledger": 51234567,
+      "createdAt": "2026-05-29T12:00:00Z",
+      "sourceAccount": "GAAZI4..."
+    },
+    {
+      "id": "51234566-002",
+      "hash": "4a3b8cd12...",
+      "ledger": 51234566,
+      "createdAt": "2026-05-29T11:58:00Z",
+      "sourceAccount": "GAAZI4..."
+    }
+  ],
+  "meta": {
+    "count": 2,
+    "limit": 2,
+    "order": "desc",
+    "nextCursor": "51234566-002",
+    "hasMore": true
+  }
+}
+```
+
+#### Step 2: Fetch the next page using the cursor
+Extract `"nextCursor": "51234566-002"` from the first response and send it as the `cursor` query parameter:
+```http
+GET /transactions/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=2&cursor=51234566-002
+```
+
+Response:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "51234560-001",
+      "hash": "1d2e3f4a...",
+      "ledger": 51234560,
+      "createdAt": "2026-05-29T11:45:00Z",
+      "sourceAccount": "GAAZI4..."
+    }
+  ],
+  "meta": {
+    "count": 1,
+    "limit": 2,
+    "order": "desc",
+    "nextCursor": null,
+    "hasMore": false
+  }
+}
+```
+Since `nextCursor` is `null` and `hasMore` is `false`, the client knows that there are no additional records to fetch.
+
+### Paginated Endpoints
+
+The following StellarKit API endpoints support cursor-based pagination:
+
+* **`GET /transactions/:id`**: Returns paginated transaction history for an account.
+* **`GET /transactions/:id/operations`**: Returns paginated operation history for an account.
+* **`GET /account/:id/payments`**: Returns paginated payment and create_account operations for an account.
+* **`GET /account/:id/timeline`**: Returns a unified chronological timeline of events for an account.
+* **`GET /account/:id/transactions/search`**: Searches transaction history filtered by memo content.
+* **`GET /asset/:code/:issuer/holders`**: Returns accounts holding a trustline for a specific asset.
+
+---
+
+## Asset Format Reference
+
+Stellar represents assets in different formats depending on the context. This reference explains how native and non-native assets are formatted in API responses and request parameters.
+
+### Native XLM Representation
+
+XLM, the native asset of Stellar, is represented in one of two ways:
+
+**In most API responses:**
+```json
+{
+  "asset_type": "native"
+}
+```
+
+**In CODE:ISSUER format (used in DEX and path endpoints):**
+```
+XLM:native
+```
+
+The keyword `native` is always used in place of an issuer for XLM, since XLM has no issuer — it is the platform's native currency.
+
+### Alphanum4 Format
+
+Assets with 4-character or shorter codes are formatted as **alphanum4**. Examples include USD, EUR, CNY, and custom codes like JPY or EURT.
+
+**In API responses:**
+```json
+{
+  "asset_type": "credit_alphanum4",
+  "asset_code": "USD",
+  "asset_issuer": "GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIYU2IYLLU2DENJCAHE4WREQDFT"
+}
+```
+
+**In CODE:ISSUER format:**
+```
+USD:GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIYU2IYLLU2DENJCAHE4WREQDFT
+```
+
+### Alphanum12 Format
+
+Assets with codes longer than 4 characters (up to 12) are formatted as **alphanum12**. Examples include yXLM, abcdef123xyz, and longer custom asset codes.
+
+**In API responses:**
+```json
+{
+  "asset_type": "credit_alphanum12",
+  "asset_code": "yXLM",
+  "asset_issuer": "GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE"
+}
+```
+
+**In CODE:ISSUER format:**
+```
+yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
+```
+
+### Common Asset Examples
+
+| Asset | CODE:ISSUER Format | Description |
+| --- | --- | --- |
+| **XLM (Native)** | `XLM:native` | Stellar's native asset |
+| **USDC (USD Coin)** | `USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` | Stablecoin issued by Circle |
+| **yXLM (Yield XLM)** | `yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE` | Yield-bearing XLM wrapper |
+| **EUR (Euro)** | `EUR:GBUQWP3BOUZX34ULNQG23RQ6F4BVWCIYU2IYLLU2DENJCAHE4WREQDFT` | Fiat-backed asset |
+| **BTC (Bitcoin)** | `BTC:GATEMHCCKCY67ZUCKTROYN24ZYT5GK4EQZ65JJLDHKHRUZI3EUEKMTCH` | Bitcoin-backed asset |
+
+### Using Asset Formats in API Requests
+
+**DEX Endpoints:**
+When querying DEX endpoints like `/dex/orderbook`, `/dex/depth`, or `/dex/spread`, always use the CODE:ISSUER format:
+
+```
+GET /dex/orderbook?buyingAsset=USDC:GBBD47IF...&sellingAsset=XLM:native
+GET /dex/spread?buyingAsset=yXLM:GARDN...&sellingAsset=USDC:GBBD...
+```
+
+**Asset Lookup Endpoints:**
+When querying specific asset information via `/asset/:code/:issuer`, use the path parameters directly:
+
+```
+GET /asset/USDC/GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+GET /asset/yXLM/GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
+```
+
+---
+
+## Stellar Memo Types Reference
+
+Stellar transactions can include an optional memo field to help identify and organize payments. Each memo type serves a specific use case, and understanding when to use each type is important for building reliable payment systems.
+
+### MEMO_NONE
+
+**Max Size:** N/A (no memo)
+
+**Use Case:**
+No memo is attached to the transaction. Use this when the transaction is self-documenting or when no reference is needed. Most system-to-system transfers or internal account movements use MEMO_NONE.
+
+**Example:**
+```
+Transfer: Internal wallet sweep between accounts
+```
+
+### MEMO_TEXT
+
+**Max Size:** 28 bytes (approximately 28 ASCII characters)
+
+**Use Case:**
+Attach human-readable text that describes the transaction purpose. Common for payment references, invoice numbers, order IDs, or short descriptions. Useful for customer support and transaction reconciliation.
+
+**Example:**
+```
+memo: "INV-2024-0512"
+memo: "Salary June 2024"
+memo: "Airbot withdrawal"
+```
+
+### MEMO_ID
+
+**Max Size:** 64-bit unsigned integer (0 to 18,446,744,073,709,551,615)
+
+**Use Case:**
+Attach a numeric identifier to a transaction. Use this when you want to reference a specific transaction against a numeric database ID or unique number. Many payment processors use memo IDs to link blockchain transactions to internal records.
+
+**Example:**
+```
+memo_id: 123456789        // Links to customer ID in payment processor
+memo_id: 987654321        // References an internal invoice number
+memo_id: 1234567890123456 // Unique transaction identifier
+```
+
+### MEMO_HASH
+
+**Max Size:** 32 bytes (SHA-256 hash digest)
+
+**Use Case:**
+Attach a cryptographic hash to represent a document, contract, or data commitment. Use this when you need to prove a transaction relates to specific data without disclosing the data itself, or when you want to anchor a transaction to a specific document hash.
+
+**Example:**
+```
+memo_hash: "8f7c4b8c3f8c9e7f4c1a2b3c4d5e6f7g"  // Hash of a contract
+memo_hash: "sha256(order_data)"                 // Hash of order details
+```
+
+### MEMO_RETURN
+
+**Max Size:** 32 bytes (return hash for payment errors)
+
+**Use Case:**
+Used by receivers to send a payment back to the sender, typically when a payment cannot be processed. The memo_return value echoes the hash from the original transaction. This is most common in automated return/refund flows.
+
+**Example:**
+```
+Original transaction memo_hash: "abc123def456"
+Return transaction memo_return: "abc123def456"  // Echoes original to link refund
+```
+
+### Choosing a Memo Type
+
+Use this decision tree to select the right memo type for your use case:
+
+| Scenario | Recommended Type | Reason |
+| --- | --- | --- |
+| No reference needed | MEMO_NONE | Simplest, no overhead |
+| Readable invoice or order reference | MEMO_TEXT | Human-friendly, easy to track |
+| Link to numeric database ID | MEMO_ID | Efficient, indexed database lookups |
+| Cryptographic proof of document | MEMO_HASH | Immutable, non-repudiable commitment |
+| Automated refund or return flow | MEMO_RETURN | Tracks original transaction |
+
+### Querying Transactions by Memo
+
+Use the `GET /account/:id/transactions/search` endpoint to find transactions by memo content. The endpoint supports filtering by memo type:
+
+```
+GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=INV-2024-0512&memo_type=text
+GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=123456789&memo_type=id
+```
+
+Also use the `GET /utils/memo` endpoint to decode raw memo data from transaction responses:
+
+```
+GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
+```
+
+---
+
 ## Example Responses
 
 ### Health
@@ -408,6 +1012,76 @@ Every transaction starts with a base fee per operation. If a transaction contain
 Capacity usage is the practical signal to watch. Low usage means an economy fee can keep costs minimal. Moderate usage is a good time to choose the standard tier for a stronger chance of timely inclusion. High usage or time-sensitive flows, such as checkout, swaps, or account setup, may need the priority tier so the transaction competes better during surge pricing.
 
 Use the `GET /fee-estimate` endpoint before submitting transactions. It returns economy, standard, and priority fee tiers in both stroops and XLM, already multiplied by the requested operation count, so clients can choose the lowest fee that still fits their urgency.
+
+---
+
+## Understanding XDR
+
+XDR (External Data Representation) is the binary serialization format Stellar uses to encode transactions, operations, and results on the ledger. Every transaction that is built, signed, and submitted to the network is serialized into XDR before it travels anywhere. Horizon stores and returns this serialized form alongside the human-readable fields in its responses.
+
+In practice, XDR looks like a long Base64-encoded string — for example:
+
+```
+AAAAAgAAAAA1YmS1mXvUjD7Zq0L0m3i4XN6T8z7j8X7X8X7X8X7XAAAAZAAA...
+```
+
+It is compact and deterministic, which makes it ideal for signing and network transmission, but it is not human-readable on its own. That is why a decoder is useful during development.
+
+### Where XDR Appears in API Responses
+
+You will encounter XDR fields in several places across the StellarKit API:
+
+| Field             | Endpoint                                                        | Description                                                                                                                                                          |
+| ----------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `envelopeXdr`     | `GET /transactions/:id`, `GET /account/:id/transactions/search` | The full signed transaction envelope. Contains the transaction body, all operations, and all signatures. This is the exact bytes that were submitted to the network. |
+| `envelopeXdr`     | `GET /stream/transactions/:id` (SSE stream)                     | Same envelope data, returned via the streaming transaction formatter.                                                                                                |
+| `resultXdr`       | `GET /stream/transactions/:id` (SSE stream)                     | The transaction result as recorded by the ledger. Encodes whether the transaction succeeded and the result code for each operation.                                  |
+| `resultMetaXdr`   | `GET /stream/transactions/:id` (SSE stream)                     | Ledger entry changes produced by the transaction — which accounts, trustlines, offers, or data entries were created, updated, or deleted.                            |
+
+### When You Need to Decode XDR
+
+Most of the time you can ignore XDR fields entirely — the API already surfaces the important data (fee, memo, operation count, success status) as plain JSON. XDR becomes relevant when you need to:
+
+- **Inspect raw operations** — verify exactly what operations a transaction contained, including source accounts and parameters not surfaced in the summary fields.
+- **Debug failed transactions** — `result_xdr` encodes the precise failure reason for each operation, which is more detailed than the top-level `successful` flag.
+- **Audit ledger state changes** — `result_meta_xdr` shows every ledger entry that was modified, useful for reconciliation and auditing.
+- **Re-sign or resubmit** — if you need to take an existing envelope, inspect it, and resubmit or modify it, you start from the `envelopeXdr` value.
+
+### Decoding XDR
+
+Use the `POST /utils/decode-xdr` endpoint to convert any Base64-encoded transaction envelope into a readable JSON object. Pass the XDR string in the request body:
+
+```
+POST /utils/decode-xdr
+Content-Type: application/json
+
+{ "xdr": "AAAAAgAAAAD..." }
+```
+
+The response breaks the envelope down into its component parts:
+
+```json
+{
+  "success": true,
+  "data": {
+    "sourceAccount": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+    "fee": "100",
+    "sequenceNumber": "12345678",
+    "memo": { "type": "text", "value": "invoice-123" },
+    "timeBounds": null,
+    "operations": [
+      {
+        "type": "payment",
+        "destination": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+        "asset": { "code": "USDC", "issuer": "GA5Z..." },
+        "amount": "50.0000000"
+      }
+    ]
+  }
+}
+```
+
+The decoder accepts `envelopeXdr` values from any StellarKit response and works for both testnet and mainnet transactions.
 
 ---
 
@@ -496,6 +1170,21 @@ GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
     "assets": [...],
     "signers": [...],
     "flags": {...}
+
+### Understanding Account Sponsorship
+
+Account sponsorship in Stellar allows one account (the sponsor) to cover the base reserve and associated subentry reserves for ledger entries owned or created for another account. Sponsorship makes it possible for custodial services, marketplaces, or onboarding flows to pay ledger costs on behalf of users while sponsorship is active.
+
+- What it means: sponsorship ties specific ledger entries (accounts, trustlines, signers, data entries, offers, claimable balances, etc.) to a sponsoring account that pays the associated reserve while the sponsorship exists.
+- Sponsored reserves: while sponsorship is active, the sponsor is responsible for the base reserve required by those sponsored ledger entries. If sponsorship ends, the sponsored account must meet the reserve requirements itself or the network may require cleanup or disallow some entries.
+- Why it exists: to simplify onboarding, reduce friction for new users, and enable managed services to cover ledger costs temporarily or indefinitely.
+
+Using this API:
+
+- Inspect sponsorship relationships using `GET /account/:id/sponsorship`. This endpoint helps determine whether an account or its ledger entries are sponsored, who the sponsor is, and which entries are covered — useful for UI indicators, billing reconciliation, or migration workflows.
+
+Note: This repository documents the sponsorship inspection endpoint; it does not change any runtime behavior or add sponsorship logic.
+
   }
 }
 ```
@@ -503,14 +1192,17 @@ GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
 ---
 
 ### `GET /account/:id/pool-positions`
+
 Returns all liquidity pool positions for an account with calculated share values and equivalent reserves.
 
 **Example:**
+
 ```
 GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/pool-positions
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -543,6 +1235,7 @@ GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/pool-positi
 ```
 
 **Key Fields:**
+
 - `shares`: The account's pool share tokens
 - `sharePercent`: Percentage of total pool ownership
 - `equivalentAmount`: The account's proportional share of each reserve asset
@@ -551,6 +1244,7 @@ GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/pool-positi
 ---
 
 ### `GET /account/:id/transactions/search`
+
 Searches transaction history for a Stellar account and filters results by memo content. Useful for developers building payment reference tracking systems.
 
 **Query Parameters:**
@@ -563,12 +1257,14 @@ Searches transaction history for a Stellar account and filters results by memo c
 | `order` | string | No | Sort order: `asc` or `desc` (default: `desc`) |
 
 **Example:**
+
 ```
 GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=invoice-123
 GET /account/GAAZI4.../transactions/search?memo=12345&memo_type=id
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -611,6 +1307,7 @@ GET /account/GAAZI4.../transactions/search?memo=12345&memo_type=id
 ```
 
 **Search Behavior:**
+
 - **Text memos**: Case-insensitive substring match (e.g., "inv" matches "invoice-123")
 - **ID/Hash/Return memos**: Exact match only
 - Transactions with `memo_type: none` are excluded from results
@@ -650,17 +1347,20 @@ GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
 ---
 
 ### `GET /dex/spread/:sellAsset/:buyAsset`
+
 Calculates the bid-ask spread for a trading pair on the Stellar DEX. Helps developers and traders assess market liquidity at a glance.
 
 **Asset Format**: `CODE:ISSUER` (e.g., `XLM:native`, `USDC:GA5Z...`)
 
 **Example:**
+
 ```
 GET /dex/spread/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
 GET /dex/spread/USDC:GA5Z.../EURC:GB...
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -689,6 +1389,7 @@ GET /dex/spread/USDC:GA5Z.../EURC:GB...
 ```
 
 **Key Fields:**
+
 - `bestBid`: Highest buy order price and amount
 - `bestAsk`: Lowest sell order price and amount
 - `spreadAbsolute`: Difference between ask and bid prices
@@ -700,6 +1401,7 @@ GET /dex/spread/USDC:GA5Z.../EURC:GB...
   - **low**: Total volume < 1,000
 
 **Error Responses:**
+
 - `400`: Invalid asset format
 - `404`: No order book exists for trading pair
 
@@ -742,7 +1444,40 @@ GET /asset/search?code=USDC
 
 Establishes a live, real-time WebSocket connection to stream Stellar ledger updates. As new ledgers are closed on the Stellar blockchain, the API receives them via the Stellar Horizon SDK subscription, parses them, and immediately broadcasts them to connected WebSocket clients.
 
-#### Client Connection Example (Vanilla JS)
+#### Message Format
+
+Each ledger update is broadcast as a JSON object containing:
+
+```json
+{
+  "sequence": 51234567,
+  "closedAt": "2026-05-26T20:15:00Z",
+  "baseFee": 100,
+  "transactionCount": 54
+}
+```
+
+**Fields:**
+- `sequence` — The ledger sequence number (incremental counter)
+- `closedAt` — ISO 8601 timestamp when the ledger closed
+- `baseFee` — Base fee in stroops for transactions in this ledger
+- `transactionCount` — Number of successful transactions in this ledger
+
+#### CLI Example (wscat)
+
+Install wscat globally if you don't have it:
+```bash
+npm install -g wscat
+```
+
+Connect to the ledger stream:
+```bash
+wscat -c ws://localhost:3000/stream/ledgers
+```
+
+You'll immediately start receiving live ledger updates as they close on the network.
+
+#### Browser WebSocket API Example
 
 ```javascript
 const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
@@ -754,13 +1489,8 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const ledger = JSON.parse(event.data);
   console.log("New ledger closed:", ledger);
-  // Example output:
-  // {
-  //   "sequence": 51234567,
-  //   "closedAt": "2026-05-26T20:15:00Z",
-  //   "baseFee": 100,
-  //   "transactionCount": 54
-  // }
+  console.log(`Ledger ${ledger.sequence} closed at ${ledger.closedAt}`);
+  console.log(`Transactions: ${ledger.transactionCount}, Base Fee: ${ledger.baseFee} stroops`);
 };
 
 ws.onerror = (error) => {
@@ -770,6 +1500,31 @@ ws.onerror = (error) => {
 ws.onclose = () => {
   console.log("WebSocket connection closed.");
 };
+```
+
+#### Node.js Example
+
+```javascript
+const WebSocket = require("ws");
+
+const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
+
+ws.on("open", () => {
+  console.log("Connected to StellarKit ledger stream!");
+});
+
+ws.on("message", (data) => {
+  const ledger = JSON.parse(data.toString());
+  console.log("New ledger:", ledger);
+});
+
+ws.on("error", (error) => {
+  console.error("WebSocket error:", error);
+});
+
+ws.on("close", () => {
+  console.log("Connection closed");
+});
 ```
 
 ---
@@ -886,10 +1641,10 @@ Path payments are useful because:
 
 ### DEX Endpoints
 
-| Endpoint | Description |
-|---|---|
-| `GET /dex/spread/:sellAsset/:buyAsset` | Fetches the live order book for a trading pair and returns the best bid, best ask, spread, mid price, and order book depth. Useful for displaying market data or deciding whether conditions are favorable before submitting a trade. |
-| `GET /dex/arbitrage/:assetCode/:assetIssuer` | Uses Horizon's strict-receive path finding to check whether a circular route exists from an asset back to itself. Returns all discovered paths and flags which ones are profitable (source amount less than destination amount). |
+| Endpoint                                     | Description                                                                                                                                                                                                                           |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /dex/spread/:sellAsset/:buyAsset`       | Fetches the live order book for a trading pair and returns the best bid, best ask, spread, mid price, and order book depth. Useful for displaying market data or deciding whether conditions are favorable before submitting a trade. |
+| `GET /dex/arbitrage/:assetCode/:assetIssuer` | Uses Horizon's strict-receive path finding to check whether a circular route exists from an asset back to itself. Returns all discovered paths and flags which ones are profitable (source amount less than destination amount).      |
 
 **Asset format for DEX endpoints:** `CODE:ISSUER` — for example `USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`. Use `XLM:native` for the native asset.
 

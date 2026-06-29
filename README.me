@@ -343,11 +343,11 @@ Utility Modules
 
 Several utility modules help keep the code clean and reusable.
 
-### `src/utils/cache.js`
+### `src/services/cache.js`
 
-This module provides in-memory caching logic for expensive or frequently repeated requests. Since Stellar data such as network status changes slowly, caching can reduce Horizon API calls and improve performance.
+This module provides a centralised in-memory TTL cache service using the `node-cache` package. It is used to cache Horizon responses and other frequently requested data, reducing network calls and improving API performance.
 
-The cache utilities can be used in route handlers to store responses for a short period of time and serve them faster for subsequent requests.
+The cache service provides methods like `get(key)`, `set(key, value, ttlSeconds)`, `delete(key)`, and `flush()`. Routes such as network status and fee estimates leverage this service to serve responses faster.
 
 ### `src/utils/formatTransaction.js`
 

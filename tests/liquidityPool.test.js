@@ -93,4 +93,93 @@ describe("Liquidity Pool Profitability API", () => {
       expect(res.body.error.message).toContain("not found");
     });
   });
+
+  describe("GET /liquidity-pools/:id/reserve-ratio", () => {
+    it("returns reserve analysis for a balanced pool", async () => {
+      const mockPool = {
+        id: poolId,
+        reserves: [
+          { asset: "XLM", amount: "5000.0000000" },
+          { asset: "USDC", amount: "5000.0000000" },
+        ],
+      };
+
+      server.liquidityPools.mockReturnValue({
+        liquidityPoolId: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue(mockPool),
+      });
+
+      const res = await request(app).get(`/liquidity-pools/${poolId}/reserve-ratio`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.reserveA.amount).toBe("5000.0000000");
+      expect(res.body.data.ratioA).toBe("50.00%");
+      expect(res.body.data.ratioB).toBe("50.00%");
+      expect(res.body.data.driftFromEqual).toBe("0.00%");
+      expect(res.body.data.driftRating).toBe("balanced");
+    });
+
+    it("returns reserve analysis for a moderately imbalanced pool", async () => {
+      const mockPool = {
+        id: poolId,
+        reserves: [
+          { asset: "XLM", amount: "6000.0000000" },
+          { asset: "USDC", amount: "4000.0000000" },
+        ],
+      };
+
+      server.liquidityPools.mockReturnValue({
+        liquidityPoolId: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue(mockPool),
+      });
+
+      const res = await request(app).get(`/liquidity-pools/${poolId}/reserve-ratio`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.ratioA).toBe("60.00%");
+      expect(res.body.data.ratioB).toBe("40.00%");
+      expect(res.body.data.driftFromEqual).toBe("10.00%");
+      expect(res.body.data.driftRating).toBe("moderate");
+    });
+
+    it("returns reserve analysis for a highly imbalanced pool", async () => {
+      const mockPool = {
+        id: poolId,
+        reserves: [
+          { asset: "XLM", amount: "8000.0000000" },
+          { asset: "USDC", amount: "2000.0000000" },
+        ],
+      };
+
+      server.liquidityPools.mockReturnValue({
+        liquidityPoolId: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue(mockPool),
+      });
+
+      const res = await request(app).get(`/liquidity-pools/${poolId}/reserve-ratio`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.ratioA).toBe("80.00%");
+      expect(res.body.data.ratioB).toBe("20.00%");
+      expect(res.body.data.driftFromEqual).toBe("30.00%");
+      expect(res.body.data.driftRating).toBe("imbalanced");
+    });
+
+    it("returns 404 for unknown pool ID", async () => {
+      const error = new Error("Not Found");
+      error.response = { status: 404 };
+      server.liquidityPools.mockReturnValue({
+        liquidityPoolId: jest.fn().mockReturnThis(),
+        call: jest.fn().mockRejectedValue(error),
+      });
+
+      const res = await request(app).get(`/liquidity-pools/UNKNOWN_ID/reserve-ratio`);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.error.message).toContain("not found");
+    });
+  });
 });

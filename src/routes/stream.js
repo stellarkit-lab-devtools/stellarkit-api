@@ -1,5 +1,8 @@
 const express = require("express");
 const router = express.Router();
+const logger = require("../utils/logger");
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { server } = require("../config/stellar");
 const { StrKey } = require("@stellar/stellar-sdk");
 const { formatTransaction } = require("../utils/formatTransaction");
@@ -76,7 +79,7 @@ router.get("/transactions/:id", async (req, res, next) => {
     }
     // For other network errors, log but proceed (don't fail the stream)
     if (process.env.NODE_ENV !== "test") {
-      console.warn(`[WARN] Account existence check failed for ${id}:`, err.message);
+      logger.warn({ accountId: id, error: err.message }, "Account existence check failed");
     }
   }
 
@@ -90,7 +93,7 @@ router.get("/transactions/:id", async (req, res, next) => {
 
   // Log stream opened
   if (process.env.NODE_ENV !== "test") {
-    console.log(`[INFO] Stream opened for account ${id} at ${new Date().toISOString()}`);
+    logger.info({ accountId: id }, "Stream opened for account");
   }
 
   // Send connected event immediately
@@ -120,7 +123,7 @@ router.get("/transactions/:id", async (req, res, next) => {
 
           // Log transaction (hash only, not full payload)
           if (process.env.NODE_ENV !== "test") {
-            console.debug(`[DEBUG] Transaction forwarded: ${transaction.hash}`);
+            logger.debug({ txHash: transaction.hash }, "Transaction forwarded");
           }
 
           // Format and send transaction event
@@ -131,7 +134,7 @@ router.get("/transactions/:id", async (req, res, next) => {
         onerror: (error) => {
           // Log the error
           if (process.env.NODE_ENV !== "test") {
-            console.error(`[ERROR] Horizon stream error for ${id}:`, error);
+            logger.error({ accountId: id, error }, "Horizon stream error");
           }
 
           // Send error event if connection still open
@@ -152,7 +155,7 @@ router.get("/transactions/:id", async (req, res, next) => {
   } catch (err) {
     // Catch any synchronous errors during stream setup
     if (process.env.NODE_ENV !== "test") {
-      console.error(`[ERROR] Failed to set up stream for ${id}:`, err);
+      logger.error({ accountId: id, err }, "Failed to set up stream");
     }
 
     if (!res.writableEnded && !res.destroyed) {
@@ -175,7 +178,7 @@ router.get("/transactions/:id", async (req, res, next) => {
     }
 
     if (process.env.NODE_ENV !== "test") {
-      console.warn(`[WARN] Heartbeat sent to potentially stale connection for ${id}`);
+      logger.warn({ accountId: id }, "Heartbeat sent to potentially stale connection");
     }
 
     res.write(`event: heartbeat\n`);
@@ -187,7 +190,7 @@ router.get("/transactions/:id", async (req, res, next) => {
   // ── Client Disconnect Cleanup ───────────────────────────────────────────────
   req.on("close", () => {
     if (process.env.NODE_ENV !== "test") {
-      console.log(`[INFO] Stream closed for account ${id} (client disconnect) at ${new Date().toISOString()}`);
+      logger.info({ accountId: id }, "Stream closed for account (client disconnect)");
     }
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -196,11 +199,115 @@ router.get("/transactions/:id", async (req, res, next) => {
 
   req.on("error", () => {
     if (process.env.NODE_ENV !== "test") {
-      console.log(`[INFO] Stream closed for account ${id} (error) at ${new Date().toISOString()}`);
+      logger.info({ accountId: id }, "Stream closed for account (error)");
     }
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     if (streamClose) streamClose();
+  });
+});
+
+/**
+ * GET /stream/payments/:id
+ * SSE endpoint that streams incoming and outgoing payment events for a Stellar account.
+ *
+ * Filters to: payment, create_account operation types.
+ *
+ * SSE Events:
+ *   - payment: JSON with { type, amount, assetCode, from, to, timestamp }
+ *   - heartbeat comment (": ping"): every 30 seconds
+ */
+router.get("/payments/:id", async (req, res, next) => {
+  const { id } = req.params;
+
+  if (!StrKey.isValidEd25519PublicKey(id)) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "ValidationError",
+        message: "Invalid Stellar account ID",
+        detail: "Must be a valid G... address",
+      },
+    });
+  }
+
+  try {
+    await server.loadAccount(id);
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "NotFound",
+          message: "Account not found",
+          detail: "No Stellar account exists for this public key",
+        },
+      });
+    }
+    if (process.env.NODE_ENV !== "test") {
+      logger.warn({ accountId: id, error: err.message }, "Account check failed");
+    }
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  let closeStream;
+  let heartbeatInterval;
+
+  const PAYMENT_TYPES = new Set(["payment", "create_account"]);
+
+  try {
+    closeStream = server
+      .payments()
+      .forAccount(id)
+      .cursor("now")
+      .stream({
+        onmessage: (op) => {
+          if (res.writableEnded || res.destroyed) {
+            closeStream && closeStream();
+            return;
+          }
+
+          if (!PAYMENT_TYPES.has(op.type)) return;
+
+          const payload = {
+            type: op.type,
+            amount: op.amount || op.starting_balance || null,
+            assetCode: op.asset_type === "native" ? "XLM" : (op.asset_code || null),
+            from: op.from || op.funder || op.source_account || null,
+            to: op.to || op.account || null,
+            timestamp: op.created_at || null,
+          };
+
+          res.write(`event: payment\n`);
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        },
+        onerror: () => {
+          if (!res.writableEnded && !res.destroyed) res.end();
+          closeStream && closeStream();
+          clearInterval(heartbeatInterval);
+        },
+      });
+  } catch {
+    if (!res.writableEnded && !res.destroyed) res.end();
+    return;
+  }
+
+  heartbeatInterval = setInterval(() => {
+    if (res.writableEnded || res.destroyed) {
+      clearInterval(heartbeatInterval);
+      return;
+    }
+    res.write(": ping\n\n");
+  }, 30_000);
+
+  req.on("close", () => {
+    clearInterval(heartbeatInterval);
+    closeStream && closeStream();
   });
 });
 

@@ -1,8 +1,22 @@
 const express = require("express");
 const router = express.Router();
-const { server } = require("../config/stellar");
-const { success } = require("../utils/response");
-const { validateAccountId, validateLimit, validateOrder } = require("../utils/validators");
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
+const { server, NETWORK } = require("../config/stellar");
+const { success, toISOTimestamp } = require("../utils/response");
+const { validateAccountId } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
+const { makeAccountNotFoundError } = require("../utils/errors");
+
+function handleAccountNotFound(err, next, accountId) {
+  if (err && err.response && err.response.status === 404) {
+    return next(makeAccountNotFoundError(accountId, NETWORK));
+  }
+  if (err && err.isAccountNotFound) {
+    return next(err);
+  }
+  next(err);
+}
 
 /**
  * GET /transactions/:id
@@ -69,9 +83,7 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = validateOrder(req.query.order);
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query);
 
     let query = server
       .transactions()
@@ -95,17 +107,20 @@ router.get("/:id", async (req, res, next) => {
         id: tx.id,
         hash: tx.hash,
         ledger: tx.ledger,
-        createdAt: tx.created_at,
+        createdAt: toISOTimestamp(tx.created_at),
         sourceAccount: tx.source_account,
         fee: {
           charged: tx.fee_charged,
+          chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+          max: tx.max_fee,
+          maxInXLM: (parseInt(tx.max_fee, 10) / STROOPS_PER_XLM).toFixed(7),
           account: tx.fee_account,
         },
         feeSummary: {
-          chargedInStroops,
-          chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
-          perOperationInStroops: perOpStroops,
-          perOperationInXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
+          stroops: chargedInStroops,
+          xlm: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+          perOperationStroops: perOpStroops,
+          perOperationXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
         },
         operationCount: tx.operation_count,
         memoType: tx.memo_type,
@@ -115,31 +130,27 @@ router.get("/:id", async (req, res, next) => {
       };
     });
 
-    const lastRecord = txResponse.records[txResponse.records.length - 1];
-    const nextCursor = lastRecord ? lastRecord.paging_token : null;
-
-    return success(res, transactions, {
-      meta: {
-        count: transactions.length,
-        limit,
-        order,
-        nextCursor,
-        hasMore: transactions.length === limit,
-      },
+    return success(res, {
+      items: transactions,
+      total: transactions.length,
+      limit,
+      cursor: txResponse.records.length > 0 ? txResponse.records[txResponse.records.length - 1].paging_token : null,
     });
   } catch (err) {
-    next(err);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
 /**
  * GET /transactions/:id/operations
- * Returns the list of operations within each transaction for an account.
+ * Returns the list of operations within each transaction for a Stellar account.
  *
  * Query params:
- *   - limit  (number, default: 10, max: 200)
- *   - order  ("asc" | "desc", default: "desc")
- *   - cursor (string)
+ *   - limit   (number, default: 10, max: 200)
+ *   - cursor  (string, pagination cursor from previous response)
+ *   - order   ("asc" | "desc", default: "desc")
+ *
+ * @param {string} id - Stellar account public key (G...)
  *
  * @example
  * GET /transactions/GAAZI4.../operations?limit=20
@@ -188,9 +199,7 @@ router.get("/:id/operations", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const limit = validateLimit(req.query.limit || 10, 200);
-    const order = validateOrder(req.query.order);
-    const cursor = req.query.cursor || undefined;
+    const { limit, order, cursor } = parsePaginationParams(req.query);
 
     let query = server
       .operations()
@@ -203,61 +212,47 @@ router.get("/:id/operations", async (req, res, next) => {
     const opResponse = await query.call();
 
     const operations = opResponse.records.map((op) => {
-      const base = {
+      const formatted = {
         id: op.id,
         type: op.type,
-        createdAt: op.created_at,
+        createdAt: toISOTimestamp(op.created_at),
         transactionHash: op.transaction_hash,
         transactionSuccessful: op.transaction_successful,
         sourceAccount: op.source_account,
       };
 
-      switch (op.type) {
-        case "payment":
-          return {
-            ...base,
-            amount: op.amount,
-            assetType: op.asset_type,
-            assetCode: op.asset_code || "XLM",
-            assetIssuer: op.asset_issuer || null,
-            from: op.from,
-            to: op.to,
-          };
-        case "create_account":
-          return {
-            ...base,
-            account: op.account,
-            funder: op.funder,
-            startingBalance: op.starting_balance,
-          };
-        case "change_trust":
-          return {
-            ...base,
-            assetCode: op.asset_code,
-            assetIssuer: op.asset_issuer,
-            limit: op.limit,
-            trustee: op.trustee,
-            trustor: op.trustor,
-          };
-        default:
-          return base;
+      // Add type-specific fields
+      if (op.type === "payment") {
+        formatted.assetCode = op.asset_code || "XLM";
+        formatted.assetIssuer = op.asset_issuer || "native";
+        formatted.amount = op.amount;
+        formatted.from = op.from;
+        formatted.to = op.to;
+      } else if (op.type === "create_account") {
+        formatted.startingBalance = op.starting_balance;
+        formatted.funder = op.funder;
+        formatted.account = op.account;
+      } else if (op.type === "change_trust") {
+        formatted.assetCode = op.asset_code;
+        formatted.assetIssuer = op.asset_issuer;
+        formatted.trustor = op.trustor;
+        formatted.trustee = op.trustee;
       }
+
+      return formatted;
     });
 
     const lastRecord = opResponse.records[opResponse.records.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
-    return success(res, operations, {
-      meta: {
-        count: operations.length,
-        limit,
-        order,
-        nextCursor,
-        hasMore: operations.length === limit,
-      },
+    return success(res, {
+      items: operations,
+      total: operations.length,
+      limit,
+      cursor: nextCursor,
     });
   } catch (err) {
-    next(err);
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -316,7 +311,7 @@ router.post("/batch-status", async (req, res, next) => {
             found: true,
             successful: tx.successful,
             ledger: tx.ledger,
-            createdAt: tx.created_at,
+            createdAt: toISOTimestamp(tx.created_at),
             fee: tx.fee_charged,
           };
         } catch (err) {
