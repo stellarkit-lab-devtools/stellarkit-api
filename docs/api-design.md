@@ -13,6 +13,8 @@ This document explains the standard design guidelines and API response conventio
 5. [Amount Format](#5-amount-format)
 6. [Error Shape](#6-error-shape)
 
+For a practical walkthrough of cursor-based pagination across StellarKit endpoints, see [Pagination Guide](pagination.md).
+
 ---
 
 ## 1. Response Envelope
