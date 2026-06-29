@@ -34,6 +34,9 @@ const cacheStatsRouter = require("./routes/cacheStats");
 const networkRouter = require("./routes/network");
 
 const app = express();
+// Disable server identification header for security
+app.disable('x-powered-by');
+
 const PORT = process.env.PORT || 3000;
 
 async function warmNetworkStatusCache({ logger: customLogger = logger, horizonServer = server } = {}) {
