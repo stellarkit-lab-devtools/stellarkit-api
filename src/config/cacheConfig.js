@@ -7,12 +7,13 @@
  * env configuration.
  *
  * Environment variables (all in milliseconds):
- *   CACHE_TTL_NETWORK_STATUS_MS  — /network-status            (default: 5 000 ms)
- *   CACHE_TTL_FEE_ESTIMATE_MS    — /fee-estimate & surge-status (default: 5 000 ms)
- *   CACHE_TTL_BASE_FEE_MS        — /network/base-fee          (default: 5 000 ms)
- *   CACHE_TTL_VALIDATORS_MS      — /network/validators        (default: 300 000 ms)
- *   CACHE_TTL_ASSET_MS           — /asset/:code/:issuer       (default: 30 000 ms)
- *   CACHE_TTL_ASSET_PRICE_MS     — /asset price endpoint      (default: 5 000 ms)
+ *   CACHE_TTL_NETWORK_STATUS_MS  — /network-status                (default: 5 000 ms)
+ *   CACHE_TTL_FEE_ESTIMATE_MS    — /fee-estimate & surge-status   (default: 5 000 ms)
+ *   CACHE_TTL_BASE_FEE_MS        — /network/base-fee              (default: 5 000 ms)
+ *   CACHE_TTL_VALIDATORS_MS      — /network/validators            (default: 300 000 ms)
+ *   CACHE_TTL_ASSET_MS           — /asset/:code/:issuer           (default: 30 000 ms)
+ *   CACHE_TTL_ASSET_PRICE_MS     — /asset price endpoint          (default: 5 000 ms)
+ *   CACHE_TTL_TRUSTLINES_MS      — /account/:id/trustlines        (default: 15 000 ms)
  *
  * The legacy CACHE_TTL_MS variable is still respected as a global fallback so
  * existing deployments are not broken.
@@ -60,6 +61,12 @@ const cacheTTL = {
   assetPrice: msToSeconds(
     process.env.CACHE_TTL_ASSET_PRICE_MS,
     globalFallbackMs
+  ),
+
+  /** /account/:id/trustlines — trustline data is stable; 15 s default */
+  trustlines: msToSeconds(
+    process.env.CACHE_TTL_TRUSTLINES_MS,
+    15000
   ),
 };
 

@@ -21,6 +21,7 @@ jest.mock("../src/config/stellar", () => ({
 
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
+const cacheService = require("../src/services/cache");
 
 const ACCOUNT_ID = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
 const ISSUER_A = "GD62SRSGF4XVUHZYLZNAMTUTOH7CKJ2WZWX6HNUTZ4G5SFKNAM6G2OXD";
@@ -62,6 +63,7 @@ function makeAccount() {
 describe("GET /account/:id/trustlines?assetCode=", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    cacheService.flush();
     server.loadAccount.mockImplementation(async (id) => {
       if (id === ACCOUNT_ID) return makeAccount();
       return { id, home_domain: null };
