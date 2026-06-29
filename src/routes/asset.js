@@ -12,6 +12,7 @@ const { validateAccountId, validateAssetCode, validateAsset, validateLimit } = r
 const { parsePaginationParams } = require("../utils/pagination");
 const { makeAssetNotFoundError } = require("../utils/errors");
 const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
 router.use(normalizeAssetCode);
 
 
@@ -161,8 +162,8 @@ router.get("/:code/:issuer", async (req, res, next) => {
       issuer: issuerInfo,
     };
 
-    // Cache the response with 30s TTL
-    cacheService.set(cacheKey, data, 30);
+    // Cache the response
+    cacheService.set(cacheKey, data, cacheTTL.asset);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -466,7 +467,6 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
   }
 });
 
-const CACHE_TTL_ASSET_PRICE = parseInt(process.env.CACHE_TTL_ASSET_PRICE_MS || "5000", 10);
 
 /**
  * GET /asset/:code/:issuer/price
@@ -520,8 +520,7 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
       quoteAsset: "XLM",
     };
 
-    const ttlSeconds = CACHE_TTL_ASSET_PRICE / 1000;
-    cacheService.set(cacheKey, data, ttlSeconds);
+    cacheService.set(cacheKey, data, cacheTTL.assetPrice);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

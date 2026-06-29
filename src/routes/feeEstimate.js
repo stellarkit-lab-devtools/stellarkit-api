@@ -3,12 +3,9 @@ const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
 
 const STROOPS_PER_XLM = 10_000_000;
-
-const DEFAULT_CACHE_TTL_SECONDS = 5;
-const CACHE_TTL =
-  parseInt(process.env.CACHE_TTL_MS, 10) / 1000 || DEFAULT_CACHE_TTL_SECONDS;
 
 const LEDGER_HISTORY_LIMIT = 5;
 const STROOP_DECIMALS = 7;
@@ -148,7 +145,7 @@ router.get("/", async (req, res, next) => {
     };
 
     // Cache the response
-    cacheService.set(cacheKey, data, CACHE_TTL);
+    cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -263,7 +260,7 @@ router.get("/surge-status", async (req, res, next) => {
     };
 
     // Cache the response (surge status can be cached briefly since it's analyzed data)
-    cacheService.set(cacheKey, data, CACHE_TTL);
+    cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

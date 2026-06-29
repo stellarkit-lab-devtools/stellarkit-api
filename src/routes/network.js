@@ -3,9 +3,7 @@ const router = express.Router();
 const { server, horizonUrl } = require("../config/stellar");
 const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
-
-const VALIDATORS_CACHE_TTL = 300; // 5 minutes
-const BASE_FEE_CACHE_TTL = 5;     // 5 seconds — one ledger close interval
+const cacheTTL = require("../config/cacheConfig");
 
 /**
  * GET /network/base-fee
@@ -52,7 +50,7 @@ router.get("/base-fee", async (req, res, next) => {
       note: "Base fee is in stroops. 1 XLM = 10,000,000 stroops. Cached for 5 seconds.",
     };
 
-    cacheService.set(cacheKey, data, BASE_FEE_CACHE_TTL);
+    cacheService.set(cacheKey, data, cacheTTL.baseFee);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -133,7 +131,7 @@ router.get("/validators", async (req, res, next) => {
       ungrouped,
     };
 
-    cacheService.set(cacheKey, data, VALIDATORS_CACHE_TTL);
+    cacheService.set(cacheKey, data, cacheTTL.validators);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
