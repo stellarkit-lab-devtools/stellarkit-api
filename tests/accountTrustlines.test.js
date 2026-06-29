@@ -25,6 +25,7 @@ jest.mock("../src/config/stellar", () => ({
 
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
+const cacheService = require("../src/services/cache");
 
 const ACCOUNT_ID =
   "GDU5LH56CZ7NVKRHYI72QVJC6BS7GAYEIO34HDMICG3H5NSFJJJFHFWL";
@@ -70,6 +71,7 @@ function accountWithBalances() {
 describe("GET /account/:id/trustlines", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    cacheService.flush();
   });
 
   it("returns non-native balances with resolved stellar.toml metadata", async () => {
