@@ -39,50 +39,131 @@ This project is ideal for:
 
 ---
 
-## API Quick Reference
+## Documentation
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| GET | `/` | Lists available API endpoints and descriptions |
-| GET | `/health` | Returns basic service health status |
-| GET | `/network-status` | Returns current Stellar network and ledger info |
-| GET | `/fee-estimate` | Calculates fee estimates for a transaction |
-| GET | `/account/:id` | Retrieves full account details and balances |
-| GET | `/account/:id/balances` | Retrieves XLM and asset balances only |
-| GET | `/account/:id/sequence` | Retrieves the account sequence number |
-| GET | `/account/:id/summary` | Retrieves a compact account summary |
-| GET | `/account/:id/payments` | Lists payment and create_account operations |
-| GET | `/account/:id/sponsorship` | Returns sponsorship relationships for the account (sponsor id and sponsored ledger entries) |
-| GET | `/transactions/:id` | Retrieves paginated transaction history |
-| GET | `/transactions/:id/operations` | Retrieves paginated operation history |
-| GET | `/asset/:code/:issuer` | Retrieves metadata and statistics for an asset |
-| GET | `/asset/:code/:issuer/holders` | Lists holders of an asset trustline |
-| GET | `/asset/search` | Searches assets by code across issuers |
-| GET | `/stream/transactions/:id` | Streams live account transactions via SSE |
-| GET | `/utils/friendbot/:accountId` | Funds a testnet account via Friendbot |
-| GET | `/utils/memo` | Decodes Horizon memo data |
-| GET | `/utils/base64` | Encodes or decodes Base64 strings |
-| Method | Endpoint                       | Description                                     |
-| ------ | ------------------------------ | ----------------------------------------------- |
-| GET    | `/`                            | Lists available API endpoints and descriptions  |
-| GET    | `/health`                      | Returns basic service health status             |
-| GET    | `/network-status`              | Returns current Stellar network and ledger info |
-| GET    | `/fee-estimate`                | Calculates fee estimates for a transaction      |
-| GET    | `/account/:id`                 | Retrieves full account details and balances     |
-| GET    | `/account/:id/balances`        | Retrieves XLM and asset balances only           |
-| GET    | `/account/:id/sequence`        | Retrieves the account sequence number           |
-| GET    | `/account/:id/summary`         | Retrieves a compact account summary             |
-| GET    | `/account/:id/payments`        | Lists payment and create_account operations     |
-| GET    | `/transactions/:id`            | Retrieves paginated transaction history         |
-| GET    | `/transactions/:id/operations` | Retrieves paginated operation history           |
-| GET    | `/asset/:code/:issuer`         | Retrieves metadata and statistics for an asset  |
-| GET    | `/asset/:code/:issuer/holders` | Lists holders of an asset trustline             |
-| GET    | `/asset/search`                | Searches assets by code across issuers          |
-| GET    | `/stream/transactions/:id`     | Streams live account transactions via SSE       |
-| GET    | `/utils/friendbot/:accountId`  | Funds a testnet account via Friendbot           |
-| GET    | `/utils/memo`                  | Decodes Horizon memo data                       |
-| GET    | `/utils/base64`                | Encodes or decodes Base64 strings               |
-| GET    | `/utils/convert`               | Converts between XLM and stroops                |
+- [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
+
+---
+
+## API Reference
+
+### Network
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/` | Lists available API endpoints | — |
+| GET | `/health` | Service health check | — |
+| GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
+| GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
+| GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
+
+### Fees
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/fee-estimate` | Fee tiers for transaction submission | `operations`, `fresh` |
+| GET | `/fee-estimate/surge-status` | Fee surge detection and recommendations | `fresh` |
+
+### Account
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/account/:id` | Account details, balances, reserve breakdown | — |
+| GET | `/account/:id/age` | Account age and longevity metrics | — |
+| GET | `/account/:id/balances` | XLM and asset balances | — |
+| GET | `/account/:id/sequence` | Current sequence number | — |
+| GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | — |
+| GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor` |
+| GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
+| GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
+| GET | `/account/:id/analytics` | Basic account activity analytics | — |
+| GET | `/account/:id/inactivity` | Days since last transaction and status | — |
+| GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
+| GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
+| GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
+| GET | `/account/:id/subentry-health` | Subentry usage and remaining capacity | — |
+| GET | `/account/:id/sponsorship` | Sponsorship relationships for the account | — |
+| GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
+| GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
+| GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
+| POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
+
+### Transactions
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/transactions/:id` | Paginated transaction history for an account | `limit`, `order`, `cursor` |
+| GET | `/transactions/:id/operations` | Paginated operation history for an account | `limit`, `order`, `cursor` |
+| POST | `/transactions/batch-status` | Check confirmation status of multiple tx hashes | Body: `hashes` |
+
+### Asset
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/asset/:code/:issuer` | Asset metadata and statistics | `fresh` |
+| GET | `/asset/:code/:issuer/holders` | Paginated accounts holding an asset | `limit`, `order`, `cursor` |
+| GET | `/asset/:code/:issuer/distribution` | Holder concentration and Gini coefficient | — |
+| GET | `/asset/:code/:issuer/supply` | Total, circulating, and locked supply breakdown | — |
+| GET | `/asset/:code/:issuer/verify` | Verify issuer via flags, home_domain, and stellar.toml | — |
+| GET | `/asset/search` | Search assets by code across all issuers | `code`, `limit` |
+
+### DEX
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/dex/price/:sellAsset/:buyAsset` | Effective exchange rate via best DEX path | `amount` |
+| GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
+| GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
+| GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
+| GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
+
+### Liquidity Pools
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/liquidity-pools/:id/profitability` | Estimated annualized fee income | — |
+| GET | `/liquidity-pools/:id/reserve-ratio` | Reserve ratio and drift from equal | — |
+
+### Claimable Balances
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/claimable-balances/:id/evaluate/:accountId` | Evaluate claimability for a specific account | — |
+
+### Streaming
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| WS | `/stream/ledgers` | Real-time ledger updates via WebSocket | — |
+| GET | `/stream/transactions/:id` | Live account transactions via SSE | — |
+| GET | `/stream/payments/:id` | Live payment events via SSE | — |
+
+### Stellar TOML
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/stellar-toml/:domain` | Fetch and parse stellar.toml for a domain | — |
+
+### Utilities
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/utils/friendbot/:accountId` | Fund a testnet account via Friendbot | — |
+| GET | `/utils/convert` | Convert between XLM and stroops | `xlm` or `stroops` |
+| GET | `/utils/validate-account` | Validate a Stellar public key format | `id` |
+| GET | `/utils/validate-asset` | Validate a Stellar asset code format | `code` |
+| GET | `/utils/memo` | Decode a raw Horizon memo | `type`, `value` |
+| GET | `/utils/base64` | Encode or decode Base64 strings | `encode` or `decode` |
+| GET | `/utils/ledger-date` | Estimate close date for a ledger sequence | `sequence` |
+| GET | `/utils/keypair` | Generate a random testnet keypair | — |
+| POST | `/utils/decode-xdr` | Decode a transaction XDR envelope to JSON | Body: `xdr` |
+
+### Cache
+
+| Method | Path | Description | Query Params |
+| ------ | ---- | ----------- | ------------ |
+| GET | `/cache/stats` | Cache hit rate and performance statistics | — |
 
 ---
 
@@ -110,6 +191,8 @@ StellarKit API currently supports Soroban contract inspection through the `/soro
 ---
 
 ## Getting Started
+
+New to Stellar or this API? Start with the **[Getting Started Guide](docs/getting-started.md)** for step-by-step instructions. Also see the **[Glossary](docs/glossary.md)** for explanations of Stellar-specific terminology.
 
 ### Prerequisites
 
@@ -160,142 +243,18 @@ Visit `http://localhost:3000` after startup.
 | `NODE_ENV`        | `development`                      | Runtime environment. Set to `production` to enable combined HTTP logging and sanitised error messages. Set to `test` to suppress console output during test runs. | ⬜ No    |
 | `RATE_LIMIT_MAX`  | `100`                              | Maximum number of requests allowed per IP address per 15-minute window. Applies to the global rate limiter.                                                       | ⬜ No    |
 | `CACHE_TTL_MS`    | `5000`                             | Cache time-to-live in milliseconds for the `/network-status` and `/fee-estimate` endpoints.                                                                       | ⬜ No    |
+| `REQUIRE_API_KEY` | `false`                            | Enables API key authentication. When true, clients must provide a valid API key via X-API-Key header.                                                             | ⬜ No    |
+| `API_KEYS`        | _(empty)_                          | Comma-separated list of valid API keys. Required when REQUIRE_API_KEY=true.                                                                                       | ⬜ No    |
 
 > All variables are optional — the server starts with sensible defaults when none are set. Set `STELLAR_NETWORK=mainnet` explicitly before deploying to production to avoid accidentally pointing at testnet.
 
 ---
 
+## Stellar Terminology
 
-## Optional API Key Authentication (Issue #198)
-
-StellarKit API supports optional API key protection using environment variables:
-
-```env
-REQUIRE_API_KEY=true
-API_KEYS=key1,key2,key3
-```
-
-When `REQUIRE_API_KEY` is enabled, clients must send the API key in the `X-API-Key` request header. The `/health` and `/` endpoints remain public even when authentication is enabled.
-
-This feature is implemented in `src/middleware/apiKey.js` and covered by unit tests in `tests/apiKeyMiddleware.test.js`.
-
-## FAQ
-
-### What is the difference between testnet and mainnet?
-The testnet is a free Stellar network for development and experimentation. Mainnet is the real network for live value transfers. Use testnet while building and switch to mainnet only when you are ready for production.
-
-### How do I get a testnet account?
-You can create a testnet account using Stellar's Friendbot service. In StellarKit API, use `GET /utils/friendbot/:accountId` with a valid public key to fund a new testnet account instantly.
-
-### What are stroops?
-A stroop is the smallest unit of XLM, just like a cent is the smallest unit of a dollar. One XLM equals 10 million stroops, so balances and fees are often measured in stroops internally.
-
-### Why does Stellar require a minimum balance?
-Stellar requires a minimum balance to prevent spam and keep the ledger efficient. Each account and each ledger entry (trustline, offer, data entry, signer) increases the reserve required to keep the account active.
-
-### What is XDR?
-XDR is the binary format Stellar uses to encode transactions, ledger entries, and protocol data. It lets Stellar transmit structured data in a compact, predictable way across the network.
-
-### How can I read claimable balance predicates?
-Claimable balance predicates are conditions that control when a claim is allowed. Common types include `unconditional`, `abs_before`, and `abs_after`. You can also combine them with `and`, `or`, and `not` to build more complex rules.
-
-### What is a home domain?
-A home domain is an optional string attached to a Stellar account that identifies the account's website or service. Wallets and anchors use it for branding, federation lookups, and verifying issuer relationships.
-
-### Are there rate limits for StellarKit API?
-Yes. StellarKit API uses a global rate limiter by default to protect the service and the underlying Horizon endpoints. The default limit is 100 requests per IP per 15 minutes, and it can be adjusted with `RATE_LIMIT_MAX`.
+New to Stellar? See the **[Glossary](docs/glossary.md)** for plain-language explanations of stroops, trustlines, claimable balances, anchors, liquidity pools, and other key concepts.
 
 ---
-
-## Stellar Glossary
-
-This glossary defines key Stellar-specific terms that appear throughout the API responses and Stellar documentation. Use this reference to understand the fundamental concepts of the Stellar ecosystem.
-
-### Base Reserve
-The fundamental unit of account reserve on the Stellar network, currently set to 0.5 XLM. Every account must hold a minimum of 2 base reserves (1 XLM) to exist, and each subentry increases the reserve requirement by 1 base reserve.
-
-### Claimable Balance
-A Stellar ledger entry that holds funds on behalf of one or more future recipients without requiring those recipients to exist on the network. Claimable balances can have predicates that control when funds can be claimed, enabling conditional and deferred transfers.
-
-### DEX
-The Decentralized Exchange built into Stellar's ledger. It allows users to create and fill limit orders for any pair of assets, forming automatic order books without a central operator.
-
-### Home Domain
-An optional string attached to a Stellar account that identifies the account's website or service. Used for branding, federation lookups, and verifying issuer relationships in wallets and anchors.
-
-### Horizon
-Stellar's REST API that provides access to the ledger, transactions, operations, and account data. Horizon is the primary interface for querying the Stellar network state and submitting transactions.
-
-### Ledger
-The main database of the Stellar blockchain that stores all accounts, balances, trustlines, offers, data entries, and other ledger entries. Each ledger closes approximately every 5-6 seconds, creating permanent historical records.
-
-### Liquidity Pool
-An automated market maker (AMM) that holds equal-value reserves of two assets and facilitates swaps between them. Pool shares represent ownership stakes, and traders pay fees that are distributed to share holders.
-
-### Memo
-An optional text, ID, hash, or return value attached to a transaction. Memos help organize and reference transactions but do not affect transaction logic or validation.
-
-### Sequence Number
-A counter maintained for each Stellar account that increments with each transaction. The sequence number ensures transactions are processed in order and prevents transaction replays. Clients must increment the sequence number when building multiple transactions.
-
-### Soroban
-Stellar's smart contract platform that allows developers to write WebAssembly (WASM) programs and execute them on the Stellar ledger. Soroban enables complex business logic beyond traditional Stellar operations.
-
-### Stellar TOML
-A configuration file hosted on an organization's domain that describes its Stellar-enabled services, supported assets, and federation information. Wallets and applications use Stellar TOML to verify issuer authenticity and discover federated addresses.\n\n### Stroop
-The smallest unit of XLM, similar to a cent in traditional currency. One XLM equals 10 million stroops. Fees and small balances are often expressed in stroops internally.
-
-### Subentry
-Any ledger entry owned by an account other than the account itself. Trustlines, open offers, data entries, and additional signers are all subentries. Each subentry increases the account's minimum balance requirement by 1 base reserve (0.5 XLM).
-
-### Trustline
-A connection between an account and a specific asset (identified by code and issuer). An account must establish a trustline before it can hold or receive a non-native asset. Trustlines have limits that control the maximum amount of an asset an account can hold.
-
-### XDR
-External Data Representation; the binary serialization format Stellar uses to encode transactions, operations, and ledger data. XDR ensures compact, deterministic encoding for signing and network transmission.
-
----
-
-
-## Testnet vs Mainnet
-
-Stellar operates two public networks: **testnet** and **mainnet**. StellarKit API supports both and switches between them with a single environment variable.
-
-| Feature | Testnet | Mainnet |
-|---|---|---|
-| Real funds | ❌ No — test XLM only | ✅ Yes — real XLM and assets |
-| Network resets | ✅ Periodic resets (quarterly) | ❌ Never resets |
-| Friendbot availability | ✅ Free account funding via `GET /utils/friendbot/:accountId` | ❌ Not available |
-| Horizon URL | `https://horizon-testnet.stellar.org` | `https://horizon.stellar.org` |
-| Recommended for | Development and testing | Production only |
-
-### Switching Between Networks
-
-Open your `.env` file and change `STELLAR_NETWORK`. That is the only value you need to update — `HORIZON_URL` is automatically derived from it and can be left blank.
-
-**Testnet (default):**
-```env
-STELLAR_NETWORK=testnet
-HORIZON_URL=
-```
-
-**Mainnet:**
-```env
-STELLAR_NETWORK=mainnet
-HORIZON_URL=
-```
-
-Restart the server after changing environment variables for the new values to take effect.
-
-### Mainnet Safety Considerations
-
-> ⚠️ **Before switching to mainnet, read this carefully.**
->
-> - **Real funds are at risk.** Every transaction on mainnet moves real XLM and real assets. Mistakes cannot be undone.
-> - **Friendbot is not available.** You cannot fund accounts for free on mainnet. Accounts must be funded with real XLM.
-> - **The network never resets.** Unlike testnet, mainnet state is permanent. There is no way to undo a transaction or recover a lost private key.
-> - **Never use testnet keypairs on mainnet.** Keys generated or printed during `npm run seed` are for testnet only. Generate fresh keypairs for mainnet and keep private keys secure.
-> - **Test thoroughly on testnet first.** Only switch to `STELLAR_NETWORK=mainnet` when your integration is fully validated.
 
 ## Understanding Stellar Account Reserves
 
@@ -1037,6 +996,91 @@ GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
 }
 ```
 
+### `GET /fee-estimate`
+
+Fetch fee tiers for a transaction, optionally requesting fresh Horizon data.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate?operations=3&fresh=true"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "operationCount": 3,
+    "perOperation": {
+      "economy": { "stroops": 100, "xlm": "0.0000100" },
+      "standard": { "stroops": 200, "xlm": "0.0000200" },
+      "priority": { "stroops": 500, "xlm": "0.0000500" }
+    },
+    "totalFee": {
+      "economy": { "stroops": 300, "xlm": "0.0000300" },
+      "standard": { "stroops": 600, "xlm": "0.0000600" },
+      "priority": { "stroops": 1500, "xlm": "0.0001500" }
+    },
+    "networkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": "0.72",
+      "p50": "200",
+      "p95": "500"
+    },
+    "recommendation": "Standard tier is recommended for moderate congestion."
+  }
+}
+```
+
+### `GET /fee-estimate/surge-status`
+
+Check whether the network is currently in a fee surge period.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate/surge-status"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "isSurging": false,
+    "avgCapacityUsage": 0.43,
+    "ledgersAnalyzed": 10,
+    "suggestedFee": 100,
+    "suggestedFeeInXLM": "0.0000100",
+    "recommendation": "Network is operating normally with low congestion.",
+    "currentNetworkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": "0.43",
+      "p50Fee": "200",
+      "p95Fee": "500"
+    }
+  }
+}
+```
+
+### `GET /fee-estimate/trends`
+
+Analyze fee trends across the last 50 ledgers.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate/trends"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "ledgersAnalyzed": 50,
+    "avgBaseFee": 120.34,
+    "minBaseFee": 100,
+    "maxBaseFee": 500,
+    "avgCapacityUsage": 0.65,
+    "trend": "rising",
+    "recommendation": "Fees are trending upward. Consider submitting time-sensitive transactions soon or use the priority tier."
+  }
+}
+```
+
 ---
 
 ## Understanding Stellar Fees
@@ -1070,9 +1114,9 @@ You will encounter XDR fields in several places across the StellarKit API:
 | Field             | Endpoint                                                        | Description                                                                                                                                                          |
 | ----------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `envelopeXdr`     | `GET /transactions/:id`, `GET /account/:id/transactions/search` | The full signed transaction envelope. Contains the transaction body, all operations, and all signatures. This is the exact bytes that were submitted to the network. |
-| `envelope_xdr`    | `GET /stream/transactions/:id` (SSE stream)                     | Same envelope data, returned in the raw Horizon field name format used by the streaming formatter.                                                                   |
-| `result_xdr`      | `GET /stream/transactions/:id` (SSE stream)                     | The transaction result as recorded by the ledger. Encodes whether the transaction succeeded and the result code for each operation.                                  |
-| `result_meta_xdr` | `GET /stream/transactions/:id` (SSE stream)                     | Ledger entry changes produced by the transaction — which accounts, trustlines, offers, or data entries were created, updated, or deleted.                            |
+| `envelopeXdr`     | `GET /stream/transactions/:id` (SSE stream)                     | Same envelope data, returned via the streaming transaction formatter.                                                                                                |
+| `resultXdr`       | `GET /stream/transactions/:id` (SSE stream)                     | The transaction result as recorded by the ledger. Encodes whether the transaction succeeded and the result code for each operation.                                  |
+| `resultMetaXdr`   | `GET /stream/transactions/:id` (SSE stream)                     | Ledger entry changes produced by the transaction — which accounts, trustlines, offers, or data entries were created, updated, or deleted.                            |
 
 ### When You Need to Decode XDR
 
@@ -1480,7 +1524,40 @@ GET /asset/search?code=USDC
 
 Establishes a live, real-time WebSocket connection to stream Stellar ledger updates. As new ledgers are closed on the Stellar blockchain, the API receives them via the Stellar Horizon SDK subscription, parses them, and immediately broadcasts them to connected WebSocket clients.
 
-#### Client Connection Example (Vanilla JS)
+#### Message Format
+
+Each ledger update is broadcast as a JSON object containing:
+
+```json
+{
+  "sequence": 51234567,
+  "closedAt": "2026-05-26T20:15:00Z",
+  "baseFee": 100,
+  "transactionCount": 54
+}
+```
+
+**Fields:**
+- `sequence` — The ledger sequence number (incremental counter)
+- `closedAt` — ISO 8601 timestamp when the ledger closed
+- `baseFee` — Base fee in stroops for transactions in this ledger
+- `transactionCount` — Number of successful transactions in this ledger
+
+#### CLI Example (wscat)
+
+Install wscat globally if you don't have it:
+```bash
+npm install -g wscat
+```
+
+Connect to the ledger stream:
+```bash
+wscat -c ws://localhost:3000/stream/ledgers
+```
+
+You'll immediately start receiving live ledger updates as they close on the network.
+
+#### Browser WebSocket API Example
 
 ```javascript
 const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
@@ -1492,13 +1569,8 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const ledger = JSON.parse(event.data);
   console.log("New ledger closed:", ledger);
-  // Example output:
-  // {
-  //   "sequence": 51234567,
-  //   "closedAt": "2026-05-26T20:15:00Z",
-  //   "baseFee": 100,
-  //   "transactionCount": 54
-  // }
+  console.log(`Ledger ${ledger.sequence} closed at ${ledger.closedAt}`);
+  console.log(`Transactions: ${ledger.transactionCount}, Base Fee: ${ledger.baseFee} stroops`);
 };
 
 ws.onerror = (error) => {
@@ -1508,6 +1580,31 @@ ws.onerror = (error) => {
 ws.onclose = () => {
   console.log("WebSocket connection closed.");
 };
+```
+
+#### Node.js Example
+
+```javascript
+const WebSocket = require("ws");
+
+const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
+
+ws.on("open", () => {
+  console.log("Connected to StellarKit ledger stream!");
+});
+
+ws.on("message", (data) => {
+  const ledger = JSON.parse(data.toString());
+  console.log("New ledger:", ledger);
+});
+
+ws.on("error", (error) => {
+  console.error("WebSocket error:", error);
+});
+
+ws.on("close", () => {
+  console.log("Connection closed");
+});
 ```
 
 ---

@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 
@@ -92,6 +94,9 @@ router.get("/:id/profitability", async (req, res, next) => {
  * and tracks how far it has drifted from a 50/50 ratio.
  *
  * @param {string} id - Liquidity Pool ID (64-char hex string)
+ *
+ * @example
+ * GET /liquidity-pools/67339253ccd0390f4886b5952d7f8d68f70f61280d908e234190c609c95b6026/reserve-ratio
  */
 router.get("/:id/reserve-ratio", async (req, res, next) => {
   try {

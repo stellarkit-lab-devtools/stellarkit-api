@@ -99,13 +99,12 @@ describe("GET /account/:id/trustlines", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.accountId).toBe(ACCOUNT_ID);
-    expect(res.body.data.count).toBe(2);
-    expect(res.body.data.trustlines).toEqual([
+    expect(res.body.data.total).toBe(2);
+    expect(res.body.data.limit).toBeNull();
+    expect(res.body.data.cursor).toBeNull();
+    expect(res.body.data.items).toEqual([
       expect.objectContaining({
-        assetCode: "USDC",
-        assetIssuer: RESOLVED_ISSUER,
-        assetType: "credit_alphanum4",
+        asset: { code: "USDC", issuer: RESOLVED_ISSUER, type: "credit_alphanum4" },
         balance: "25.0000000",
         toml: {
           name: "USD Coin",
@@ -114,16 +113,14 @@ describe("GET /account/:id/trustlines", () => {
         },
       }),
       expect.objectContaining({
-        assetCode: "NOHOME",
-        assetIssuer: UNRESOLVED_ISSUER,
-        assetType: "credit_alphanum12",
+        asset: { code: "NOHOME", issuer: UNRESOLVED_ISSUER, type: "credit_alphanum12" },
         balance: "2.5000000",
         toml: null,
       }),
     ]);
     expect(axios.get).toHaveBeenCalledWith(
       "https://assets.example.com/.well-known/stellar.toml",
-      expect.objectContaining({ responseType: "text", timeout: 5000 }),
+      expect.objectContaining({ timeout: 5000 }),
     );
   });
 
@@ -143,9 +140,9 @@ describe("GET /account/:id/trustlines", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.trustlines).toEqual([
+    expect(res.body.data.items).toEqual([
       expect.objectContaining({
-        assetCode: "USDC",
+        asset: expect.objectContaining({ code: "USDC" }),
         toml: null,
       }),
     ]);

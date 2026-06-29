@@ -1,9 +1,11 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { Asset } = require("@stellar/stellar-sdk");
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
-const { validateAssetCode, validateAccountId } = require("../utils/validators");
+const { validateAssetCode, validateAccountId, validateAsset } = require("../utils/validators");
 const { parseStellarAsset } = require("../utils/asset");
 
 /**
@@ -20,8 +22,7 @@ router.get("/arbitrage/:assetCode/:assetIssuer", async (req, res, next) => {
     // Validate asset code and issuer (if not native)
     if (assetCode.toUpperCase() !== "XLM" || assetIssuer.toLowerCase() !== "native") {
       // Validate inputs using shared validators
-      validateAssetCode(assetCode);
-      validateAccountId(assetIssuer);
+      validateAsset(assetCode, assetIssuer);
     }
 
     const asset = (assetCode.toUpperCase() === "XLM" && assetIssuer.toLowerCase() === "native")

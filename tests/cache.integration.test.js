@@ -54,4 +54,62 @@ describe("Cache Integration", () => {
       expect(res.headers["x-cache"]).toBe("HIT");
     });
   });
+
+  describe("ETag Support", () => {
+    describe("GET /network-status with ETag", () => {
+      it("should return an ETag header on successful response", async () => {
+        const res = await request(app).get("/network-status");
+        expect(res.headers["etag"]).toBeDefined();
+        expect(res.headers["etag"]).toMatch(/^"[a-f0-9]{64}"$/); // SHA256 hash format
+      });
+
+      it("should return 304 Not Modified when If-None-Match matches ETag", async () => {
+        const firstRes = await request(app).get("/network-status");
+        const etag = firstRes.headers["etag"];
+
+        const secondRes = await request(app)
+          .get("/network-status")
+          .set("If-None-Match", etag);
+
+        expect(secondRes.status).toBe(304);
+        expect(secondRes.body).toEqual({}); // 304 has no body
+        expect(secondRes.headers["etag"]).toBe(etag);
+      });
+
+      it("should return 200 with full response when If-None-Match does not match", async () => {
+        const firstRes = await request(app).get("/network-status");
+        const wrongETag = '"wrongetag"';
+
+        const secondRes = await request(app)
+          .get("/network-status")
+          .set("If-None-Match", wrongETag);
+
+        expect(secondRes.status).toBe(200);
+        expect(secondRes.body).toBeDefined();
+        expect(secondRes.headers["etag"]).toBeDefined();
+      });
+    });
+
+    describe("GET /fee-estimate with ETag", () => {
+      it("should return an ETag header on successful response", async () => {
+        const res = await request(app).get("/fee-estimate");
+        expect(res.headers["etag"]).toBeDefined();
+        expect(res.headers["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
+      });
+
+      it("should return 304 Not Modified when If-None-Match matches ETag", async () => {
+        const firstRes = await request(app).get("/fee-estimate");
+        const etag = firstRes.headers["etag"];
+
+        const secondRes = await request(app)
+          .get("/fee-estimate")
+          .set("If-None-Match", etag);
+
+        expect(secondRes.status).toBe(304);
+        expect(secondRes.body).toEqual({});
+        expect(secondRes.headers["etag"]).toBe(etag);
+      });
+    });
+  });
 });
+

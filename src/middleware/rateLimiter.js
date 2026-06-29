@@ -10,23 +10,55 @@ function parsePositiveInteger(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function buildRateLimitMessage(message) {
-  return {
+/**
+ * Custom handler for rate limit exceeded.
+ * Sets proper headers (Retry-After, X-RateLimit-*) and returns structured error response.
+ *
+ * @param {import('express').Request} req - Express request
+ * @param {import('express').Response} res - Express response
+ * @param {*} options - Rate limiter options
+ */
+function rateLimitHandler(req, res, options) {
+  // Calculate retry-after in seconds (window in ms to seconds)
+  const retryAfterSeconds = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
+
+  // Set rate limit headers on all rate-limited responses
+  res.set('Retry-After', String(retryAfterSeconds));
+  res.set('X-RateLimit-Limit', String(options.max));
+  res.set('X-RateLimit-Remaining', '0');
+  res.set('X-RateLimit-Reset', new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString());
+
+  res.status(429).json({
     success: false,
     error: {
-      type: "RateLimitError",
-      message,
+      type: "RateLimitExceeded",
+      message: "Too many requests, please try again later.",
+      retryAfter: retryAfterSeconds,
+      resetAt: new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString(),
     },
-  };
+  });
 }
 
+/**
+ * Create a rate limiter with proper error handling and headers.
+ *
+ * @param {Object} config - Configuration object
+ * @param {number} config.max - Maximum requests per window
+ * @param {string} config.message - User-friendly error message
+ * @returns {Function} Express middleware
+ */
 function createLimiter({ max, message }) {
   return rateLimit({
     windowMs: RATE_LIMIT_WINDOW_MS,
     max,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: buildRateLimitMessage(message),
+    standardHeaders: false, // Don't use default RateLimit-* headers
+    legacyHeaders: false,   // Don't use deprecated X-RateLimit-* headers from express-rate-limit
+    handler: rateLimitHandler, // Use our custom handler
+    // Optional: Skip certain requests
+    skip: (req) => {
+      // Skip health check endpoint
+      return req.path === "/health";
+    },
   });
 }
 
@@ -48,6 +80,8 @@ const assetHoldersRateLimiter = createLimiter({
 });
 
 module.exports = globalRateLimiter;
+module.exports.accountSummaryRateLimiter = accountSummaryRateLimiter;
+module.exports.assetHoldersRateLimiter = assetHoldersRateLimiter;
 module.exports.globalRateLimiter = globalRateLimiter;
 module.exports.accountSummaryRateLimiter = accountSummaryRateLimiter;
 module.exports.assetHoldersRateLimiter = assetHoldersRateLimiter;
