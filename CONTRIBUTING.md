@@ -17,6 +17,17 @@ This repo is part of the Stellar Wave Program. During each monthly Wave (a 7-day
 
 ---
 
+### 🏷️ Stellar Wave Issues
+
+Issues labeled with **Stellar Wave** are part of the paid-contribution program described above.
+
+- **Point rewards** — Each Stellar Wave issue carries a point value (indicated by its complexity label: `trivial`, `medium`, or `high`). Points are converted to real rewards at the end of each Wave.
+- **Apply before starting** — You **must** apply to work on a Stellar Wave issue via the [Drips Wave app](https://www.drips.network/wave/stellar) **before** you start coding. Pull Requests submitted without a prior application will not be eligible for rewards.
+- **Merge before the Wave ends** — To earn points for a Stellar Wave issue, your Pull Request must be **merged before the current Wave ends**. PRs that are still open when the Wave closes will not receive points.
+- **How to identify them** — Look for the `Stellar Wave` label on issues in the [Issues tab](../../issues). These issues are also marked with complexity labels (`trivial`, `medium`, `high`) that determine their point value.
+
+---
+
 ## 🛠️ Development Setup
 
 ```bash
