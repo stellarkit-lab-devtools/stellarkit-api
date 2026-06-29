@@ -42,6 +42,7 @@ This project is ideal for:
 ## Documentation
 
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [Pagination Guide](docs/pagination.md) - Learn how cursor-based pagination works across the API
 
 ---
 
