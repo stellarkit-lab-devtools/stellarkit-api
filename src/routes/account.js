@@ -14,8 +14,7 @@ const {
 
 const { parsePaginationParams } = require("../utils/pagination");
 const { buildAccountAgeResponse } = require("../utils/accountAge");
-const cacheService = require("../services/cache");
-const cacheTTL = require("../config/cacheConfig");
+const { validateEffectType } = require("../utils/effectTypes");
 
 
 const axios = require("axios");
@@ -23,6 +22,8 @@ const { Asset } = require("@stellar/stellar-sdk");
 
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
+const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
 
 function validateLimit(limit, max = 100) {
   const n = Number(limit);
@@ -477,13 +478,104 @@ router.get("/:id/offers", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/effects
+ * Returns paginated account effects from Horizon (historical, immutable ledger events).
+ *
+ * Query params:
+ *   - limit, order, cursor — pagination (see parsePaginationParams)
+ *   - type — optional effect type filter (e.g. account_credited)
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ */
+router.get("/:id/effects", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const effectType = req.query.type || null;
+    if (effectType) {
+      validateEffectType(effectType);
+    }
+
+    const cacheKey = `effects:${id}:${limit}:${order}:${cursor || ""}:${effectType || ""}`;
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let query = server.effects().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+    if (effectType) query = query.type(effectType);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    const items = records.map((effect) => ({
+      id: effect.id,
+      type: effect.type,
+      account: effect.account,
+      createdAt: toISOTimestamp(effect.created_at),
+      pagingToken: effect.paging_token,
+      transactionHash: effect.transaction_hash || null,
+      asset: effect.asset || null,
+      amount: effect.amount || null,
+      balance: effect.balance || null,
+      startingBalance: effect.starting_balance || null,
+      limit: effect.limit || null,
+      seller: effect.seller || null,
+      offerId: effect.offer_id || null,
+      trustor: effect.trustor || null,
+      trustee: effect.trustee || null,
+      lastModifiedLedger: effect.last_modified_ledger || null,
+    }));
+
+    const nextCursor =
+      records.length > 0 ? records[records.length - 1].paging_token : null;
+
+    const data = {
+      items,
+      total: items.length,
+      limit,
+      order,
+      cursor: nextCursor,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.effects);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/claimable-balances
  * Returns claimable balances for an account, categorized by claimability.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
  */
 router.get("/:id/claimable-balances", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
+
+    const cacheKey = `claimable-balances:${id}`;
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
 
     const limit = validateLimit(req.query.limit || 200, 200);
     const cursor = req.query.cursor || undefined;
@@ -575,14 +667,19 @@ router.get("/:id/claimable-balances", async (req, res, next) => {
 
     const nextCursor = records.length === limit ? (records[records.length - 1]?.paging_token || null) : null;
 
-    return success(res, {
+    const data = {
       eligible: claimable,
       notYetClaimable,
       expired,
       total: records.length,
       limit,
       cursor: nextCursor,
-    });
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.claimableBalances);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }

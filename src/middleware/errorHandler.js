@@ -7,6 +7,11 @@ const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 const StellarKitError = require("../utils/StellarKitError");
+const {
+  HORIZON_TIMEOUT_MESSAGE,
+  HORIZON_TIMEOUT_SUGGESTION,
+  isHorizonTimeoutError,
+} = require("../utils/errors");
 
 /**
  * Logs 4xx and 5xx responses using the structured logger.
@@ -140,6 +145,19 @@ function errorHandler(err, req, res, next) {
         type: "InvalidAsset",
         message: err.message,
         suggestion: err.suggestion || null,
+      },
+    });
+  }
+
+  // Horizon timeout errors (Horizon node did not respond in time)
+  if (isHorizonTimeoutError(err)) {
+    logError(504, req, HORIZON_TIMEOUT_MESSAGE);
+    return res.status(504).json({
+      success: false,
+      error: {
+        type: "HorizonTimeout",
+        message: HORIZON_TIMEOUT_MESSAGE,
+        suggestion: HORIZON_TIMEOUT_SUGGESTION,
       },
     });
   }

@@ -60,14 +60,14 @@ describe("cacheConfig — default values", () => {
     expect(cfg.assetPrice).toBe(5);
   });
 
-  it("trades defaults to 15 seconds", () => {
+  it("claimableBalances defaults to 20 seconds", () => {
     const cfg = loadCacheConfig();
-    expect(cfg.trades).toBe(15);
+    expect(cfg.claimableBalances).toBe(20);
   });
 
-  it("poolTrades defaults to 30 seconds", () => {
+  it("effects defaults to 30 seconds", () => {
     const cfg = loadCacheConfig();
-    expect(cfg.poolTrades).toBe(30);
+    expect(cfg.effects).toBe(30);
   });
 });
 
@@ -79,8 +79,8 @@ describe("cacheConfig — per-endpoint overrides", () => {
     delete process.env.CACHE_TTL_VALIDATORS_MS;
     delete process.env.CACHE_TTL_ASSET_MS;
     delete process.env.CACHE_TTL_ASSET_PRICE_MS;
-    delete process.env.CACHE_TTL_TRADES_MS;
-    delete process.env.CACHE_TTL_POOL_TRADES_MS;
+    delete process.env.CACHE_TTL_CLAIMABLE_BALANCES_MS;
+    delete process.env.CACHE_TTL_EFFECTS_MS;
   });
 
   it("CACHE_TTL_NETWORK_STATUS_MS overrides networkStatus TTL", () => {
