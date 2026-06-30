@@ -40,6 +40,19 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // Offer not found errors
+  if (err.isOfferNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "OfferNotFound",
+        message: err.message,
+        suggestion: err.suggestion,
+      },
+    });
+  }
+
   // Validation errors (thrown manually)
   if (err.isValidation) {
     logError(400, req, err.message);

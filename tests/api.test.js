@@ -466,6 +466,78 @@ describe("StellarKit API", () => {
       expect(res.headers["content-encoding"]).toBe("gzip");
     });
   });
+  // ── Offers Tests ─────────────────────────────────────────────────────────────
+  describe("GET /account/:id/offers", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns open offers for a valid account", async () => {
+      const query = {
+        forAccount: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offer: jest.fn().mockReturnThis(),
+        call: jest.fn().mockResolvedValue({
+          records: [
+            {
+              id: "123",
+              seller: VALID_KEY,
+              selling: { asset_type: "native" },
+              buying: { asset_code: "USDC", asset_issuer: "GA5ZSEJYB37JIUIK3VHI67YFVL2OESQ5X2Z3U5QZWAJT44PJ5G2NXFXA", asset_type: "credit_alphanum4" },
+              amount: "50.0000000",
+              price: "0.50",
+            },
+          ],
+        }),
+      };
+
+      jest.spyOn(server, "offers").mockReturnValue(query);
+
+      const res = await request(app).get(`/account/${VALID_KEY}/offers`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toBeInstanceOf(Array);
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data[0].id).toBe("123");
+    });
+
+    it("returns 400 for invalid account ID", async () => {
+      const res = await request(app).get("/account/INVALID_KEY/offers");
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("ValidationError");
+    });
+
+    it("returns OfferNotFound when a specific offer does not exist", async () => {
+      const query = {
+        forAccount: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offer: jest.fn().mockReturnThis(),
+        call: jest.fn().mockRejectedValue({
+          response: {
+            status: 404,
+            data: { detail: "Resource not found", title: "Not Found" },
+          },
+        }),
+      };
+
+      jest.spyOn(server, "offers").mockReturnValue(query);
+
+      const res = await request(app).get(`/account/${VALID_KEY}/offers?offerId=999999`);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("OfferNotFound");
+      expect(res.body.error.message).toContain("999999");
+      expect(res.body.error.message).toContain("not found");
+      expect(res.body.error).toHaveProperty("suggestion");
+    });
+  });
+
   // ── Friendbot Tests ─────────────────────────────────────────────────────────
   describe("GET /utils/friendbot/:accountId", () => {
     const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
