@@ -53,7 +53,7 @@ function errorHandler(err, req, res, next) {
 
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const httpStatus = mappedStatus ?? err.response.status ?? 400;
-
+   
     const body = {
       success: false,
       error: {
@@ -85,7 +85,20 @@ function errorHandler(err, req, res, next) {
       error: err.toJSON(),
     });
   }
-
+  // ReferenceError and TypeError — catch runtime exceptions
+  if (err instanceof ReferenceError || err instanceof TypeError) {
+    logError(500, req, err.message);
+    return res.status(500).json({
+      success: false,
+      error: {
+        type: "InternalError",
+        title: "Internal Server Error",
+        detail: process.env.NODE_ENV === "production"
+          ? "An unexpected error occurred."
+          : err.message,
+      },
+    });
+  }
   // Payload too large errors from body parsers
   if (err.type === "entity.too.large" || err.status === 413) {
     const maxBodySize = process.env.MAX_BODY_SIZE || "10kb";
