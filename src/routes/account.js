@@ -228,10 +228,87 @@ router.get("/:id/sequence", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/effects
+ */
+router.get("/:id/effects", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, cursor } = parsePaginationParams(req.query, 200);
+
+    // Ensure account exists for proper 404s
+    await server.loadAccount(id);
+
+    let query = server.effects().forAccount(id).limit(limit).order("desc");
+    if (cursor) query = query.cursor(cursor);
+
+    const effectsResponse = await query.call();
+    const records = effectsResponse.records || [];
+
+    const effects = records.map((eff) => {
+      const effectId = eff.id || eff.effect_id || null;
+      const type = eff.type;
+      const createdAt = toISOTimestamp(eff.created_at);
+
+      // Type specific fields (best-effort normalization)
+      const asset = (() => {
+        if (eff.asset_type === "native") return { code: "XLM", issuer: null, type: "native" };
+        if (eff.asset_type) return { code: eff.asset_code || null, issuer: eff.asset_issuer || null, type: eff.asset_type };
+        return null;
+      })();
+
+      const amount =
+        eff.amount !== undefined
+          ? eff.amount
+          : eff.starting_balance !== undefined
+            ? eff.starting_balance
+            : null;
+
+
+      return {
+        effectId,
+        type,
+        createdAt,
+        ...(asset ? { asset } : {}),
+        ...(amount !== null ? { amount } : {}),
+        // passthrough common Horizon fields when present
+        ...(eff.account !== undefined ? { account: eff.account } : {}),
+        ...(eff.type ? {} : {}),
+        ...(eff.details !== undefined ? { details: eff.details } : {}),
+        ...(eff.paging_token ? { pagingToken: eff.paging_token } : {}),
+        // Provide a normalized cursor for internal debugging/consistency
+        ...(eff.paging_token ? { nextPagingToken: eff.paging_token } : {}),
+      };
+
+    });
+
+    const nextCursor =
+      records.length > 0
+        ? records[records.length - 1].paging_token || null
+        : null;
+
+    return success(res, {
+      effects,
+      total: effects.length,
+      limit,
+      cursor: effects.length ? nextCursor : null,
+    });
+  } catch (err) {
+    if (err && err.response && err.response.status === 404) {
+      return next(makeAccountNotFoundError(req.params.id, NETWORK));
+    }
+    if (err && err.isAccountNotFound) return next(err);
+    next(err);
+  }
+});
+
+/**
  * GET /account/:id/payments
  * Returns payment and create_account operations with full asset detail (including TOML metadata).
  */
 router.get("/:id/payments", async (req, res, next) => {
+
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -718,17 +795,17 @@ router.get("/:id/analytics", async (req, res, next) => {
     const lastSeen =
       successfulTransactions[successfulTransactions.length - 1]
         ? toISOTimestamp(
-            successfulTransactions[successfulTransactions.length - 1].created_at,
-          )
+          successfulTransactions[successfulTransactions.length - 1].created_at,
+        )
         : null;
 
     const activeDays = firstSeen && lastSeen
       ? Math.max(
-          1,
-          Math.ceil(
-            (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) / 86400000,
-          ),
-        )
+        1,
+        Math.ceil(
+          (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) / 86400000,
+        ),
+      )
       : 0;
 
     return success(res, {
@@ -1125,11 +1202,11 @@ router.get("/:id/freeze-status/:assetCode/:assetIssuer", async (req, res, next) 
       normalizedAssetCode === "XLM"
         ? (account.balances || []).find((b) => b.asset_type === "native")
         : (account.balances || []).find(
-            (b) =>
-              b.asset_type !== "native" &&
-              b.asset_code === normalizedAssetCode &&
-              b.asset_issuer === assetIssuer,
-          );
+          (b) =>
+            b.asset_type !== "native" &&
+            b.asset_code === normalizedAssetCode &&
+            b.asset_issuer === assetIssuer,
+        );
 
     if (!trustline) {
       const notFoundErr = new Error(
