@@ -45,6 +45,12 @@ This project is ideal for:
 
 ---
 
+## Community
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+
+---
+
 ## API Reference
 
 ### Network
