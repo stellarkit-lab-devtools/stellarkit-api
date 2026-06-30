@@ -801,6 +801,71 @@ image = "https://example.com/test.png"
     });
   });
 
+  describe("Cache - /account/:id", () => {
+    const VALID_KEY =
+      "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns X-Cache: MISS on first request and HIT on subsequent request", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 0,
+        last_modified_ledger: 1,
+        balances: [
+          {
+            asset_type: "native",
+            balance: "1.0000000",
+            buying_liabilities: "0",
+            selling_liabilities: "0",
+          },
+        ],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      const firstRes = await request(app).get(`/account/${VALID_KEY}`);
+      const secondRes = await request(app).get(`/account/${VALID_KEY}`);
+
+      expect(firstRes.statusCode).toBe(200);
+      expect(firstRes.headers["x-cache"]).toBe("MISS");
+      expect(secondRes.statusCode).toBe(200);
+      expect(secondRes.headers["x-cache"]).toBe("HIT");
+    });
+
+    it("bypasses cache with ?fresh=true and returns MISS", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 0,
+        last_modified_ledger: 1,
+        balances: [
+          {
+            asset_type: "native",
+            balance: "1.0000000",
+            buying_liabilities: "0",
+            selling_liabilities: "0",
+          },
+        ],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      await request(app).get(`/account/${VALID_KEY}`);
+      const res = await request(app).get(`/account/${VALID_KEY}?fresh=true`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-cache"]).toBe("MISS");
+    });
+  });
+
   // ── Issue #75: feeSummary ──────────────────────────────────────────────────
   describe("GET /transactions/:id — feeSummary", () => {
     const VALID_KEY =

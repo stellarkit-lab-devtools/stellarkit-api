@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
+const { makeAccountNotFoundError } = require("../utils/errors");
+const cacheService = require("../services/cache");
+
 const {
   makeAccountNotFoundError,
   makeClaimableBalanceNotFoundError,
@@ -23,7 +26,10 @@ const { formatBalance } = require("../utils/formatBalance");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 
-function validateLimit(limit, max = 100) {
+// Cache TTL for account endpoint responses (in seconds)
+const CACHE_TTL_ACCOUNT = parseInt(process.env.CACHE_TTL_ACCOUNT_MS, 10) / 1000 || 10;
+
+function validateLimit(limit, max = 200) {
   const n = Number(limit);
   if (!Number.isInteger(n) || n <= 0 || n > max) {
     const err = new Error(`limit must be between 1 and ${max}`);
@@ -886,7 +892,20 @@ router.get("/:id/analytics", async (req, res, next) => {
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
+    res.set("X-Cache", "MISS");
     validateAccountId(id);
+
+    const cacheKey = `account:${id}`;
+    const fresh = req.query.fresh === "true";
+
+    // Check cache first (unless fresh=true)
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
 
     const account = await server.loadAccount(id);
 
@@ -899,24 +918,7 @@ router.get("/:id", async (req, res, next) => {
     const toXLM = (xlm) => xlm.toFixed(7);
     const toStroops = (xlm) => Math.round(xlm * STROOPS_PER_XLM);
 
-    const xlmBalance = (account.balances || []).find(
-      (b) => b.asset_type === "native",
-    );
-    const assets = (account.balances || [])
-      .filter((b) => b.asset_type !== "native")
-      .map((b) => ({
-        assetCode: b.asset_code,
-        assetIssuer: b.asset_issuer,
-        assetType: b.asset_type,
-        balance: b.balance,
-        limit: b.limit,
-        buyingLiabilities: b.buying_liabilities,
-        sellingLiabilities: b.selling_liabilities,
-        isAuthorized: b.is_authorized,
-        isClawbackEnabled: b.is_clawback_enabled,
-      }));
-
-    return success(res, {
+    const data = {
       accountId: account.id,
       sequence: account.sequence,
       subentryCount: account.subentry_count,
@@ -962,7 +964,13 @@ router.get("/:id", async (req, res, next) => {
           ),
         },
       },
-    });
+    };
+
+    // Cache the response
+    cacheService.set(cacheKey, data, CACHE_TTL_ACCOUNT);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -1276,6 +1284,7 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       accountId: account.id,
       sponsoredEntries,
       accountsSponsoring,
+      count: sponsoredEntries.length,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);

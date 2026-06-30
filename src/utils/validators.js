@@ -1,5 +1,15 @@
 const { StrKey } = require("@stellar/stellar-sdk");
 
+/**
+ * Create a structured validation error for invalid input.
+ *
+ * @param {string} message - Human-readable error message.
+ * @param {string} field - Name of the field that failed validation.
+ * @param {*} receivedValue - Value supplied by the caller.
+ * @param {string} expectedFormat - Expected format description for the field.
+ * @returns {Error} A validation error with metadata for API error handling.
+ * @throws {Error} Always throws an Error instance populated with validation metadata.
+ */
 function makeValidationError(message, field, receivedValue, expectedFormat) {
   const err = new Error(message);
   err.isValidation = true;
@@ -9,18 +19,13 @@ function makeValidationError(message, field, receivedValue, expectedFormat) {
   return err;
 }
 
-function makeInvalidAssetError(message, suggestion) {
-  const err = new Error(message);
-  err.isInvalidAsset = true;
-  err.suggestion = suggestion || null;
-  return err;
-}
-
-function qp(field, details) {
-  // Keep a consistent template for query validation errors.
-  return `Query parameter '${field}' ${details}`;
-}
-
+/**
+ * Validate a Stellar account ID and ensure it is a valid Ed25519 public key.
+ *
+ * @param {string} accountId - The Stellar public key to validate.
+ * @returns {void} Returns nothing when validation succeeds.
+ * @throws {Error} Throws a validation error when the account ID is missing or invalid.
+ */
 function validateAccountId(accountId) {
   if (!accountId) {
     throw makeValidationError(
@@ -40,6 +45,13 @@ function validateAccountId(accountId) {
   }
 }
 
+/**
+ * Validate an asset code and ensure it matches the expected Stellar format.
+ *
+ * @param {string} code - The asset code to validate.
+ * @returns {void} Returns nothing when validation succeeds.
+ * @throws {Error} Throws a validation error when the asset code is missing or invalid.
+ */
 function validateAssetCode(code) {
   if (!code) {
     throw makeValidationError(
@@ -59,7 +71,15 @@ function validateAssetCode(code) {
   }
 }
 
-function validateLimit(limit, max = 100) {
+/**
+ * Validate a numeric limit value and ensure it falls within the allowed range.
+ *
+ * @param {number|string} limit - The requested limit value to validate.
+ * @param {number} [max=200] - Maximum allowable limit value.
+ * @returns {number} The parsed limit as an integer when valid.
+ * @throws {Error} Throws a validation error when the limit is missing, non-numeric, or out of range.
+ */
+function validateLimit(limit, max = 200) {
   const parsed = parseInt(limit);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
     throw makeValidationError(
@@ -72,6 +92,13 @@ function validateLimit(limit, max = 100) {
   return parsed;
 }
 
+/**
+ * Validate an ordering parameter and normalize it to the supported values.
+ *
+ * @param {string} [order] - The requested sort direction.
+ * @returns {string} The normalized order value, either "asc" or "desc".
+ * @throws {Error} Throws a validation error when the order value is unsupported.
+ */
 function validateOrder(order) {
   if (!order) return "desc";
   const lowerOrder = String(order).toLowerCase();
