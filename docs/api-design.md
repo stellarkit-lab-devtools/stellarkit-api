@@ -12,6 +12,7 @@ This document explains the standard design guidelines and API response conventio
 4. [Timestamp Format](#4-timestamp-format)
 5. [Amount Format](#5-amount-format)
 6. [Error Shape](#6-error-shape)
+7. [Endpoint Domain Examples](#7-endpoint-domain-examples)
 
 ---
 
@@ -230,4 +231,193 @@ Thrown for unhandled internal exceptions. Under a production environment (`NODE_
     "message": "An unexpected error occurred."
   }
 }
+```
+
+---
+
+## 7. Endpoint Domain Examples
+
+The conventions above are applied consistently across every endpoint domain. The trimmed examples below give contributors a concrete reference when adding or normalising endpoints. Each example follows the StellarKit response envelope, uses camelCase keys, ISO 8601 UTC timestamps, seven-decimal amounts, and the standard asset shape.
+
+### 7.1 Accounts
+
+`GET /account/:id` returns the normalised account envelope with balances, signers, and reserve metadata.
+
+```json
+{
+  "success": true,
+  "data": {
+    "accountId": "GD6WU54JYAEX23MBDYWRE6GGDJ426SWJCA55X5KIKXWDXN5Z3XWRLA65",
+    "sequence": "1234567",
+    "subentryCount": 3,
+    "xlm": {
+      "balance": "1,234.5678900",
+      "buyingLiabilities": "0.0000000",
+      "sellingLiabilities": "0.0000000"
+    },
+    "assets": [
+      {
+        "assetCode": "USDC",
+        "assetIssuer": "GBBD47R2LWK7P7CQA4B27USF672QHWWT7MQFGCVQD6ISVJVCGLOWW657",
+        "assetType": "credit_alphanum4",
+        "balance": "500.0000000",
+        "limit": "922337203685.4775807",
+        "buyingLiabilities": "0.0000000",
+        "sellingLiabilities": "0.0000000",
+        "isAuthorized": true,
+        "isClawbackEnabled": false
+      }
+    ],
+    "assetCount": 1,
+    "homeDomain": "example.com",
+    "lastModifiedLedger": 12345678,
+    "reserveBreakdown": {
+      "baseReserve": { "xlm": "0.5000000", "stroops": 5000000 },
+      "accountReserve": { "xlm": "1.0000000", "stroops": 10000000 },
+      "subentryReserve": { "xlm": "1.5000000", "stroops": 15000000 },
+      "totalLocked": { "xlm": "2.5000000", "stroops": 25000000 },
+      "spendable": { "xlm": "1,232.0678900", "stroops": 12320678900 }
+    }
+  }
+}
+```
+
+### 7.2 DEX
+
+`GET /dex/spread/:sellAsset/:buyAsset` returns order book depth, best bid/ask prices, and spread metrics.
+
+```json
+{
+  "success": true,
+  "data": {
+    "bestBid": {
+      "price": "0.1250000",
+      "amount": "1000.0000000"
+    },
+    "bestAsk": {
+      "price": "0.1260000",
+      "amount": "500.0000000"
+    },
+    "spreadAbsolute": "0.0010000",
+    "spreadPercent": "0.8000",
+    "midPrice": "0.1255000",
+    "liquidity": "high",
+    "orderBookDepth": {
+      "bids": 12,
+      "asks": 8,
+      "totalBidVolume": "15000.0000000",
+      "totalAskVolume": "8000.0000000",
+      "totalVolume": "23000.0000000"
+    }
+  }
+}
+```
+
+### 7.3 Fees
+
+`GET /fee-estimate` returns per-operation and total fee estimates in both stroops and XLM, plus congestion context.
+
+```json
+{
+  "success": true,
+  "data": {
+    "note": "Fee estimates for a transaction with 1 operation(s). Fees are in stroops (1 XLM = 10,000,000 stroops).",
+    "operationCount": 1,
+    "perOperation": {
+      "economy": {
+        "stroops": 100,
+        "xlm": "0.0000100",
+        "description": "Minimum — may be slow during congestion"
+      },
+      "standard": {
+        "stroops": 100,
+        "xlm": "0.0000100",
+        "description": "Recommended for most transactions"
+      },
+      "priority": {
+        "stroops": 100,
+        "xlm": "0.0000100",
+        "description": "Fast inclusion even during high network load"
+      }
+    },
+    "totalFee": {
+      "economy": { "stroops": 100, "xlm": "0.0000100" },
+      "standard": { "stroops": 100, "xlm": "0.0000100" },
+      "priority": { "stroops": 100, "xlm": "0.0000100" }
+    },
+    "networkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": 0.1234,
+      "maxFeeCharged": 100,
+      "p10": 100,
+      "p50": 100,
+      "p95": 100,
+      "p99": 100
+    },
+    "history": [
+      {
+        "ledger": 12345678,
+        "baseFee": 100,
+        "capacityUsage": 0.05
+      }
+    ],
+    "networkCongestion": "low",
+    "recommendation": "Economy tier is sufficient – network is not congested."
+  }
+}
+```
+
+### 7.4 Network
+
+`GET /network-status` returns the latest ledger, fee, and protocol information for the configured network.
+
+```json
+{
+  "success": true,
+  "data": {
+    "network": "testnet",
+    "horizonUrl": "https://horizon-testnet.stellar.org",
+    "latestLedger": {
+      "sequence": 12345678,
+      "closedAt": "2026-06-28T11:15:30.000Z",
+      "transactionCount": 42,
+      "operationCount": 137,
+      "totalCoins": "100000000000.0000000",
+      "feePool": "12345.6789012"
+    },
+    "fees": {
+      "baseFeeInStroops": 100,
+      "baseFeeInXLM": "0.0000100",
+      "basereserveInStroops": 5000000,
+      "baseReserveInXLM": "0.5000000"
+    },
+    "protocol": {
+      "version": 22
+    }
+  }
+}
+```
+
+### 7.5 Streaming
+
+`GET /stream/transactions/:id` is a Server-Sent Events (SSE) endpoint. Individual events are JSON payloads, not wrapped in the standard success envelope.
+
+```
+event: connected
+data: {"account":"GD6WU54JYAEX23MBDYWRE6GGDJ426SWJCA55X5KIKXWDXN5Z3XWRLA65","timestamp":"2026-06-28T11:15:30.000Z"}
+
+event: transaction
+data: {
+  "id": "fa3b...",
+  "hash": "a1b2c3d4e5f6...",
+  "ledger": 12345678,
+  "createdAt": "2026-06-28T11:15:30.000Z",
+  "sourceAccount": "GD6WU54JYAEX23MBDYWRE6GGDJ426SWJCA55X5KIKXWDXN5Z3XWRLA65",
+  "feeCharged": "100",
+  "operationCount": 1,
+  "successful": true
+}
+
+event: heartbeat
+data: {"timestamp":"2026-06-28T11:15:55.000Z"}
 ```

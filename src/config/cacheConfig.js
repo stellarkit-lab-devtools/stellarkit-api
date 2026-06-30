@@ -13,6 +13,8 @@
  *   CACHE_TTL_VALIDATORS_MS      — /network/validators        (default: 300 000 ms)
  *   CACHE_TTL_ASSET_MS           — /asset/:code/:issuer       (default: 30 000 ms)
  *   CACHE_TTL_ASSET_PRICE_MS     — /asset price endpoint      (default: 5 000 ms)
+ *   CACHE_TTL_CLAIMABLE_BALANCES_MS — /account/:id/claimable-balances (default: 20 000 ms)
+ *   CACHE_TTL_EFFECTS_MS         — /account/:id/effects          (default: 30 000 ms)
  *
  * The legacy CACHE_TTL_MS variable is still respected as a global fallback so
  * existing deployments are not broken.
@@ -60,6 +62,18 @@ const cacheTTL = {
   assetPrice: msToSeconds(
     process.env.CACHE_TTL_ASSET_PRICE_MS,
     globalFallbackMs
+  ),
+
+  /** /account/:id/claimable-balances — changes only on create/claim */
+  claimableBalances: msToSeconds(
+    process.env.CACHE_TTL_CLAIMABLE_BALANCES_MS,
+    20000
+  ),
+
+  /** /account/:id/effects — historical ledger effects, immutable once written */
+  effects: msToSeconds(
+    process.env.CACHE_TTL_EFFECTS_MS,
+    30000
   ),
 };
 
