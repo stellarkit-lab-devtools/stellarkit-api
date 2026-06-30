@@ -136,6 +136,21 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // InvalidAccountId errors — thrown by validateAccountId(id)
+  if (err.isInvalidAccountId) {
+    logError(400, req, err.message);
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "InvalidAccountId",
+        message: err.message,
+        suggestion:
+          err.suggestion ||
+          "Account addresses start with G and are 56 characters long.",
+      },
+    });
+  }
+
   // InvalidAsset errors — thrown by validateAsset(code, issuer)
   if (err.isInvalidAsset) {
     logError(400, req, err.message);

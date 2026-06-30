@@ -242,7 +242,7 @@ describe("Account Can Receive API", () => {
 
             expect(res.statusCode).toBe(400);
             expect(res.body.success).toBe(false);
-            expect(res.body.error.type).toBe("ValidationError");
+            expect(res.body.error.type).toBe("InvalidAccountId");
         });
 
         it("returns 400 for invalid asset code", async () => {
@@ -262,7 +262,7 @@ describe("Account Can Receive API", () => {
 
             expect(res.statusCode).toBe(400);
             expect(res.body.success).toBe(false);
-            expect(res.body.error.type).toBe("ValidationError");
+            expect(res.body.error.type).toBe("InvalidAccountId");
         });
     });
 

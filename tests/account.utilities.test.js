@@ -749,7 +749,9 @@ describe("Account Utility Endpoints", () => {
           const res = await request(app).get(`/account/${encodeURIComponent(malformedId)}/sequence`);
           expect(res.statusCode).toBe(400);
           expect(res.body.success).toBe(false);
-          expect(res.body.error.type).toBe("ValidationError");
+          // Blank/whitespace ids are rejected earlier as MissingParameter;
+          // malformed-but-present ids fail validateAccountId as InvalidAccountId.
+          expect(["InvalidAccountId", "MissingParameter"]).toContain(res.body.error.type);
         });
       });
     });

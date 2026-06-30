@@ -103,7 +103,7 @@ describe("Account Risk Scorer", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 });

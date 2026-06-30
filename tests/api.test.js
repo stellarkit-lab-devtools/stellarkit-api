@@ -212,14 +212,17 @@ describe("StellarKit API", () => {
 
   // ── Validation ─────────────────────────────────────────────────────────────
   describe("GET /account/:id — validation", () => {
-    it("returns 400 for an invalid account ID with field-level details", async () => {
+    it("returns a standardised 400 InvalidAccountId error for a malformed account ID", async () => {
       const res = await request(app).get("/account/NOT_A_VALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
-      expect(res.body.error.field).toBe("accountId");
-      expect(res.body.error.receivedValue).toBe("NOT_A_VALID_KEY");
-      expect(res.body.error.expectedFormat).toBeDefined();
+      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.message).toBe(
+        "'NOT_A_VALID_KEY' is not a valid Stellar account address."
+      );
+      expect(res.body.error.suggestion).toBe(
+        "Account addresses start with G and are 56 characters long."
+      );
     });
   });
 
@@ -338,12 +341,14 @@ image = "https://example.com/test.png"
   });
 
   describe("GET /transactions/:id — validation", () => {
-    it("returns 400 for an invalid account ID with field-level details", async () => {
+    it("returns a standardised 400 InvalidAccountId error for a malformed account ID", async () => {
       const res = await request(app).get("/transactions/BADKEY123");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.field).toBe("accountId");
-      expect(res.body.error.receivedValue).toBe("BADKEY123");
+      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.message).toBe(
+        "'BADKEY123' is not a valid Stellar account address."
+      );
     });
 
     it("returns 400 for an invalid limit param with field-level details", async () => {
@@ -509,7 +514,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 
@@ -648,7 +653,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("respects limit query param", async () => {
@@ -727,7 +732,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 
@@ -980,7 +985,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get("/utils/friendbot/INVALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("returns 400 when account ID is missing", async () => {
@@ -1319,7 +1324,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get("/account/BADKEY/volume");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("returns 400 when days exceeds 90", async () => {
@@ -1623,7 +1628,7 @@ describe("GET /account/:id/trustlines", () => {
     const res = await request(app).get("/account/INVALID_KEY/trustlines");
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.type).toBe("ValidationError");
+    expect(res.body.error.type).toBe("InvalidAccountId");
   });
 
   it("validates that route exists and handles errors gracefully", async () => {
