@@ -1027,6 +1027,40 @@ image = "https://example.com/test.png"
       expect(res.headers["content-encoding"]).toBe("gzip");
     });
   });
+  // ── OfferNotFound Error ───────────────────────────────────────────────────────
+  describe("GET /account/:id/offers — specific offer", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns OfferNotFound when a specific offer does not exist", async () => {
+      const query = {
+        forAccount: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offer: jest.fn().mockReturnThis(),
+        call: jest.fn().mockRejectedValue({
+          response: {
+            status: 404,
+            data: { detail: "Resource not found", title: "Not Found" },
+          },
+        }),
+      };
+
+      jest.spyOn(server, "offers").mockReturnValue(query);
+
+      const res = await request(app).get(`/account/${VALID_KEY}/offers?offerId=999999`);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("OfferNotFound");
+      expect(res.body.error.message).toContain("999999");
+      expect(res.body.error.message).toContain("not found");
+      expect(res.body.error).toHaveProperty("suggestion");
+    });
+  });
+
   // ── Friendbot Tests ─────────────────────────────────────────────────────────
   describe("GET /utils/friendbot/:accountId", () => {
     const VALID_KEY =

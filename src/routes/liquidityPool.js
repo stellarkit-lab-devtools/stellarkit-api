@@ -4,6 +4,127 @@ const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
+const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
+const { parsePaginationParams } = require("../utils/pagination");
+const { StrKey } = require("@stellar/stellar-sdk");
+
+function makeAssetQueryValidationError(field, value) {
+  const err = new Error(
+    `Query parameter '${field}' must be "XLM" or "CODE:ISSUER" (e.g. USDC:G...).`,
+  );
+  err.isValidation = true;
+  err.field = field;
+  err.receivedValue = value;
+  err.expectedFormat = "XLM or CODE:ISSUER";
+  return err;
+}
+
+function parseAssetFilter(value, field) {
+  if (value === undefined) return null;
+
+  const raw = String(value).trim();
+  if (!raw) {
+    throw makeAssetQueryValidationError(field, value);
+  }
+
+  if (raw.toUpperCase() === "XLM") {
+    return { type: "native", cacheToken: "XLM" };
+  }
+
+  const parts = raw.split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw makeAssetQueryValidationError(field, value);
+  }
+
+  const code = parts[0].toUpperCase();
+  const issuer = parts[1];
+
+  if (!/^[A-Z0-9]{1,12}$/.test(code) || !StrKey.isValidEd25519PublicKey(issuer)) {
+    throw makeAssetQueryValidationError(field, value);
+  }
+
+  return {
+    type: "credit",
+    code,
+    issuer,
+    cacheToken: `${code}:${issuer}`,
+  };
+}
+
+function tradeAssetMatchesFilter(trade, side, filter) {
+  const assetType = trade[`${side}_asset_type`];
+
+  if (filter.type === "native") {
+    return assetType === "native";
+  }
+
+  if (assetType === "native") {
+    return false;
+  }
+
+  const assetCode = String(trade[`${side}_asset_code`] || "").toUpperCase();
+  const assetIssuer = trade[`${side}_asset_issuer`] || null;
+  return assetCode === filter.code && assetIssuer === filter.issuer;
+}
+
+/**
+ * GET /liquidity-pools/:id/trades
+ */
+router.get("/:id/trades", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+    const baseAssetFilter = parseAssetFilter(req.query.baseAsset, "baseAsset");
+    const counterAssetFilter = parseAssetFilter(req.query.counterAsset, "counterAsset");
+    const fresh = req.query.fresh === "true";
+    const normalizedCursor = cursor || "";
+    const normalizedBaseAsset = baseAssetFilter ? baseAssetFilter.cacheToken : "";
+    const normalizedCounterAsset = counterAssetFilter ? counterAssetFilter.cacheToken : "";
+    const cacheKey = `liquidity-pool-trades:${id}:${limit}:${order}:${normalizedCursor}:${normalizedBaseAsset}:${normalizedCounterAsset}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let query = server.trades().forLiquidityPool(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+
+    const tradesResponse = await query.call();
+    const records = tradesResponse.records || [];
+    const filteredRecords = records.filter((trade) => {
+      if (baseAssetFilter && !tradeAssetMatchesFilter(trade, "base", baseAssetFilter)) {
+        return false;
+      }
+      if (
+        counterAssetFilter &&
+        !tradeAssetMatchesFilter(trade, "counter", counterAssetFilter)
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const data = {
+      items: filteredRecords,
+      total: filteredRecords.length,
+      limit,
+      cursor: filteredRecords.length
+        ? filteredRecords[filteredRecords.length - 1].paging_token || null
+        : null,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.poolTrades);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /liquidity-pools/:id/profitability

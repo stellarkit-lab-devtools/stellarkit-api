@@ -42,7 +42,14 @@ This project is ideal for:
 ## Documentation
 
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [TypeScript SDK Reference](docs/sdk.md) — Installation, initialisation, and every SDK method across account, dex, fees, and network modules
 - [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
+
+---
+
+## Community
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
@@ -507,6 +514,14 @@ Returns a compact account summary suitable for dashboards and quick views.
 
 Lists payments and asset transfers for the account.
 
+| Param | Type | Required | Default | Description |
+| ----- | ---- | -------- | ------- | ----------- |
+| `limit` | integer | No | `20` | Maximum number of payment records to return per page. |
+| `cursor` | string | No | None | Horizon pagination cursor from a previous response. |
+| `order` | string | No | `desc` | Sort order for results: `asc` or `desc`. |
+| `assetCode` | string | No | None | Case-insensitive asset code filter that matches all issuers for that code. |
+| `assetIssuer` | string | No | None | Asset issuer filter used only when `assetCode` is also provided; by itself it has no effect. |
+
 ### `GET /transactions/:id`
 
 Retrieves transaction history for an account, with pagination.
@@ -640,6 +655,143 @@ When an error occurs, the response structure differs:
   }
 }
 ```
+
+---
+
+## Request Tracing with X-Request-ID
+
+Every request to StellarKit API is assigned a unique identifier for tracing and debugging purposes. This header helps you correlate requests with server logs, monitor application performance, and troubleshoot issues across distributed systems.
+
+### What is X-Request-ID?
+
+The `X-Request-ID` header is a unique identifier attached to every API request. It serves three primary purposes:
+
+1. **Request Correlation**: Link requests across multiple services and systems using a common identifier.
+2. **Debugging**: Find specific requests in server logs by searching for the request ID.
+3. **Monitoring**: Track request flow through your application architecture and identify bottlenecks.
+
+### How X-Request-ID Works
+
+**If you send a custom request ID:**
+- StellarKit API uses the `X-Request-ID` value you provide in your request.
+- The same ID is returned in the response header.
+- Useful for correlating API calls with your internal logging or tracing systems.
+
+**If you don't send a request ID:**
+- StellarKit API automatically generates a UUID v4 (e.g., `550e8400-e29b-41d4-a716-446655440000`).
+- The generated ID is returned in the response header.
+- You can extract and log this ID for future reference.
+
+### Sending a Custom Request ID
+
+To send a custom request ID, include the `X-Request-ID` header in your request:
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" \
+  -H "X-Request-ID: my-request-001"
+```
+
+The custom ID can be any non-empty string (UUID, alphanumeric, or any format you prefer).
+
+### Reading the Generated or Echoed Request ID
+
+Every response includes the `X-Request-ID` header. Extract it from the response headers to log, trace, or correlate with other systems:
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" \
+  -i
+```
+
+Response (headers shown):
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-ID: 550e8400-e29b-41d4-a716-446655440000
+...
+
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+### Practical Examples
+
+#### Example 1: Send a Custom Request ID and Verify It
+
+```bash
+curl -X GET "http://localhost:3000/network-status" \
+  -H "X-Request-ID: my-health-check-001" \
+  -H "Accept: application/json"
+```
+
+Response headers:
+```http
+X-Request-ID: my-health-check-001
+```
+
+The server echoes back your custom ID, which you can log for correlation with your application logs.
+
+#### Example 2: Extract Auto-Generated Request ID from Response
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" \
+  -s -i | grep X-Request-ID
+```
+
+Output:
+```
+X-Request-ID: a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6
+```
+
+Save this ID in your logs for debugging later.
+
+#### Example 3: Using X-Request-ID with JavaScript/Node.js
+
+```javascript
+const axios = require('axios');
+
+async function fetchAccountWithTracing() {
+  const requestId = 'my-custom-trace-' + Date.now();
+  
+  try {
+    const response = await axios.get(
+      'http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      {
+        headers: {
+          'X-Request-ID': requestId
+        }
+      }
+    );
+    
+    // Extract the request ID from response headers
+    const responseRequestId = response.headers['x-request-id'];
+    console.log('Request ID:', responseRequestId);
+    console.log('Account data:', response.data);
+  } catch (error) {
+    console.error('Error:', error.message);
+  }
+}
+
+fetchAccountWithTracing();
+```
+
+### Use Cases
+
+| Use Case | Example |
+| --- | --- |
+| **Distributed tracing** | Pass the same request ID across multiple microservices to trace a user action end-to-end. |
+| **Log correlation** | Log the request ID alongside your application events, then search server logs by ID to reconstruct the full request flow. |
+| **Support debugging** | When a user reports a problem, ask for the request ID from their client and search the API logs for that ID to understand what happened. |
+| **Monitoring dashboards** | Aggregate request IDs in your monitoring system to track request latency, success rates, and error patterns over time. |
+| **Rate limiting analysis** | Use request IDs to identify which requests contributed to hitting a rate limit and when they occurred. |
+
+### Best Practices
+
+- **Always log the request ID**: Include the `X-Request-ID` from the response in your application logs. This makes troubleshooting significantly easier.
+- **Use meaningful custom IDs**: If you send a custom request ID, use a format that makes sense in your logging context (e.g., `user-123-action-456`).
+- **Correlate across services**: In a microservices architecture, propagate the same `X-Request-ID` to downstream API calls so you can trace the entire flow.
+- **Attach to error reports**: When reporting bugs or API errors, always include the `X-Request-ID` so engineers can look up the exact request in the logs.
 
 ---
 
@@ -1652,6 +1804,13 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting.
 
 ---
 
+## 👥 Community
+
+- [Contributors](CONTRIBUTORS.md) — See everyone who has contributed to StellarKit API
+- [Code of Conduct](CODE_OF_CONDUCT.md) — Our community standards
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -1729,6 +1888,12 @@ Path payments are useful because:
 **Asset format for DEX endpoints:** `CODE:ISSUER` — for example `USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`. Use `XLM:native` for the native asset.
 
 These endpoints wrap Horizon's order book and path-finding APIs, normalizing the responses into the standard StellarKit envelope so you get consistent `success`, `data`, and `error` fields across all calls.
+
+---
+
+## 🗺️ Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the project's planned direction across near-term, medium-term, and long-term horizons — including upcoming endpoints, SDK milestones, and ecosystem integrations.
 
 ---
 

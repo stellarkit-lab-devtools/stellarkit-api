@@ -255,6 +255,69 @@ describe("ErrorHandler Middleware", () => {
     });
   });
 
+  describe("Horizon Timeout Errors", () => {
+    const horizonTimeoutBody = {
+      success: false,
+      error: {
+        type: "HorizonTimeout",
+        message: "The Stellar Horizon node did not respond in time.",
+        suggestion:
+          "Try again in a few seconds. If the issue persists check the Stellar network status at https://status.stellar.org.",
+      },
+    };
+
+    it("should return 504 with HorizonTimeout shape for timeout message errors", () => {
+      const err = new Error("Network timeout");
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(504);
+      expect(res.json).toHaveBeenCalledWith(horizonTimeoutBody);
+    });
+
+    it("should return 504 for ECONNABORTED errors", () => {
+      const err = new Error("timeout of 10000ms exceeded");
+      err.code = "ECONNABORTED";
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(504);
+      expect(res.json).toHaveBeenCalledWith(horizonTimeoutBody);
+    });
+
+    it("should return 504 for isHorizonTimeout flagged errors", () => {
+      const err = new Error("The Stellar Horizon node did not respond in time.");
+      err.isHorizonTimeout = true;
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(504);
+      expect(res.json).toHaveBeenCalledWith(horizonTimeoutBody);
+    });
+
+    it("should not treat Horizon HTTP errors as timeout", () => {
+      const err = {
+        response: {
+          status: 400,
+          data: {
+            title: "Transaction Failed",
+            detail: "Bad sequence.",
+          },
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.objectContaining({ type: "HorizonError" }),
+        })
+      );
+    });
+  });
+
   describe("Validation Errors", () => {
     it("should handle custom validation errors with a 400 status code", () => {
       const err = {
