@@ -226,6 +226,8 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/fee-estimate?operations=N", description: "Fee estimate for N operations" },
         { method: "GET", path: "/account/:id", description: "Account details, balances, signers" },
         { method: "GET", path: "/account/:id/trustlines", description: "Trustlines with TOML asset metadata resolved" },
+        { method: "GET", path: "/account/:id/effects", description: "Effects history for an account (normalized, paginated)" },
+
         { method: "GET", path: "/transactions/:id", description: "Transaction history for an account" },
         { method: "GET", path: "/transactions/:id/operations", description: "Operation history for an account" },
         { method: "GET", path: "/fee-estimate/surge-status", description: "Identify fee surge periods and get actionable recommendations" },
