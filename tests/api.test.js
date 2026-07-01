@@ -166,11 +166,39 @@ describe("StellarKit API", () => {
     it("returns API info and endpoint list", async () => {
       const res = await request(app).get("/");
       expect(res.statusCode).toBe(200);
+
       expect(res.body.success).toBe(true);
-      expect(res.body.data.endpoints).toBeInstanceOf(Array);
-      expect(res.body.data.endpoints.length).toBeGreaterThan(0);
+      expect(res.body).toHaveProperty("data");
+
+      const { data } = res.body;
+      expect(data).toHaveProperty("name");
+      expect(typeof data.name).toBe("string");
+
+      expect(data).toHaveProperty("description");
+      expect(typeof data.description).toBe("string");
+
+      expect(data).toHaveProperty("version");
+      expect(typeof data.version).toBe("string");
+      expect(data.version.length).toBeGreaterThan(0);
+
+      expect(data).toHaveProperty("network");
+      expect(["testnet", "mainnet"]).toContain(data.network);
+
+      expect(data).toHaveProperty("endpoints");
+      expect(Array.isArray(data.endpoints)).toBe(true);
+      expect(data.endpoints.length).toBeGreaterThan(0);
+
+      // Validate endpoint entries shape (at least one entry)
+      const first = data.endpoints[0];
+      expect(first).toHaveProperty("method");
+      expect(typeof first.method).toBe("string");
+      expect(first).toHaveProperty("path");
+      expect(typeof first.path).toBe("string");
+      expect(first).toHaveProperty("description");
+      expect(typeof first.description).toBe("string");
     });
   });
+
 
   // ── 404 ───────────────────────────────────────────────────────────────────
   describe("Unknown routes", () => {
@@ -184,14 +212,17 @@ describe("StellarKit API", () => {
 
   // ── Validation ─────────────────────────────────────────────────────────────
   describe("GET /account/:id — validation", () => {
-    it("returns 400 for an invalid account ID with field-level details", async () => {
+    it("returns a standardised 400 InvalidAccountId error for a malformed account ID", async () => {
       const res = await request(app).get("/account/NOT_A_VALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
-      expect(res.body.error.field).toBe("accountId");
-      expect(res.body.error.receivedValue).toBe("NOT_A_VALID_KEY");
-      expect(res.body.error.expectedFormat).toBeDefined();
+      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.message).toBe(
+        "'NOT_A_VALID_KEY' is not a valid Stellar account address."
+      );
+      expect(res.body.error.suggestion).toBe(
+        "Account addresses start with G and are 56 characters long."
+      );
     });
   });
 
@@ -310,12 +341,14 @@ image = "https://example.com/test.png"
   });
 
   describe("GET /transactions/:id — validation", () => {
-    it("returns 400 for an invalid account ID with field-level details", async () => {
+    it("returns a standardised 400 InvalidAccountId error for a malformed account ID", async () => {
       const res = await request(app).get("/transactions/BADKEY123");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.field).toBe("accountId");
-      expect(res.body.error.receivedValue).toBe("BADKEY123");
+      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.message).toBe(
+        "'BADKEY123' is not a valid Stellar account address."
+      );
     });
 
     it("returns 400 for an invalid limit param with field-level details", async () => {
@@ -481,7 +514,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 
@@ -620,7 +653,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("respects limit query param", async () => {
@@ -699,7 +732,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 
@@ -770,6 +803,71 @@ image = "https://example.com/test.png"
         totalLocked: { xlm: "2.0000000", stroops: 20000000 },
         spendable: { xlm: "8.0000000", stroops: 80000000 },
       });
+    });
+  });
+
+  describe("Cache - /account/:id", () => {
+    const VALID_KEY =
+      "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns X-Cache: MISS on first request and HIT on subsequent request", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 0,
+        last_modified_ledger: 1,
+        balances: [
+          {
+            asset_type: "native",
+            balance: "1.0000000",
+            buying_liabilities: "0",
+            selling_liabilities: "0",
+          },
+        ],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      const firstRes = await request(app).get(`/account/${VALID_KEY}`);
+      const secondRes = await request(app).get(`/account/${VALID_KEY}`);
+
+      expect(firstRes.statusCode).toBe(200);
+      expect(firstRes.headers["x-cache"]).toBe("MISS");
+      expect(secondRes.statusCode).toBe(200);
+      expect(secondRes.headers["x-cache"]).toBe("HIT");
+    });
+
+    it("bypasses cache with ?fresh=true and returns MISS", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 0,
+        last_modified_ledger: 1,
+        balances: [
+          {
+            asset_type: "native",
+            balance: "1.0000000",
+            buying_liabilities: "0",
+            selling_liabilities: "0",
+          },
+        ],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      await request(app).get(`/account/${VALID_KEY}`);
+      const res = await request(app).get(`/account/${VALID_KEY}?fresh=true`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-cache"]).toBe("MISS");
     });
   });
 
@@ -934,6 +1032,40 @@ image = "https://example.com/test.png"
       expect(res.headers["content-encoding"]).toBe("gzip");
     });
   });
+  // ── OfferNotFound Error ───────────────────────────────────────────────────────
+  describe("GET /account/:id/offers — specific offer", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns OfferNotFound when a specific offer does not exist", async () => {
+      const query = {
+        forAccount: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offer: jest.fn().mockReturnThis(),
+        call: jest.fn().mockRejectedValue({
+          response: {
+            status: 404,
+            data: { detail: "Resource not found", title: "Not Found" },
+          },
+        }),
+      };
+
+      jest.spyOn(server, "offers").mockReturnValue(query);
+
+      const res = await request(app).get(`/account/${VALID_KEY}/offers?offerId=999999`);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("OfferNotFound");
+      expect(res.body.error.message).toContain("999999");
+      expect(res.body.error.message).toContain("not found");
+      expect(res.body.error).toHaveProperty("suggestion");
+    });
+  });
+
   // ── Friendbot Tests ─────────────────────────────────────────────────────────
   describe("GET /utils/friendbot/:accountId", () => {
     const VALID_KEY =
@@ -952,7 +1084,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get("/utils/friendbot/INVALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("returns 400 when account ID is missing", async () => {
@@ -1291,7 +1423,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get("/account/BADKEY/volume");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("returns 400 when days exceeds 90", async () => {
@@ -1595,7 +1727,7 @@ describe("GET /account/:id/trustlines", () => {
     const res = await request(app).get("/account/INVALID_KEY/trustlines");
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.type).toBe("ValidationError");
+    expect(res.body.error.type).toBe("InvalidAccountId");
   });
 
   it("validates that route exists and handles errors gracefully", async () => {

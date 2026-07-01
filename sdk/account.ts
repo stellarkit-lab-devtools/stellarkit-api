@@ -33,6 +33,18 @@ export class StellarKitError extends Error {
 }
 
 /**
+ * Native XLM balance details returned by GET /account/:id/native-balance.
+ */
+export interface NativeBalance {
+  /** Current XLM balance as a seven-decimal string (e.g. "9.9999800"). */
+  balance: string;
+  /** XLM reserved for buying liabilities. */
+  buyingLiabilities: string;
+  /** XLM reserved for selling liabilities. */
+  sellingLiabilities: string;
+}
+
+/**
  * AccountModule wraps all `/account/:id/*` routes of the StellarKit API
  * into fully-typed async methods.
  *
@@ -72,12 +84,39 @@ export class AccountModule {
   /**
    * Get full account details including XLM balance, assets, signers, thresholds, and flags.
    *
-   * @param id - Stellar account public key.
+   * @param id - Stellar account public key (non-empty string).
    * @returns Resolves to the account data payload.
-   * @throws {StellarKitError} On non-2xx response (e.g. 404 account not found).
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404).
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const details = await account.getAccount("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * console.log(details.xlm.balance); // "9.9999800"
    */
   async getAccount(id: string): Promise<AccountResponse["data"]> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
     return this._get<AccountResponse["data"]>(`/account/${id}`);
+  }
+
+  /**
+   * Get the native XLM balance for an account.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @returns Resolves to XLM balance with liabilities.
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404).
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const native = await account.getNativeBalance("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * console.log(native.balance); // "9.9999800"
+   */
+  async getNativeBalance(id: string): Promise<NativeBalance> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    return this._get<NativeBalance>(`/account/${id}/native-balance`);
   }
 
   /**

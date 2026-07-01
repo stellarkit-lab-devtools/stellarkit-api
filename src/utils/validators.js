@@ -16,27 +16,42 @@ function makeInvalidAssetError(message, suggestion) {
   return err;
 }
 
+/**
+ * Builds a standardised error for a malformed Stellar account address.
+ *
+ * The error carries `isInvalidAccountId = true` so the central error handler
+ * can render the canonical
+ * { type: "InvalidAccountId", message, suggestion } 400 response shape.
+ *
+ * @param {*} accountId - The value that failed validation (echoed in the message)
+ */
+function makeInvalidAccountIdError(accountId) {
+  const err = new Error(
+    `'${accountId}' is not a valid Stellar account address.`
+  );
+  err.isInvalidAccountId = true;
+  err.suggestion =
+    "Account addresses start with G and are 56 characters long.";
+  return err;
+}
+
 function qp(field, details) {
   // Keep a consistent template for query validation errors.
   return `Query parameter '${field}' ${details}`;
 }
 
+/**
+ * Validates that a value is a well-formed Stellar account address (Ed25519
+ * public key) using the Stellar SDK's StrKey check. Throws a standardised
+ * InvalidAccountId error for any non-G / wrong-length / malformed value so the
+ * caller never reaches Horizon with garbage input.
+ *
+ * @param {*} accountId - The account address from a route/body parameter
+ * @throws An error with `isInvalidAccountId = true` when the value is invalid
+ */
 function validateAccountId(accountId) {
-  if (!accountId) {
-    throw makeValidationError(
-      qp("accountId", "is required."),
-      "accountId",
-      accountId,
-      "G... (valid Ed25519 public key)"
-    );
-  }
-  if (!StrKey.isValidEd25519PublicKey(accountId)) {
-    throw makeValidationError(
-      qp("accountId", 'must be a valid Ed25519 public key starting with "G".'),
-      "accountId",
-      accountId,
-      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
-    );
+  if (typeof accountId !== "string" || !StrKey.isValidEd25519PublicKey(accountId)) {
+    throw makeInvalidAccountIdError(accountId);
   }
 }
 
@@ -59,11 +74,11 @@ function validateAssetCode(code) {
   }
 }
 
-function validateLimit(limit, max = 200) {
+function validateLimit(limit, max = 100) {
   const parsed = parseInt(limit);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
     throw makeValidationError(
-      qp("limit", `must be an integer between 1 and ${max}.`),
+      qp("limit", `must be between 1 and ${max}.`),
       "limit",
       limit,
       `1–${max}`

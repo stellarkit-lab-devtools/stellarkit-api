@@ -191,13 +191,9 @@ StellarKit API currently supports Soroban contract inspection through the `/soro
 
 ---
 
-## Documentation
-
-- [API Design Guidelines](docs/api-design.md) — Explains StellarKit's response envelope, pagination conventions, asset shapes, timestamp formats, amount formats, and error structure.
-
----
-
 ## Getting Started
+
+New to Stellar or this API? Start with the **[Getting Started Guide](docs/getting-started.md)** for step-by-step instructions. Also see the **[Glossary](docs/glossary.md)** for explanations of Stellar-specific terminology.
 
 ### Prerequisites
 
@@ -255,137 +251,11 @@ Visit `http://localhost:3000` after startup.
 
 ---
 
+## Stellar Terminology
 
-## Optional API Key Authentication (Issue #198)
-
-StellarKit API supports optional API key protection using environment variables:
-
-```env
-REQUIRE_API_KEY=true
-API_KEYS=key1,key2,key3
-```
-
-When `REQUIRE_API_KEY` is enabled, clients must send the API key in the `X-API-Key` request header. The `/health` and `/` endpoints remain public even when authentication is enabled.
-
-This feature is implemented in `src/middleware/apiKey.js` and covered by unit tests in `tests/apiKeyMiddleware.test.js`.
-
-## FAQ
-
-### What is the difference between testnet and mainnet?
-The testnet is a free Stellar network for development and experimentation. Mainnet is the real network for live value transfers. Use testnet while building and switch to mainnet only when you are ready for production.
-
-### How do I get a testnet account?
-You can create a testnet account using Stellar's Friendbot service. In StellarKit API, use `GET /utils/friendbot/:accountId` with a valid public key to fund a new testnet account instantly.
-
-### What are stroops?
-A stroop is the smallest unit of XLM, just like a cent is the smallest unit of a dollar. One XLM equals 10 million stroops, so balances and fees are often measured in stroops internally.
-
-### Why does Stellar require a minimum balance?
-Stellar requires a minimum balance to prevent spam and keep the ledger efficient. Each account and each ledger entry (trustline, offer, data entry, signer) increases the reserve required to keep the account active.
-
-### What is XDR?
-XDR is the binary format Stellar uses to encode transactions, ledger entries, and protocol data. It lets Stellar transmit structured data in a compact, predictable way across the network.
-
-### How can I read claimable balance predicates?
-Claimable balance predicates are conditions that control when a claim is allowed. Common types include `unconditional`, `abs_before`, and `abs_after`. You can also combine them with `and`, `or`, and `not` to build more complex rules.
-
-### What is a home domain?
-A home domain is an optional string attached to a Stellar account that identifies the account's website or service. Wallets and anchors use it for branding, federation lookups, and verifying issuer relationships.
-
-### Are there rate limits for StellarKit API?
-Yes. StellarKit API uses a global rate limiter by default to protect the service and the underlying Horizon endpoints. The default limit is 100 requests per IP per 15 minutes, and it can be adjusted with `RATE_LIMIT_MAX`.
+New to Stellar? See the **[Glossary](docs/glossary.md)** for plain-language explanations of stroops, trustlines, claimable balances, anchors, liquidity pools, and other key concepts.
 
 ---
-
-## Stellar Glossary
-
-This glossary defines key Stellar-specific terms that appear throughout the API responses and Stellar documentation. Use this reference to understand the fundamental concepts of the Stellar ecosystem.
-
-### Base Reserve
-The fundamental unit of account reserve on the Stellar network, currently set to 0.5 XLM. Every account must hold a minimum of 2 base reserves (1 XLM) to exist, and each subentry increases the reserve requirement by 1 base reserve.
-
-### Claimable Balance
-A Stellar ledger entry that holds funds on behalf of one or more future recipients without requiring those recipients to exist on the network. Claimable balances can have predicates that control when funds can be claimed, enabling conditional and deferred transfers.
-
-### DEX
-The Decentralized Exchange built into Stellar's ledger. It allows users to create and fill limit orders for any pair of assets, forming automatic order books without a central operator.
-
-### Home Domain
-An optional string attached to a Stellar account that identifies the account's website or service. Used for branding, federation lookups, and verifying issuer relationships in wallets and anchors.
-
-### Horizon
-Stellar's REST API that provides access to the ledger, transactions, operations, and account data. Horizon is the primary interface for querying the Stellar network state and submitting transactions.
-
-### Ledger
-The main database of the Stellar blockchain that stores all accounts, balances, trustlines, offers, data entries, and other ledger entries. Each ledger closes approximately every 5-6 seconds, creating permanent historical records.
-
-### Liquidity Pool
-An automated market maker (AMM) that holds equal-value reserves of two assets and facilitates swaps between them. Pool shares represent ownership stakes, and traders pay fees that are distributed to share holders.
-
-### Memo
-An optional text, ID, hash, or return value attached to a transaction. Memos help organize and reference transactions but do not affect transaction logic or validation.
-
-### Sequence Number
-A counter maintained for each Stellar account that increments with each transaction. The sequence number ensures transactions are processed in order and prevents transaction replays. Clients must increment the sequence number when building multiple transactions.
-
-### Soroban
-Stellar's smart contract platform that allows developers to write WebAssembly (WASM) programs and execute them on the Stellar ledger. Soroban enables complex business logic beyond traditional Stellar operations.
-
-### Stellar TOML
-A configuration file hosted on an organization's domain that describes its Stellar-enabled services, supported assets, and federation information. Wallets and applications use Stellar TOML to verify issuer authenticity and discover federated addresses.\n\n### Stroop
-The smallest unit of XLM, similar to a cent in traditional currency. One XLM equals 10 million stroops. Fees and small balances are often expressed in stroops internally.
-
-### Subentry
-Any ledger entry owned by an account other than the account itself. Trustlines, open offers, data entries, and additional signers are all subentries. Each subentry increases the account's minimum balance requirement by 1 base reserve (0.5 XLM).
-
-### Trustline
-A connection between an account and a specific asset (identified by code and issuer). An account must establish a trustline before it can hold or receive a non-native asset. Trustlines have limits that control the maximum amount of an asset an account can hold.
-
-### XDR
-External Data Representation; the binary serialization format Stellar uses to encode transactions, operations, and ledger data. XDR ensures compact, deterministic encoding for signing and network transmission.
-
----
-
-
-## Testnet vs Mainnet
-
-Stellar operates two public networks: **testnet** and **mainnet**. StellarKit API supports both and switches between them with a single environment variable.
-
-| Feature | Testnet | Mainnet |
-|---|---|---|
-| Real funds | ❌ No — test XLM only | ✅ Yes — real XLM and assets |
-| Network resets | ✅ Periodic resets (quarterly) | ❌ Never resets |
-| Friendbot availability | ✅ Free account funding via `GET /utils/friendbot/:accountId` | ❌ Not available |
-| Horizon URL | `https://horizon-testnet.stellar.org` | `https://horizon.stellar.org` |
-| Recommended for | Development and testing | Production only |
-
-### Switching Between Networks
-
-Open your `.env` file and change `STELLAR_NETWORK`. That is the only value you need to update — `HORIZON_URL` is automatically derived from it and can be left blank.
-
-**Testnet (default):**
-```env
-STELLAR_NETWORK=testnet
-HORIZON_URL=
-```
-
-**Mainnet:**
-```env
-STELLAR_NETWORK=mainnet
-HORIZON_URL=
-```
-
-Restart the server after changing environment variables for the new values to take effect.
-
-### Mainnet Safety Considerations
-
-> ⚠️ **Before switching to mainnet, read this carefully.**
->
-> - **Real funds are at risk.** Every transaction on mainnet moves real XLM and real assets. Mistakes cannot be undone.
-> - **Friendbot is not available.** You cannot fund accounts for free on mainnet. Accounts must be funded with real XLM.
-> - **The network never resets.** Unlike testnet, mainnet state is permanent. There is no way to undo a transaction or recover a lost private key.
-> - **Never use testnet keypairs on mainnet.** Keys generated or printed during `npm run seed` are for testnet only. Generate fresh keypairs for mainnet and keep private keys secure.
-> - **Test thoroughly on testnet first.** Only switch to `STELLAR_NETWORK=mainnet` when your integration is fully validated.
 
 ## Understanding Stellar Account Reserves
 
@@ -638,6 +508,14 @@ Returns a compact account summary suitable for dashboards and quick views.
 
 Lists payments and asset transfers for the account.
 
+| Param | Type | Required | Default | Description |
+| ----- | ---- | -------- | ------- | ----------- |
+| `limit` | integer | No | `20` | Maximum number of payment records to return per page. |
+| `cursor` | string | No | None | Horizon pagination cursor from a previous response. |
+| `order` | string | No | `desc` | Sort order for results: `asc` or `desc`. |
+| `assetCode` | string | No | None | Case-insensitive asset code filter that matches all issuers for that code. |
+| `assetIssuer` | string | No | None | Asset issuer filter used only when `assetCode` is also provided; by itself it has no effect. |
+
 ### `GET /transactions/:id`
 
 Retrieves transaction history for an account, with pagination.
@@ -771,6 +649,143 @@ When an error occurs, the response structure differs:
   }
 }
 ```
+
+---
+
+## Request Tracing with X-Request-ID
+
+Every request to StellarKit API is assigned a unique identifier for tracing and debugging purposes. This header helps you correlate requests with server logs, monitor application performance, and troubleshoot issues across distributed systems.
+
+### What is X-Request-ID?
+
+The `X-Request-ID` header is a unique identifier attached to every API request. It serves three primary purposes:
+
+1. **Request Correlation**: Link requests across multiple services and systems using a common identifier.
+2. **Debugging**: Find specific requests in server logs by searching for the request ID.
+3. **Monitoring**: Track request flow through your application architecture and identify bottlenecks.
+
+### How X-Request-ID Works
+
+**If you send a custom request ID:**
+- StellarKit API uses the `X-Request-ID` value you provide in your request.
+- The same ID is returned in the response header.
+- Useful for correlating API calls with your internal logging or tracing systems.
+
+**If you don't send a request ID:**
+- StellarKit API automatically generates a UUID v4 (e.g., `550e8400-e29b-41d4-a716-446655440000`).
+- The generated ID is returned in the response header.
+- You can extract and log this ID for future reference.
+
+### Sending a Custom Request ID
+
+To send a custom request ID, include the `X-Request-ID` header in your request:
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" \
+  -H "X-Request-ID: my-request-001"
+```
+
+The custom ID can be any non-empty string (UUID, alphanumeric, or any format you prefer).
+
+### Reading the Generated or Echoed Request ID
+
+Every response includes the `X-Request-ID` header. Extract it from the response headers to log, trace, or correlate with other systems:
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" \
+  -i
+```
+
+Response (headers shown):
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-ID: 550e8400-e29b-41d4-a716-446655440000
+...
+
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+### Practical Examples
+
+#### Example 1: Send a Custom Request ID and Verify It
+
+```bash
+curl -X GET "http://localhost:3000/network-status" \
+  -H "X-Request-ID: my-health-check-001" \
+  -H "Accept: application/json"
+```
+
+Response headers:
+```http
+X-Request-ID: my-health-check-001
+```
+
+The server echoes back your custom ID, which you can log for correlation with your application logs.
+
+#### Example 2: Extract Auto-Generated Request ID from Response
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" \
+  -s -i | grep X-Request-ID
+```
+
+Output:
+```
+X-Request-ID: a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6
+```
+
+Save this ID in your logs for debugging later.
+
+#### Example 3: Using X-Request-ID with JavaScript/Node.js
+
+```javascript
+const axios = require('axios');
+
+async function fetchAccountWithTracing() {
+  const requestId = 'my-custom-trace-' + Date.now();
+  
+  try {
+    const response = await axios.get(
+      'http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+      {
+        headers: {
+          'X-Request-ID': requestId
+        }
+      }
+    );
+    
+    // Extract the request ID from response headers
+    const responseRequestId = response.headers['x-request-id'];
+    console.log('Request ID:', responseRequestId);
+    console.log('Account data:', response.data);
+  } catch (error) {
+    console.error('Error:', error.message);
+  }
+}
+
+fetchAccountWithTracing();
+```
+
+### Use Cases
+
+| Use Case | Example |
+| --- | --- |
+| **Distributed tracing** | Pass the same request ID across multiple microservices to trace a user action end-to-end. |
+| **Log correlation** | Log the request ID alongside your application events, then search server logs by ID to reconstruct the full request flow. |
+| **Support debugging** | When a user reports a problem, ask for the request ID from their client and search the API logs for that ID to understand what happened. |
+| **Monitoring dashboards** | Aggregate request IDs in your monitoring system to track request latency, success rates, and error patterns over time. |
+| **Rate limiting analysis** | Use request IDs to identify which requests contributed to hitting a rate limit and when they occurred. |
+
+### Best Practices
+
+- **Always log the request ID**: Include the `X-Request-ID` from the response in your application logs. This makes troubleshooting significantly easier.
+- **Use meaningful custom IDs**: If you send a custom request ID, use a format that makes sense in your logging context (e.g., `user-123-action-456`).
+- **Correlate across services**: In a microservices architecture, propagate the same `X-Request-ID` to downstream API calls so you can trace the entire flow.
+- **Attach to error reports**: When reporting bugs or API errors, always include the `X-Request-ID` so engineers can look up the exact request in the logs.
 
 ---
 
@@ -1123,6 +1138,91 @@ GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
       "standard": { "stroops": 600, "xlm": "0.0000600" },
       "priority": { "stroops": 1500, "xlm": "0.0001500" }
     }
+  }
+}
+```
+
+### `GET /fee-estimate`
+
+Fetch fee tiers for a transaction, optionally requesting fresh Horizon data.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate?operations=3&fresh=true"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "operationCount": 3,
+    "perOperation": {
+      "economy": { "stroops": 100, "xlm": "0.0000100" },
+      "standard": { "stroops": 200, "xlm": "0.0000200" },
+      "priority": { "stroops": 500, "xlm": "0.0000500" }
+    },
+    "totalFee": {
+      "economy": { "stroops": 300, "xlm": "0.0000300" },
+      "standard": { "stroops": 600, "xlm": "0.0000600" },
+      "priority": { "stroops": 1500, "xlm": "0.0001500" }
+    },
+    "networkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": "0.72",
+      "p50": "200",
+      "p95": "500"
+    },
+    "recommendation": "Standard tier is recommended for moderate congestion."
+  }
+}
+```
+
+### `GET /fee-estimate/surge-status`
+
+Check whether the network is currently in a fee surge period.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate/surge-status"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "isSurging": false,
+    "avgCapacityUsage": 0.43,
+    "ledgersAnalyzed": 10,
+    "suggestedFee": 100,
+    "suggestedFeeInXLM": "0.0000100",
+    "recommendation": "Network is operating normally with low congestion.",
+    "currentNetworkStats": {
+      "lastLedgerBaseFee": 100,
+      "ledgerCapacityUsage": "0.43",
+      "p50Fee": "200",
+      "p95Fee": "500"
+    }
+  }
+}
+```
+
+### `GET /fee-estimate/trends`
+
+Analyze fee trends across the last 50 ledgers.
+
+```bash
+curl -X GET "http://localhost:3000/fee-estimate/trends"
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "ledgersAnalyzed": 50,
+    "avgBaseFee": 120.34,
+    "minBaseFee": 100,
+    "maxBaseFee": 500,
+    "avgCapacityUsage": 0.65,
+    "trend": "rising",
+    "recommendation": "Fees are trending upward. Consider submitting time-sensitive transactions soon or use the priority tier."
   }
 }
 ```
@@ -1570,7 +1670,40 @@ GET /asset/search?code=USDC
 
 Establishes a live, real-time WebSocket connection to stream Stellar ledger updates. As new ledgers are closed on the Stellar blockchain, the API receives them via the Stellar Horizon SDK subscription, parses them, and immediately broadcasts them to connected WebSocket clients.
 
-#### Client Connection Example (Vanilla JS)
+#### Message Format
+
+Each ledger update is broadcast as a JSON object containing:
+
+```json
+{
+  "sequence": 51234567,
+  "closedAt": "2026-05-26T20:15:00Z",
+  "baseFee": 100,
+  "transactionCount": 54
+}
+```
+
+**Fields:**
+- `sequence` — The ledger sequence number (incremental counter)
+- `closedAt` — ISO 8601 timestamp when the ledger closed
+- `baseFee` — Base fee in stroops for transactions in this ledger
+- `transactionCount` — Number of successful transactions in this ledger
+
+#### CLI Example (wscat)
+
+Install wscat globally if you don't have it:
+```bash
+npm install -g wscat
+```
+
+Connect to the ledger stream:
+```bash
+wscat -c ws://localhost:3000/stream/ledgers
+```
+
+You'll immediately start receiving live ledger updates as they close on the network.
+
+#### Browser WebSocket API Example
 
 ```javascript
 const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
@@ -1582,13 +1715,8 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const ledger = JSON.parse(event.data);
   console.log("New ledger closed:", ledger);
-  // Example output:
-  // {
-  //   "sequence": 51234567,
-  //   "closedAt": "2026-05-26T20:15:00Z",
-  //   "baseFee": 100,
-  //   "transactionCount": 54
-  // }
+  console.log(`Ledger ${ledger.sequence} closed at ${ledger.closedAt}`);
+  console.log(`Transactions: ${ledger.transactionCount}, Base Fee: ${ledger.baseFee} stroops`);
 };
 
 ws.onerror = (error) => {
@@ -1598,6 +1726,31 @@ ws.onerror = (error) => {
 ws.onclose = () => {
   console.log("WebSocket connection closed.");
 };
+```
+
+#### Node.js Example
+
+```javascript
+const WebSocket = require("ws");
+
+const ws = new WebSocket("ws://localhost:3000/stream/ledgers");
+
+ws.on("open", () => {
+  console.log("Connected to StellarKit ledger stream!");
+});
+
+ws.on("message", (data) => {
+  const ledger = JSON.parse(data.toString());
+  console.log("New ledger:", ledger);
+});
+
+ws.on("error", (error) => {
+  console.error("WebSocket error:", error);
+});
+
+ws.on("close", () => {
+  console.log("Connection closed");
+});
 ```
 
 ---
@@ -1642,6 +1795,13 @@ Contributions are very welcome! This project participates in the **[Stellar Wave
 4. Push and open a Pull Request
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting.
+
+---
+
+## 👥 Community
+
+- [Contributors](CONTRIBUTORS.md) — See everyone who has contributed to StellarKit API
+- [Code of Conduct](CODE_OF_CONDUCT.md) — Our community standards
 
 ---
 
@@ -1722,6 +1882,12 @@ Path payments are useful because:
 **Asset format for DEX endpoints:** `CODE:ISSUER` — for example `USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`. Use `XLM:native` for the native asset.
 
 These endpoints wrap Horizon's order book and path-finding APIs, normalizing the responses into the standard StellarKit envelope so you get consistent `success`, `data`, and `error` fields across all calls.
+
+---
+
+## 🗺️ Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the project's planned direction across near-term, medium-term, and long-term horizons — including upcoming endpoints, SDK milestones, and ecosystem integrations.
 
 ---
 

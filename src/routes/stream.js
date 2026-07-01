@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const logger = require("../utils/logger");
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 const { server } = require("../config/stellar");
@@ -78,7 +79,7 @@ router.get("/transactions/:id", async (req, res, next) => {
     }
     // For other network errors, log but proceed (don't fail the stream)
     if (process.env.NODE_ENV !== "test") {
-      console.warn(`[WARN] Account existence check failed for ${id}:`, err.message);
+      logger.warn({ accountId: id, error: err.message }, "Account existence check failed");
     }
   }
 
@@ -92,7 +93,7 @@ router.get("/transactions/:id", async (req, res, next) => {
 
   // Log stream opened
   if (process.env.NODE_ENV !== "test") {
-    console.log(`[INFO] Stream opened for account ${id} at ${new Date().toISOString()}`);
+    logger.info({ accountId: id }, "Stream opened for account");
   }
 
   // Send connected event immediately
@@ -122,7 +123,7 @@ router.get("/transactions/:id", async (req, res, next) => {
 
           // Log transaction (hash only, not full payload)
           if (process.env.NODE_ENV !== "test") {
-            console.debug(`[DEBUG] Transaction forwarded: ${transaction.hash}`);
+            logger.debug({ txHash: transaction.hash }, "Transaction forwarded");
           }
 
           // Format and send transaction event
@@ -133,7 +134,7 @@ router.get("/transactions/:id", async (req, res, next) => {
         onerror: (error) => {
           // Log the error
           if (process.env.NODE_ENV !== "test") {
-            console.error(`[ERROR] Horizon stream error for ${id}:`, error);
+            logger.error({ accountId: id, error }, "Horizon stream error");
           }
 
           // Send error event if connection still open
@@ -154,7 +155,7 @@ router.get("/transactions/:id", async (req, res, next) => {
   } catch (err) {
     // Catch any synchronous errors during stream setup
     if (process.env.NODE_ENV !== "test") {
-      console.error(`[ERROR] Failed to set up stream for ${id}:`, err);
+      logger.error({ accountId: id, err }, "Failed to set up stream");
     }
 
     if (!res.writableEnded && !res.destroyed) {
@@ -177,7 +178,7 @@ router.get("/transactions/:id", async (req, res, next) => {
     }
 
     if (process.env.NODE_ENV !== "test") {
-      console.warn(`[WARN] Heartbeat sent to potentially stale connection for ${id}`);
+      logger.warn({ accountId: id }, "Heartbeat sent to potentially stale connection");
     }
 
     res.write(`event: heartbeat\n`);
@@ -189,7 +190,7 @@ router.get("/transactions/:id", async (req, res, next) => {
   // ── Client Disconnect Cleanup ───────────────────────────────────────────────
   req.on("close", () => {
     if (process.env.NODE_ENV !== "test") {
-      console.log(`[INFO] Stream closed for account ${id} (client disconnect) at ${new Date().toISOString()}`);
+      logger.info({ accountId: id }, "Stream closed for account (client disconnect)");
     }
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -198,7 +199,7 @@ router.get("/transactions/:id", async (req, res, next) => {
 
   req.on("error", () => {
     if (process.env.NODE_ENV !== "test") {
-      console.log(`[INFO] Stream closed for account ${id} (error) at ${new Date().toISOString()}`);
+      logger.info({ accountId: id }, "Stream closed for account (error)");
     }
 
     if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -244,7 +245,7 @@ router.get("/payments/:id", async (req, res, next) => {
       });
     }
     if (process.env.NODE_ENV !== "test") {
-      console.warn(`[WARN] Account check failed for ${id}:`, err.message);
+      logger.warn({ accountId: id, error: err.message }, "Account check failed");
     }
   }
 

@@ -3,12 +3,18 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
+const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 const StellarKitError = require("../utils/StellarKitError");
+const {
+  HORIZON_TIMEOUT_MESSAGE,
+  HORIZON_TIMEOUT_SUGGESTION,
+  isHorizonTimeoutError,
+} = require("../utils/errors");
 
 /**
- * Logs 4xx and 5xx responses to the console.
+ * Logs 4xx and 5xx responses using the structured logger.
  * Suppressed when NODE_ENV=test to keep test output clean.
  *
  * @param {number} status - HTTP status code
@@ -19,9 +25,15 @@ function logError(status, req, message) {
   if (process.env.NODE_ENV === "test") return;
   if (status >= 400) {
     const requestId = req.requestId || "-";
-    const label = status >= 500 ? "ERROR" : "WARN";
-    console.error(
-      `[${label}] [${requestId}] ${req.method} ${req.path} → ${status} | ${message}`
+    const logLevel = status >= 500 ? "error" : "warn";
+    logger[logLevel](
+      {
+        requestId,
+        method: req.method,
+        path: req.path,
+        status,
+      },
+      message
     );
   }
 }
@@ -47,12 +59,7 @@ function errorHandler(err, req, res, next) {
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const httpStatus = mappedStatus ?? err.response.status ?? 400;
 
-    const code = resultCode || null;
-    const humanMessage = translateHorizonError(resultCode);
-
-    const message = horizonError.detail || horizonError.title || "Horizon Error";
-    logError(status, req, message);
-    return res.status(status).json({
+    const body = {
       success: false,
       error: {
         type: "HorizonError",
@@ -129,6 +136,21 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // InvalidAccountId errors — thrown by validateAccountId(id)
+  if (err.isInvalidAccountId) {
+    logError(400, req, err.message);
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "InvalidAccountId",
+        message: err.message,
+        suggestion:
+          err.suggestion ||
+          "Account addresses start with G and are 56 characters long.",
+      },
+    });
+  }
+
   // InvalidAsset errors — thrown by validateAsset(code, issuer)
   if (err.isInvalidAsset) {
     logError(400, req, err.message);
@@ -138,6 +160,32 @@ function errorHandler(err, req, res, next) {
         type: "InvalidAsset",
         message: err.message,
         suggestion: err.suggestion || null,
+      },
+    });
+  }
+
+  // Horizon timeout errors (Horizon node did not respond in time)
+  if (isHorizonTimeoutError(err)) {
+    logError(504, req, HORIZON_TIMEOUT_MESSAGE);
+    return res.status(504).json({
+      success: false,
+      error: {
+        type: "HorizonTimeout",
+        message: HORIZON_TIMEOUT_MESSAGE,
+        suggestion: HORIZON_TIMEOUT_SUGGESTION,
+      },
+    });
+  }
+
+  // Offer not found errors
+  if (err.isOfferNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "OfferNotFound",
+        message: err.message,
+        suggestion: err.suggestion,
       },
     });
   }

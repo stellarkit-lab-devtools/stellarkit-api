@@ -83,7 +83,7 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
 
     let query = server
       .transactions()
@@ -199,7 +199,7 @@ router.get("/:id/operations", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
 
     let query = server
       .operations()

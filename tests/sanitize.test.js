@@ -39,7 +39,8 @@ describe("Sanitize Middleware", () => {
       const res = await request(app).get(`/account/${longValue}`);
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      // An over-long account path param is rejected as an invalid account address.
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("allows params exactly at the 500 character limit", async () => {

@@ -3,8 +3,7 @@ const router = express.Router();
 const { server, horizonUrl, NETWORK } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
 const cacheService = require("../services/cache");
-
-const CACHE_TTL = 5; // seconds
+const cacheTTL = require("../config/cacheConfig");
 
 /**
  * GET /network-status
@@ -57,8 +56,8 @@ router.get("/", async (req, res, next) => {
       },
     };
 
-    // Cache the response with 5s TTL
-    cacheService.set(cacheKey, data, 5);
+    // Cache the response
+    cacheService.set(cacheKey, data, cacheTTL.networkStatus);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

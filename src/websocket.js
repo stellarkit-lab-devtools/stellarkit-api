@@ -1,4 +1,5 @@
 const { WebSocketServer } = require("ws");
+const logger = require("./utils/logger");
 const { server: stellarServer } = require("./config/stellar");
 
 /**
@@ -23,7 +24,7 @@ function setupWebSocket(server) {
   });
 
   wss.on("connection", (ws, req) => {
-    console.log(`[WebSocket] Client connected to /stream/ledgers from ${req.socket.remoteAddress}`);
+    logger.info(`Client connected to /stream/ledgers from ${req.socket.remoteAddress}`);
 
     // isClosed is a race-condition guard. Both the "close" and "error" events can fire
     // in quick succession (or even concurrently in the event loop). Without this flag,
@@ -62,7 +63,7 @@ function setupWebSocket(server) {
               ws.send(payload);
             }
           } catch (err) {
-            console.error("[WebSocket] Error formatting or sending ledger update:", err);
+            logger.error({ err }, "Error formatting or sending ledger update");
           }
         },
         onerror: (error) => {
@@ -70,11 +71,11 @@ function setupWebSocket(server) {
           // Logging here keeps the error visible without crashing the Node process. The stream will
           // attempt to reconnect automatically via the underlying EventSource retry logic; we do not
           // close the WebSocket so the client stays connected through transient Horizon issues.
-          console.error("[WebSocket] Stellar Horizon ledger stream error:", error);
+          logger.error({ error }, "Stellar Horizon ledger stream error");
         },
       });
     } catch (err) {
-      console.error("[WebSocket] Failed to start Stellar Horizon stream:", err);
+      logger.error({ err }, "Failed to start Stellar Horizon stream");
       ws.close(1011, "Horizon stream subscription failed");
       return;
     }
@@ -85,7 +86,7 @@ function setupWebSocket(server) {
       // that check isClosed will also see the closed state.
       if (isClosed) return;
       isClosed = true;
-      console.log("[WebSocket] Client disconnected from /stream/ledgers. Unsubscribing Horizon stream.");
+      logger.info("Client disconnected from /stream/ledgers. Unsubscribing Horizon stream.");
 
       // Calling closeHorizonStream() stops the Horizon SSE/EventSource subscription.
       // Without this call, the stream would continue running in the background, consuming
@@ -94,14 +95,14 @@ function setupWebSocket(server) {
         try {
           closeHorizonStream();
         } catch (err) {
-          console.error("[WebSocket] Error unsubscribing from Horizon stream:", err);
+          logger.error({ err }, "Error unsubscribing from Horizon stream");
         }
       }
     };
 
     ws.on("close", cleanup);
     ws.on("error", (err) => {
-      console.error("[WebSocket] Client socket error:", err);
+      logger.error({ err }, "Client socket error");
       cleanup();
     });
   });

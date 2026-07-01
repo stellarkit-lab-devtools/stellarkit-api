@@ -28,32 +28,31 @@ Returned when a request parameter or body value fails validation.
 {
   "success": false,
   "error": {
-    "type": "ValidationError",
-    "message": "Query parameter 'accountId' must be a valid Ed25519 public key starting with \"G\".",
-    "field": "accountId",
-    "receivedValue": "INVALID",
-    "expectedFormat": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
+    "type": "<ErrorType>",
+    "message": "...",
+    ...
   }
 }
 ```
 
-**Common causes:**
-- Missing or malformed `accountId`, `limit`, `order`, or `assetCode` query parameters
-- `Content-Type` is not `application/json` on POST/PATCH requests with a body
-- Request parameters exceed the maximum length (500 characters)
-- Request parameters contain null bytes
+## Error Types
 
-**Suggested fix:** Check the `field` and `expectedFormat` fields in the response. Correct the parameter value and retry.
+| Type              | HTTP Status | Description                                                           |
+| ----------------- | ----------- | --------------------------------------------------------------------- |
+| `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
+| `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
+| `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
+| `NotFound`        | 404         | Route or resource not found                                           |
+| `RateLimitError`  | 429         | Too many requests from the same IP                                    |
+| `ServerError`     | 500         | Unexpected internal error                                             |
 
 ---
 
-## AccountNotFound
+### OfferNotFound
 
-Returned when a Stellar account does not exist on the network.
+Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID that does not exist, or when any operation references a non-existent offer.
 
-**Status:** `404`
-
-**Example:**
+**Example response:**
 
 ```json
 {

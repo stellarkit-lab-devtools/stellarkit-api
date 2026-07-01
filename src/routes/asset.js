@@ -8,10 +8,11 @@ const { success } = require("../utils/response");
 const { formatBalance } = require("../utils/formatBalance");
 const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
-const { validateAccountId, validateAssetCode, validateAsset } = require("../utils/validators");
+const { validateAccountId, validateAssetCode, validateAsset, validateLimit } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
 const { makeAssetNotFoundError } = require("../utils/errors");
 const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
 router.use(normalizeAssetCode);
 
 
@@ -61,7 +62,7 @@ router.get(
       validateAsset(code, issuer);
 
       const assetCode = code.toUpperCase();
-      const { limit, order, cursor } = parsePaginationParams(req.query, 200);
+      const { limit, order, cursor } = parsePaginationParams(req.query);
 
       let query = server
         .accounts()
@@ -161,8 +162,8 @@ router.get("/:code/:issuer", async (req, res, next) => {
       issuer: issuerInfo,
     };
 
-    // Cache the response with 30s TTL
-    cacheService.set(cacheKey, data, 30);
+    // Cache the response
+    cacheService.set(cacheKey, data, cacheTTL.asset);
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -359,7 +360,7 @@ router.get("/search", async (req, res, next) => {
 
     validateAssetCode(code);
     const assetCode = code.toUpperCase();
-    const limit = Math.min(parseInt(rawLimit) || 10, 50);
+    const limit = validateLimit(rawLimit ?? 20);
 
     const assetsResponse = await server
       .assets()
@@ -466,7 +467,6 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
   }
 });
 
-const CACHE_TTL_ASSET_PRICE = parseInt(process.env.CACHE_TTL_ASSET_PRICE_MS || "5000", 10);
 
 /**
  * GET /asset/:code/:issuer/price
@@ -520,8 +520,7 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
       quoteAsset: "XLM",
     };
 
-    const ttlSeconds = CACHE_TTL_ASSET_PRICE / 1000;
-    cacheService.set(cacheKey, data, ttlSeconds);
+    cacheService.set(cacheKey, data, cacheTTL.assetPrice);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

@@ -17,6 +17,12 @@ This repo is part of the Stellar Wave Program. During each monthly Wave (a 7-day
 
 ---
 
+## 📖 Documentation
+
+- [Testing Guide](docs/testing.md) — how the test suite is structured, how to run tests, mocking patterns, and coverage expectations
+
+---
+
 ## 🛠️ Development Setup
 
 ```bash
