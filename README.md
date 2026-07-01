@@ -1,14 +1,14 @@
 # StellarKit API 🚀
 
+StellarKit API is a REST service that gives developers clean, typed access to the Stellar blockchain — a public payment network for sending and trading digital assets. It wraps Stellar's Horizon API with structured endpoints for account details, transaction history, fee estimates, asset metadata, and real-time data streaming, so you can build on Stellar without parsing raw blockchain responses yourself.
+
 <p align="center">
   <b>English 🇺🇸</b> | <a href="README.fr.md">Français 🇫🇷</a> | <a href="README.es.md">Español 🇪🇸</a>
 </p>
 
-> StellarKit API is a developer utility service that exposes the Stellar Horizon blockchain through a simple REST interface. It is designed for application developers who need fast, typed access to account details, fee estimates, transaction history, network health, and asset metadata.
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
-[![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
+[![Stellar Network](https://img.shields.io/badge/Stellar-testnet%20%7C%20mainnet-blue)](https://stellar.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ---
