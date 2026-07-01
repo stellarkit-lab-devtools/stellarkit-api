@@ -1,8 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { server } = require("../config/stellar");
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
+const { server, NETWORK } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
+const { makeAccountNotFoundError } = require("../utils/errors");
 
 /**
  * GET /account/:id/counterparties
@@ -23,13 +26,10 @@ router.get("/:id/counterparties", async (req, res, next) => {
     try {
       await server.loadAccount(id);
     } catch (e) {
-      // If Horizon returns 404, propagate as not found
       if (e.response && e.response.status === 404) {
-        const notFound = new Error("Account not found.");
-        notFound.status = 404;
-        return next(notFound);
+        return next(makeAccountNotFoundError(id, NETWORK));
       }
-      // For other errors, continue with empty data (tests only check status)
+      // For other errors, continue with empty data
     }
     // Placeholder implementation – return empty counterparties list
     return success(res, { topSenders: [], topReceivers: [] });

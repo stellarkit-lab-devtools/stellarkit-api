@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const registerParamValidation = require("../middleware/validateRouteParams");
+registerParamValidation(router);
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
@@ -79,7 +81,14 @@ function evaluatePredicate(predicate, nowSeconds) {
 
 /**
  * GET /claimable-balances/:id/evaluate/:accountId
- * Evaluates claimability of a balance for a specific account.
+ * Evaluates whether a specific account can currently claim a claimable balance
+ * by analyzing the balance's time-bound and conditional predicates.
+ *
+ * @param {string} id - Claimable balance ID (56-character hex string)
+ * @param {string} accountId - Stellar account public key (G-address) to check claimability for
+ *
+ * @example
+ * GET /claimable-balances/00000000929b20b72e5890ab51c24f1cc46fa01c4f318d8d33367d24dd614cfdf5491072/evaluate/GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
  */
 router.get("/:id/evaluate/:accountId", async (req, res, next) => {
   try {

@@ -17,6 +17,12 @@ This repo is part of the Stellar Wave Program. During each monthly Wave (a 7-day
 
 ---
 
+## 📖 Documentation
+
+- [Testing Guide](docs/testing.md) — how the test suite is structured, how to run tests, mocking patterns, and coverage expectations
+
+---
+
 ## 🛠️ Development Setup
 
 ```bash
@@ -53,6 +59,7 @@ npm run dev
 ## 🧱 Code Style
 
 - An `.editorconfig` file is included at the repo root. Make sure your editor supports it (most do natively or via a plugin: [editorconfig.org](https://editorconfig.org)). It enforces: 2-space indentation, LF line endings, UTF-8 charset, and a final newline on all files.
+- **Line endings:** This repo enforces LF (`\n`) line endings via `.gitattributes`. If you're on Windows, configure Git to not convert line endings: `git config core.autocrlf false`. Your editor should also be set to save files with LF endings.
 - Use `async/await` — no raw promise chains
 - All routes must use the `next(err)` pattern for errors
 - Use the `success()` helper from `src/utils/response.js` for consistent responses

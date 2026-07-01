@@ -1,0 +1,11 @@
+# Enforce LF line endings for all text files to ensure consistent diffs
+# across Windows, macOS, and Linux contributors.
+* text=auto
+
+# Explicit LF rules for source files
+*.js    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.ts    text eol=lf

@@ -9,29 +9,56 @@ function makeValidationError(message, field, receivedValue, expectedFormat) {
   return err;
 }
 
+function makeInvalidAssetError(message, suggestion) {
+  const err = new Error(message);
+  err.isInvalidAsset = true;
+  err.suggestion = suggestion || null;
+  return err;
+}
+
+/**
+ * Builds a standardised error for a malformed Stellar account address.
+ *
+ * The error carries `isInvalidAccountId = true` so the central error handler
+ * can render the canonical
+ * { type: "InvalidAccountId", message, suggestion } 400 response shape.
+ *
+ * @param {*} accountId - The value that failed validation (echoed in the message)
+ */
+function makeInvalidAccountIdError(accountId) {
+  const err = new Error(
+    `'${accountId}' is not a valid Stellar account address.`
+  );
+  err.isInvalidAccountId = true;
+  err.suggestion =
+    "Account addresses start with G and are 56 characters long.";
+  return err;
+}
+
+function qp(field, details) {
+  // Keep a consistent template for query validation errors.
+  return `Query parameter '${field}' ${details}`;
+}
+
+/**
+ * Validates that a value is a well-formed Stellar account address (Ed25519
+ * public key) using the Stellar SDK's StrKey check. Throws a standardised
+ * InvalidAccountId error for any non-G / wrong-length / malformed value so the
+ * caller never reaches Horizon with garbage input.
+ *
+ * @param {*} accountId - The account address from a route/body parameter
+ * @throws An error with `isInvalidAccountId = true` when the value is invalid
+ */
 function validateAccountId(accountId) {
-  if (!accountId) {
-    throw makeValidationError(
-      "Account ID is required.",
-      "accountId",
-      accountId,
-      "G... (valid Ed25519 public key)"
-    );
-  }
-  if (!StrKey.isValidEd25519PublicKey(accountId)) {
-    throw makeValidationError(
-      `Invalid Stellar account ID. Must be a valid Ed25519 public key starting with "G".`,
-      "accountId",
-      accountId,
-      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
-    );
+  if (typeof accountId !== "string" || !StrKey.isValidEd25519PublicKey(accountId)) {
+    throw makeInvalidAccountIdError(accountId);
   }
 }
 
 function validateAssetCode(code) {
   if (!code) {
     throw makeValidationError(
-      "Asset code is required.",
+      qp("assetCode", "is required."),
       "assetCode",
       code,
       "USDC"
@@ -39,7 +66,7 @@ function validateAssetCode(code) {
   }
   if (!/^[A-Z0-9]{1,12}$/.test(code.toUpperCase())) {
     throw makeValidationError(
-      `Invalid asset code. Must be 1–12 uppercase alphanumeric characters.`,
+      qp("assetCode", "must be 1–12 uppercase alphanumeric characters."),
       "assetCode",
       code,
       "USDC"
@@ -47,11 +74,11 @@ function validateAssetCode(code) {
   }
 }
 
-function validateLimit(limit, max = 200) {
+function validateLimit(limit, max = 100) {
   const parsed = parseInt(limit);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
     throw makeValidationError(
-      `Limit must be a number between 1 and ${max}.`,
+      qp("limit", `must be between 1 and ${max}.`),
       "limit",
       limit,
       `1–${max}`
@@ -66,6 +93,7 @@ function validateOrder(order) {
   if (!["asc", "desc"].includes(lowerOrder)) {
     throw makeValidationError(
       `Invalid order parameter: "${order}". Valid values are "asc" or "desc".`,
+      qp("order", 'must be either "asc" or "desc".'),
       "order",
       order,
       "asc or desc"
@@ -74,4 +102,54 @@ function validateOrder(order) {
   return lowerOrder;
 }
 
-module.exports = { validateAccountId, validateAssetCode, validateLimit, validateOrder };
+/**
+ * Validates a Stellar asset defined by a code and issuer route parameter pair.
+ *
+ * Checks:
+ * - code is present and at most 12 alphanumeric characters
+ * - issuer is present and a valid Ed25519 public key (starts with G)
+ *
+ * Throws an error with `isInvalidAsset = true` and a standardised
+ * { type: "InvalidAsset", message, suggestion } shape when invalid.
+ *
+ * @param {string} code   - Asset code from route params (e.g. USDC)
+ * @param {string} issuer - Asset issuer from route params (G... public key)
+ */
+function validateAsset(code, issuer) {
+  if (!code) {
+    throw makeInvalidAssetError(
+      "Asset code is required.",
+      "Provide a valid asset code (1–12 alphanumeric characters), e.g. USDC."
+    );
+  }
+
+  if (code.length > 12) {
+    throw makeInvalidAssetError(
+      `Asset code "${code.slice(0, 20)}" is too long (maximum 12 characters).`,
+      "Use a Stellar asset code of 1–12 uppercase alphanumeric characters, e.g. USDC or LONGASSET12."
+    );
+  }
+
+  if (!/^[A-Za-z0-9]{1,12}$/.test(code)) {
+    throw makeInvalidAssetError(
+      `Asset code "${code.slice(0, 20)}" contains invalid characters. Only alphanumeric characters are allowed.`,
+      "Use a Stellar asset code of 1–12 uppercase alphanumeric characters, e.g. USDC."
+    );
+  }
+
+  if (!issuer) {
+    throw makeInvalidAssetError(
+      "Asset issuer is required.",
+      "Provide the issuer's Stellar public key (a G... address), e.g. GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN."
+    );
+  }
+
+  if (!StrKey.isValidEd25519PublicKey(issuer)) {
+    throw makeInvalidAssetError(
+      `Issuer address "${String(issuer).slice(0, 10)}..." is not a valid Stellar public key.`,
+      "The issuer must be a valid Ed25519 public key starting with G (56 characters), e.g. GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN."
+    );
+  }
+}
+
+module.exports = { validateAccountId, validateAssetCode, validateLimit, validateOrder, validateAsset };
