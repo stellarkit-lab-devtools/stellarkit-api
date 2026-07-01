@@ -145,4 +145,38 @@ router.get("/validators", async (req, res, next) => {
   }
 });
 
+const BASE_FEE_CACHE_TTL = 5;
+
+router.get("/base-fee", async (req, res, next) => {
+  try {
+    const cacheKey = "network-base-fee";
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const feeStats = await server.feeStats();
+
+    const baseFeeStroops = parseInt(feeStats.last_ledger_base_fee, 10);
+    const baseFeeXLM = (baseFeeStroops / 1e7).toFixed(7);
+    const isSurge =
+      parseFloat(feeStats.ledger_capacity_usage) > 0.5 ||
+      baseFeeStroops > parseInt(feeStats.fee_charged.min, 10);
+
+    const data = { baseFeeStroops, baseFeeXLM, isSurge };
+
+    cacheService.set(cacheKey, data, BASE_FEE_CACHE_TTL);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
