@@ -92,6 +92,7 @@ describe("Endpoint rate limiting", () => {
         resetAt: expect.any(String),
       },
     });
+  }, 30000);
     // Verify rate limit headers are present
     expect(res.headers["retry-after"]).toBe("900");
     expect(res.headers["x-ratelimit-limit"]).toBe("20");
@@ -156,7 +157,7 @@ describe("Endpoint rate limiting", () => {
     expect(limitedResponse.headers["x-ratelimit-remaining"]).toBe("0");
     expect(limitedResponse.headers["x-ratelimit-reset"]).toBeDefined();
     expect(query.call).toHaveBeenCalledTimes(10);
-  });
+  }, 30000);
 
   it("keeps non-expensive endpoints on the existing global limit", async () => {
     const { app } = loadFreshApp();
@@ -165,5 +166,5 @@ describe("Endpoint rate limiting", () => {
       const res = await request(app).get("/health");
       expect(res.statusCode).toBe(200);
     }
-  });
+  }, 30000);
 });

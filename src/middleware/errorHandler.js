@@ -56,6 +56,8 @@ function errorHandler(err, req, res, next) {
       }
     }
 
+    const code = resultCode;
+    const humanMessage = translateHorizonError(resultCode);
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const httpStatus = mappedStatus ?? err.response.status ?? 400;
 

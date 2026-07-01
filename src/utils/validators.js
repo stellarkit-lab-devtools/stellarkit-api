@@ -92,6 +92,7 @@ function validateOrder(order) {
   const lowerOrder = String(order).toLowerCase();
   if (!["asc", "desc"].includes(lowerOrder)) {
     throw makeValidationError(
+      `Invalid order parameter: "${order}". Valid values are "asc" or "desc".`,
       qp("order", 'must be either "asc" or "desc".'),
       "order",
       order,

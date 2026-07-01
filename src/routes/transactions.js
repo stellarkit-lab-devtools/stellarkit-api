@@ -106,7 +106,7 @@ router.get("/:id", async (req, res, next) => {
       return {
         id: tx.id,
         hash: tx.hash,
-        ledger: tx.ledger,
+        ledger: typeof tx.ledger === "number" ? tx.ledger : tx.ledger_attr,
         createdAt: toISOTimestamp(tx.created_at),
         sourceAccount: tx.source_account,
         fee: {
@@ -117,10 +117,10 @@ router.get("/:id", async (req, res, next) => {
           account: tx.fee_account,
         },
         feeSummary: {
-          stroops: chargedInStroops,
-          xlm: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
-          perOperationStroops: perOpStroops,
-          perOperationXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
+          chargedInStroops: chargedInStroops,
+          chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+          perOperationInStroops: perOpStroops,
+          perOperationInXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
         },
         operationCount: tx.operation_count,
         memoType: tx.memo_type,
@@ -310,7 +310,7 @@ router.post("/batch-status", async (req, res, next) => {
             hash: hash,
             found: true,
             successful: tx.successful,
-            ledger: tx.ledger,
+            ledger: typeof tx.ledger === "number" ? tx.ledger : tx.ledger_attr,
             createdAt: toISOTimestamp(tx.created_at),
             fee: tx.fee_charged,
           };

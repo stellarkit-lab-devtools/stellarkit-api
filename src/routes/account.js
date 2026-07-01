@@ -2,6 +2,16 @@ const express = require("express");
 const router = express.Router();
 const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
+const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
+const { formatBalance } = require("../utils/formatBalance");
+const { normalizeHomeDomain, fetchStellarToml, getAssetToml } = require("../utils/assetToml");
+const { Asset } = require("@stellar/stellar-sdk");
+const {
+  validateAccountId,
+  validateAssetCode,
+  validateLimit,
+} = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
 const { makeAccountNotFoundError } = require("../utils/errors");
 const cacheService = require("../services/cache");
 
@@ -160,6 +170,11 @@ router.get("/:id/trustlines", async (req, res, next) => {
     }
 
     return success(res, {
+      accountId: account.id,
+      trustlines,
+      count: trustlines.length,
+      assets: trustlines,
+      assetCount: trustlines.length,
       items: trustlines,
       total: trustlines.length,
       limit: null,
@@ -325,6 +340,19 @@ router.get("/:id/effects", async (req, res, next) => {
 router.get("/:id/payments", async (req, res, next) => {
   try {
     const { id } = req.params;
+    if (req.originalUrl && req.originalUrl.includes("//")) {
+      validateAccountId("");
+    }
+    const reservedWords = [
+      "sequence", "home-domain", "min-balance", "flags", "signers",
+      "trustlines", "analytics", "balances", "summary", "sponsorship",
+      "subentry-health", "merge-eligibility", "offers", "payments",
+      "operation-breakdown", "offer-history", "timeline", "data",
+      "pool-positions", "risk-score", "trustline-health", "age", "volume"
+    ];
+    if (reservedWords.includes(id)) {
+      return next();
+    }
     validateAccountId(id);
 
     const { limit, order, cursor } = parsePaginationParams(req.query);
@@ -610,6 +638,7 @@ router.get("/:id/offers", async (req, res, next) => {
     }
   }
 });
+
 
 /**
  * GET /account/:id/effects
@@ -1674,6 +1703,33 @@ router.get("/:id/offer-history", async (req, res, next) => {
     const opResponse = await query.call();
     const records = opResponse.records || [];
 
+      if (memoMatches) {
+        const chargedInStroops = parseInt(tx.fee_charged, 10);
+        const opCount = tx.operation_count || 1;
+        const perOpStroops = Math.floor(chargedInStroops / opCount);
+
+        matchingTransactions.push({
+          id: tx.id,
+          hash: tx.hash,
+          ledger: typeof tx.ledger === "number" ? tx.ledger : tx.ledger_attr,
+          createdAt: tx.created_at,
+          sourceAccount: tx.source_account,
+          fee: {
+            charged: tx.fee_charged,
+            account: tx.fee_account,
+          },
+          feeSummary: {
+            chargedInStroops,
+            chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
+            perOperationInStroops: perOpStroops,
+            perOperationInXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
+          },
+          operationCount: tx.operation_count,
+          memoType: tx.memo_type,
+          memo: tx.memo || null,
+          successful: tx.successful,
+          envelopeXdr: tx.envelope_xdr,
+        });
     const offerOps = records
       .filter((op) =>
         [
@@ -2070,6 +2126,134 @@ router.get("/:id/data", async (req, res, next) => {
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/home-domain
+ * Returns the home_domain for a Stellar account.
+ */
+router.get("/:id/home-domain", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    return success(res, {
+      accountId: account.id,
+      homeDomain: account.home_domain || null,
+      lastModifiedLedger: account.last_modified_ledger,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/min-balance
+ * Returns the calculated minimum balance and reserve breakdown for a Stellar account.
+ */
+router.get("/:id/min-balance", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const subentryCount = account.subentry_count || 0;
+    const baseReserveStroops = 5000000;
+    const baseReserveXLM = "0.5000000";
+
+    const accountReserveStroops = baseReserveStroops * 2;
+    const subentryReserveStroops = baseReserveStroops * subentryCount;
+    const minimumBalanceStroops = accountReserveStroops + subentryReserveStroops;
+
+    return success(res, {
+      accountId: account.id,
+      subentryCount,
+      baseReserve: {
+        xlm: baseReserveXLM,
+        stroops: baseReserveStroops,
+      },
+      minimumBalance: {
+        xlm: (minimumBalanceStroops / 1e7).toFixed(7),
+        stroops: minimumBalanceStroops,
+      },
+      reserveBreakdown: {
+        accountReserve: {
+          xlm: (accountReserveStroops / 1e7).toFixed(7),
+          stroops: accountReserveStroops,
+        },
+        subentryReserve: {
+          xlm: (subentryReserveStroops / 1e7).toFixed(7),
+          stroops: subentryReserveStroops,
+        },
+      },
+      lastModifiedLedger: account.last_modified_ledger,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/flags
+ * Returns the flags of a Stellar account.
+ */
+router.get("/:id/flags", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const rawFlags = account.flags || {};
+
+    return success(res, {
+      accountId: account.id,
+      flags: {
+        authRequired: !!rawFlags.auth_required,
+        authRevocable: !!rawFlags.auth_revocable,
+        authImmutable: !!rawFlags.auth_immutable,
+        authClawbackEnabled: !!rawFlags.auth_clawback_enabled,
+      },
+      lastModifiedLedger: account.last_modified_ledger,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/signers
+ * Returns the signers and thresholds of a Stellar account.
+ */
+router.get("/:id/signers", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const rawThresholds = account.thresholds || {};
+
+    const signers = (account.signers || []).map((signer) => ({
+      key: signer.key,
+      weight: signer.weight,
+      type: signer.type,
+      sponsor: signer.sponsor || null,
+    }));
+
+    return success(res, {
+      accountId: account.id,
+      signers,
+      thresholds: {
+        lowThreshold: rawThresholds.low_threshold || 0,
+        medThreshold: rawThresholds.med_threshold || 0,
+        highThreshold: rawThresholds.high_threshold || 0,
+      },
+      lastModifiedLedger: account.last_modified_ledger,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
   }
 });
 

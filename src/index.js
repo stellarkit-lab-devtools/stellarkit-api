@@ -205,6 +205,9 @@ app.get("/health", (req, res) => {
 app.use(apiKeyMiddleware);
 
 // ── API Routes ───────────────────────────────────────────────────────────────
+app.use("/network-status", networkStatusRouter);
+app.use("/network", networkStatusRouter);
+app.use("/fee-estimate", feeEstimateRouter);
 // Apply ETag middleware to cached endpoints
 app.use("/network-status", etagMiddleware, networkStatusRouter);
 app.use("/fee-estimate", etagMiddleware, feeEstimateRouter);

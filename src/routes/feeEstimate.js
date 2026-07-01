@@ -3,6 +3,7 @@ const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || "5000", 10) / 1000; // seconds
 const cacheTTL = require("../config/cacheConfig");
 
 const STROOPS_PER_XLM = 10_000_000;
@@ -145,6 +146,7 @@ router.get("/", async (req, res, next) => {
     };
 
     // Cache the response
+    cacheService.set(cacheKey, data, CACHE_TTL);
     cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
 
     res.set("X-Cache", "MISS");
@@ -260,6 +262,86 @@ router.get("/surge-status", async (req, res, next) => {
     };
 
     // Cache the response (surge status can be cached briefly since it's analyzed data)
+    cacheService.set(cacheKey, data, CACHE_TTL);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /fee-estimate/trends
+ * Analyze fee trends across last 50 ledgers with statistical summary.
+ */
+router.get("/trends", async (req, res, next) => {
+  try {
+    const cacheKey = "fee-trends";
+    const fresh = req.query.fresh === "true";
+
+    // Check cache first (unless fresh=true)
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const ledgers = await server.ledgers().order("desc").limit(50).call();
+    const records = ledgers.records || [];
+
+    if (records.length === 0) {
+      throw new Error("No ledgers found on the network.");
+    }
+
+    const baseFees = records.map((ledger) => parseInt(ledger.base_fee_in_stroops || ledger.base_fee || 100, 10));
+    const capacityUsages = records.map((ledger) => {
+      const txCount = ledger.successful_transaction_count || 0;
+      return Math.min(txCount / 1000, 1.0);
+    });
+
+    const sum = baseFees.reduce((a, b) => a + b, 0);
+    const avgBaseFee = sum / baseFees.length;
+    const minBaseFee = Math.min(...baseFees);
+    const maxBaseFee = Math.max(...baseFees);
+
+    const sumCapacity = capacityUsages.reduce((a, b) => a + b, 0);
+    const avgCapacityUsage = sumCapacity / capacityUsages.length;
+
+    // Trend analysis: compare recent 25 vs older 25 (records are descending: newest first)
+    const recentFees = baseFees.slice(0, 25);
+    const olderFees = baseFees.slice(25, 50);
+
+    const avgRecent = recentFees.reduce((a, b) => a + b, 0) / (recentFees.length || 1);
+    const avgOlder = olderFees.reduce((a, b) => a + b, 0) / (olderFees.length || 1);
+
+    let trend = "stable";
+    if (avgRecent > avgOlder) {
+      trend = "rising";
+    } else if (avgRecent < avgOlder) {
+      trend = "falling";
+    }
+
+    let recommendation = "Network fees are stable. Economy or standard fee rates are sufficient.";
+    if (trend === "rising") {
+      recommendation = "Fees are rising. Consider using a standard or priority fee to ensure timely transaction inclusion.";
+    } else if (trend === "falling") {
+      recommendation = "Fees are falling. Economy fee rates should be sufficient for non-urgent transactions.";
+    }
+
+    const data = {
+      ledgersAnalyzed: records.length,
+      avgBaseFee,
+      minBaseFee,
+      maxBaseFee,
+      avgCapacityUsage: parseFloat(avgCapacityUsage.toFixed(4)),
+      trend,
+      recommendation,
+    };
+
+    cacheService.set(cacheKey, data, CACHE_TTL);
     cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
 
     res.set("X-Cache", "MISS");
