@@ -1,6 +1,10 @@
 require("dotenv").config();
 const { Horizon } = require("@stellar/stellar-sdk");
-const { makeAccountNotFoundError } = require("../utils/errors");
+const {
+  makeAccountNotFoundError,
+  makeHorizonTimeoutError,
+  isHorizonTimeoutError,
+} = require("../utils/errors");
 
 const NETWORK = process.env.STELLAR_NETWORK || "testnet";
 
@@ -54,7 +58,11 @@ async function fetchAccountCreation(publicKey) {
       throw err;
     }
 
-    // For network/connection errors, throw 500
+    if (isHorizonTimeoutError(err)) {
+      throw makeHorizonTimeoutError();
+    }
+
+    // For other network/connection errors, throw 500
     const serverErr = new Error("Unable to reach Stellar Horizon. Please try again.");
     serverErr.status = 500;
     throw serverErr;

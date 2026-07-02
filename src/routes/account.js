@@ -1,26 +1,33 @@
 const express = require("express");
 const router = express.Router();
+const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
+const { success, toISOTimestamp } = require("../utils/response");
+const cacheService = require("../services/cache");
+
+const {
+  makeAccountNotFoundError,
+  makeClaimableBalanceNotFoundError,
+} = require("../utils/errors");
+const { validateAccountId, validateAssetCode } = require("../utils/validators");
+const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 
-const { server, fetchAccountCreation, NETWORK } = require("../config/stellar");
-const { success, toISOTimestamp } = require("../utils/response");
-const { makeAccountNotFoundError, makeClaimableBalanceNotFoundError } = require("../utils/errors");
-
-const {
-  validateAccountId,
-  validateAssetCode,
-} = require("../utils/validators");
-
 const { parsePaginationParams } = require("../utils/pagination");
 const { buildAccountAgeResponse } = require("../utils/accountAge");
-
+const { validateEffectType } = require("../utils/effectTypes");
 
 const axios = require("axios");
 const { Asset } = require("@stellar/stellar-sdk");
 
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
+
+const cacheTTL = require("../config/cacheConfig");
+
+// Cache TTL for account endpoint responses (in seconds)
+const CACHE_TTL_ACCOUNT = parseInt(process.env.CACHE_TTL_ACCOUNT_MS, 10) / 1000 || 10;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Ledger Sequence to Approximate Date Converter
 // ═══════════════════════════════════════════════════════════════════════════
@@ -63,7 +70,7 @@ router.get("/ledger/:sequence/date", async (req, res, next) => {
   }
 });
 
-function validateLimit(limit, max = 100) {
+function validateLimit(limit, max = 200) {
   const n = Number(limit);
   if (!Number.isInteger(n) || n <= 0 || n > max) {
     const err = new Error(`limit must be between 1 and ${max}`);
@@ -86,7 +93,9 @@ function handleAccountNotFound(err, next, accountId) {
 }
 
 function formatAccountBalances(account) {
-  const xlmBalance = (account.balances || []).find((b) => b.asset_type === "native");
+  const xlmBalance = (account.balances || []).find(
+    (b) => b.asset_type === "native",
+  );
   const assets = (account.balances || [])
     .filter((b) => b.asset_type !== "native")
     .map((b) => ({
@@ -103,7 +112,9 @@ function formatAccountBalances(account) {
 
   return {
     xlm: {
-      balance: xlmBalance ? formatBalance(xlmBalance.balance) : formatBalance("0.0000000"),
+      balance: xlmBalance
+        ? formatBalance(xlmBalance.balance)
+        : formatBalance("0.0000000"),
       buyingLiabilities: xlmBalance
         ? formatBalance(xlmBalance.buying_liabilities)
         : formatBalance("0"),
@@ -152,7 +163,8 @@ async function resolveTrustlineToml(balance, issuerCache, tomlCache) {
     balance: balance.balance,
     limit: balance.limit,
     isAuthorized: balance.is_authorized,
-    isAuthorizedToMaintainLiabilities: balance.is_authorized_to_maintain_liabilities,
+    isAuthorizedToMaintainLiabilities:
+      balance.is_authorized_to_maintain_liabilities,
     toml,
   };
 }
@@ -225,7 +237,9 @@ router.get("/:id/native-balance", async (req, res, next) => {
     validateAccountId(id);
 
     const account = await server.loadAccount(id);
-    const xlmBalance = (account.balances || []).find((b) => b.asset_type === "native");
+    const xlmBalance = (account.balances || []).find(
+      (b) => b.asset_type === "native",
+    );
 
     if (!xlmBalance) {
       return success(res, {
@@ -266,6 +280,86 @@ router.get("/:id/sequence", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/effects
+ */
+router.get("/:id/effects", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, cursor } = parsePaginationParams(req.query, 200);
+
+    // Ensure account exists for proper 404s
+    await server.loadAccount(id);
+
+    let query = server.effects().forAccount(id).limit(limit).order("desc");
+    if (cursor) query = query.cursor(cursor);
+
+    const effectsResponse = await query.call();
+    const records = effectsResponse.records || [];
+
+    const effects = records.map((eff) => {
+      const effectId = eff.id || eff.effect_id || null;
+      const type = eff.type;
+      const createdAt = toISOTimestamp(eff.created_at);
+
+      // Type specific fields (best-effort normalization)
+      const asset = (() => {
+        if (eff.asset_type === "native")
+          return { code: "XLM", issuer: null, type: "native" };
+        if (eff.asset_type)
+          return {
+            code: eff.asset_code || null,
+            issuer: eff.asset_issuer || null,
+            type: eff.asset_type,
+          };
+        return null;
+      })();
+
+      const amount =
+        eff.amount !== undefined
+          ? eff.amount
+          : eff.starting_balance !== undefined
+            ? eff.starting_balance
+            : null;
+
+      return {
+        effectId,
+        type,
+        createdAt,
+        ...(asset ? { asset } : {}),
+        ...(amount !== null ? { amount } : {}),
+        // passthrough common Horizon fields when present
+        ...(eff.account !== undefined ? { account: eff.account } : {}),
+        ...(eff.type ? {} : {}),
+        ...(eff.details !== undefined ? { details: eff.details } : {}),
+        ...(eff.paging_token ? { pagingToken: eff.paging_token } : {}),
+        // Provide a normalized cursor for internal debugging/consistency
+        ...(eff.paging_token ? { nextPagingToken: eff.paging_token } : {}),
+      };
+    });
+
+    const nextCursor =
+      records.length > 0
+        ? records[records.length - 1].paging_token || null
+        : null;
+
+    return success(res, {
+      effects,
+      total: effects.length,
+      limit,
+      cursor: effects.length ? nextCursor : null,
+    });
+  } catch (err) {
+    if (err && err.response && err.response.status === 404) {
+      return next(makeAccountNotFoundError(req.params.id, NETWORK));
+    }
+    if (err && err.isAccountNotFound) return next(err);
+    next(err);
+  }
+});
+
+/**
  * GET /account/:id/payments
  * Returns payment and create_account operations with full asset detail (including TOML metadata).
  */
@@ -284,9 +378,11 @@ router.get("/:id/payments", async (req, res, next) => {
       : null;
     const filterIssuer = req.query.assetIssuer || null;
 
-    let query = server.operations().forAccount(id).limit(limit).order(order);
+    let query = server.payments().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
 
+    const paymentResponse = await query.call();
+    const rawRecords = paymentResponse.records || [];
     const opResponse = await query.call();
     const rawRecords = opResponse.records || [];
 
@@ -331,7 +427,10 @@ router.get("/:id/payments", async (req, res, next) => {
               tomlCache.set(homeDomain, homeDomain);
             }
             try {
-              const toml = await getAssetMetadataFromToml(homeDomain, assetCode);
+              const toml = await getAssetMetadataFromToml(
+                homeDomain,
+                assetCode,
+              );
               if (toml) {
                 assetDetail = { ...assetDetail, toml };
               }
@@ -357,18 +456,97 @@ router.get("/:id/payments", async (req, res, next) => {
       }
     }
 
-    const lastIdx = rawRecords.length ? rawRecords.length - 1 : -1;
-    const nextCursor =
-      rawRecords[lastIdx] && rawRecords[lastIdx].paging_token
-        ? rawRecords[lastIdx].paging_token
-        : null;
+    const payments = rawRecords.map((op) => {
+      const isPayment = op.type === "payment";
+      const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
+      const assetIssuer = isPayment ? op.asset_issuer || null : null;
+      return {
+        paymentId: op.id,
+        from: isPayment ? op.from : op.funder,
+        to: isPayment ? op.to : op.account,
+        asset: assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode,
+        amount: isPayment ? op.amount : op.starting_balance,
+        createdAt: toISOTimestamp(op.created_at),
+        transactionHash: op.transaction_hash,
+      };
+    });
+
+    const lastRecord = rawRecords[rawRecords.length - 1];
+    const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
     return success(res, {
-      items: paymentOps,
-      total: paymentOps.length,
+      payments,
+      total: payments.length,
       limit,
-      cursor: paymentOps.length ? nextCursor : null,
+      cursor: payments.length ? nextCursor : null,
     });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/trades
+ */
+router.get("/:id/trades", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const fresh = req.query.fresh === "true";
+    const normalizedCursor = cursor || "";
+    const cacheKey = `account-trades:${id}:${limit}:${order}:${normalizedCursor}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let query = server.trades().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+
+    const tradeResponse = await query.call();
+    const records = tradeResponse.records || [];
+
+    const trades = records.map((trade) => ({
+      id: trade.id,
+      pagingToken: trade.paging_token,
+      ledgerCloseTime: toISOTimestamp(trade.ledger_close_time),
+      offerId: trade.offer_id,
+      tradeType: trade.base_is_seller ? "sell" : "buy",
+      baseAccount: trade.base_account,
+      baseAmount: trade.base_amount,
+      baseAssetType: trade.base_asset_type,
+      baseAssetCode: trade.base_asset_code || "XLM",
+      baseAssetIssuer: trade.base_asset_issuer || null,
+      counterAccount: trade.counter_account,
+      counterAmount: trade.counter_amount,
+      counterAssetType: trade.counter_asset_type,
+      counterAssetCode: trade.counter_asset_code || "XLM",
+      counterAssetIssuer: trade.counter_asset_issuer || null,
+      priceNumerator: trade.price?.n || null,
+      priceDenominator: trade.price?.d || null,
+      baseIsSeller: trade.base_is_seller === true,
+    }));
+
+    const nextCursor = records.length
+      ? records[records.length - 1].paging_token || null
+      : null;
+
+    const data = {
+      items: trades,
+      total: trades.length,
+      limit,
+      cursor: trades.length ? nextCursor : null,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.trades);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -380,7 +558,26 @@ router.get("/:id/payments", async (req, res, next) => {
 router.get("/:id/offers", async (req, res, next) => {
   try {
     const { id } = req.params;
+    const { offerId } = req.query;
     validateAccountId(id);
+
+    if (offerId) {
+      try {
+        const offer = await server.offers().offer(offerId).call();
+        return success(res, offer);
+      } catch (err) {
+        if (err.response && err.response.status === 404) {
+          const notFound = new Error(
+            `Offer '${offerId}' was not found on the Stellar ${NETWORK} network.`,
+          );
+          notFound.isOfferNotFound = true;
+          notFound.suggestion =
+            "The offer may have already been filled, cancelled, or the offer ID may be incorrect.";
+          throw notFound;
+        }
+        throw err;
+      }
+    }
 
     const limit = validateLimit(req.query.limit ?? 20);
     const cursor = req.query.cursor || undefined;
@@ -403,7 +600,9 @@ router.get("/:id/offers", async (req, res, next) => {
       // Always format to 7 decimal places for consistency with other amounts.
       let priceDecimal;
       if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
-        priceDecimal = (Number(offer.price_r.n) / Number(offer.price_r.d)).toFixed(7);
+        priceDecimal = (
+          Number(offer.price_r.n) / Number(offer.price_r.d)
+        ).toFixed(7);
       } else {
         priceDecimal = parseFloat(offer.price || "0").toFixed(7);
       }
@@ -434,7 +633,8 @@ router.get("/:id/offers", async (req, res, next) => {
 
     const hasMore = (offerResponse.records || []).length === limit;
     const nextCursor = hasMore
-      ? (offerResponse.records[offerResponse.records.length - 1] || {}).paging_token
+      ? (offerResponse.records[offerResponse.records.length - 1] || {})
+          .paging_token
       : null;
 
     return success(res, {
@@ -444,6 +644,87 @@ router.get("/:id/offers", async (req, res, next) => {
       cursor: nextCursor,
     });
   } catch (err) {
+    if (req.query.offerId) {
+      next(err);
+    } else {
+      handleAccountNotFound(err, next, req.params.id);
+    }
+  }
+});
+
+/**
+ * GET /account/:id/effects
+ * Returns paginated account effects from Horizon (historical, immutable ledger events).
+ *
+ * Query params:
+ *   - limit, order, cursor — pagination (see parsePaginationParams)
+ *   - type — optional effect type filter (e.g. account_credited)
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ */
+router.get("/:id/effects", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const effectType = req.query.type || null;
+    if (effectType) {
+      validateEffectType(effectType);
+    }
+
+    const cacheKey = `effects:${id}:${limit}:${order}:${cursor || ""}:${effectType || ""}`;
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let query = server.effects().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+    if (effectType) query = query.type(effectType);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    const items = records.map((effect) => ({
+      id: effect.id,
+      type: effect.type,
+      account: effect.account,
+      createdAt: toISOTimestamp(effect.created_at),
+      pagingToken: effect.paging_token,
+      transactionHash: effect.transaction_hash || null,
+      asset: effect.asset || null,
+      amount: effect.amount || null,
+      balance: effect.balance || null,
+      startingBalance: effect.starting_balance || null,
+      limit: effect.limit || null,
+      seller: effect.seller || null,
+      offerId: effect.offer_id || null,
+      trustor: effect.trustor || null,
+      trustee: effect.trustee || null,
+      lastModifiedLedger: effect.last_modified_ledger || null,
+    }));
+
+    const nextCursor =
+      records.length > 0 ? records[records.length - 1].paging_token : null;
+
+    const data = {
+      items,
+      total: items.length,
+      limit,
+      order,
+      cursor: nextCursor,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.effects);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
 });
@@ -451,11 +732,25 @@ router.get("/:id/offers", async (req, res, next) => {
 /**
  * GET /account/:id/claimable-balances
  * Returns claimable balances for an account, categorized by claimability.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
  */
 router.get("/:id/claimable-balances", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
+
+    const cacheKey = `claimable-balances:${id}`;
+    const fresh = req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
 
     const limit = validateLimit(req.query.limit || 200, 200);
     const cursor = req.query.cursor || undefined;
@@ -470,7 +765,10 @@ router.get("/:id/claimable-balances", async (req, res, next) => {
 
     function evaluatePredicate(predicate) {
       if (predicate.unconditional) {
-        return { canClaim: true, reason: "The balance is claimable unconditionally." };
+        return {
+          canClaim: true,
+          reason: "The balance is claimable unconditionally.",
+        };
       }
 
       if (predicate.not) {
@@ -479,8 +777,8 @@ router.get("/:id/claimable-balances", async (req, res, next) => {
       }
 
       if (predicate.and) {
-        const results = predicate.and.map(p => evaluatePredicate(p));
-        const canClaim = results.every(r => r.canClaim);
+        const results = predicate.and.map((p) => evaluatePredicate(p));
+        const canClaim = results.every((r) => r.canClaim);
         return {
           canClaim,
           reason: canClaim ? `All conditions met` : `Some conditions failed`,
@@ -488,26 +786,37 @@ router.get("/:id/claimable-balances", async (req, res, next) => {
       }
 
       if (predicate.or) {
-        const results = predicate.or.map(p => evaluatePredicate(p));
-        const canClaim = results.some(r => r.canClaim);
-        return { canClaim, reason: canClaim ? `At least one condition met` : `No conditions met` };
+        const results = predicate.or.map((p) => evaluatePredicate(p));
+        const canClaim = results.some((r) => r.canClaim);
+        return {
+          canClaim,
+          reason: canClaim ? `At least one condition met` : `No conditions met`,
+        };
       }
 
       if (predicate.abs_before) {
-        const deadline = Math.floor(new Date(predicate.abs_before).getTime() / 1000);
+        const deadline = Math.floor(
+          new Date(predicate.abs_before).getTime() / 1000,
+        );
         const canClaim = nowSeconds < deadline;
         return {
           canClaim,
-          reason: canClaim ? `Before deadline ${predicate.abs_before}` : `Deadline passed`,
+          reason: canClaim
+            ? `Before deadline ${predicate.abs_before}`
+            : `Deadline passed`,
         };
       }
 
       if (predicate.abs_after) {
-        const startTime = Math.floor(new Date(predicate.abs_after).getTime() / 1000);
+        const startTime = Math.floor(
+          new Date(predicate.abs_after).getTime() / 1000,
+        );
         const canClaim = nowSeconds >= startTime;
         return {
           canClaim,
-          reason: canClaim ? `After start time ${predicate.abs_after}` : `Not yet started`,
+          reason: canClaim
+            ? `After start time ${predicate.abs_after}`
+            : `Not yet started`,
         };
       }
 
@@ -519,7 +828,7 @@ router.get("/:id/claimable-balances", async (req, res, next) => {
     const expired = [];
 
     for (const balance of records) {
-      const claimant = balance.claimants.find(c => c.destination === id);
+      const claimant = balance.claimants.find((c) => c.destination === id);
       if (!claimant) continue;
 
       const evaluation = evaluatePredicate(claimant.predicate);
@@ -545,16 +854,24 @@ router.get("/:id/claimable-balances", async (req, res, next) => {
       }
     }
 
-    const nextCursor = records.length === limit ? (records[records.length - 1]?.paging_token || null) : null;
+    const nextCursor =
+      records.length === limit
+        ? records[records.length - 1]?.paging_token || null
+        : null;
 
-    return success(res, {
+    const data = {
       eligible: claimable,
       notYetClaimable,
       expired,
       total: records.length,
       limit,
       cursor: nextCursor,
-    });
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.claimableBalances);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -588,23 +905,25 @@ router.get("/:id/analytics", async (req, res, next) => {
       (t) => t.successful !== false,
     );
 
-    const firstSeen =
-      successfulTransactions[0] ? toISOTimestamp(successfulTransactions[0].created_at) : null;
-    const lastSeen =
-      successfulTransactions[successfulTransactions.length - 1]
-        ? toISOTimestamp(
-            successfulTransactions[successfulTransactions.length - 1].created_at,
-          )
-        : null;
-
-    const activeDays = firstSeen && lastSeen
-      ? Math.max(
-          1,
-          Math.ceil(
-            (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) / 86400000,
-          ),
+    const firstSeen = successfulTransactions[0]
+      ? toISOTimestamp(successfulTransactions[0].created_at)
+      : null;
+    const lastSeen = successfulTransactions[successfulTransactions.length - 1]
+      ? toISOTimestamp(
+          successfulTransactions[successfulTransactions.length - 1].created_at,
         )
-      : 0;
+      : null;
+
+    const activeDays =
+      firstSeen && lastSeen
+        ? Math.max(
+            1,
+            Math.ceil(
+              (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) /
+                86400000,
+            ),
+          )
+        : 0;
 
     return success(res, {
       totalSent: 0,
@@ -628,7 +947,20 @@ router.get("/:id/analytics", async (req, res, next) => {
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
+    res.set("X-Cache", "MISS");
     validateAccountId(id);
+
+    const cacheKey = `account:${id}`;
+    const fresh = req.query.fresh === "true";
+
+    // Check cache first (unless fresh=true)
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
 
     const account = await server.loadAccount(id);
 
@@ -641,29 +973,20 @@ router.get("/:id", async (req, res, next) => {
     const toXLM = (xlm) => xlm.toFixed(7);
     const toStroops = (xlm) => Math.round(xlm * STROOPS_PER_XLM);
 
-    const xlmBalance = (account.balances || []).find((b) => b.asset_type === "native");
-    const assets = (account.balances || [])
-      .filter((b) => b.asset_type !== "native")
-      .map((b) => ({
-        assetCode: b.asset_code,
-        assetIssuer: b.asset_issuer,
-        assetType: b.asset_type,
-        balance: b.balance,
-        limit: b.limit,
-        buyingLiabilities: b.buying_liabilities,
-        sellingLiabilities: b.selling_liabilities,
-        isAuthorized: b.is_authorized,
-        isClawbackEnabled: b.is_clawback_enabled,
-      }));
-
-    return success(res, {
+    const data = {
       accountId: account.id,
       sequence: account.sequence,
       subentryCount: account.subentry_count,
       xlm: {
-        balance: xlmBalance ? formatBalance(xlmBalance.balance) : formatBalance("0.0000000"),
-        buyingLiabilities: xlmBalance ? formatBalance(xlmBalance.buying_liabilities) : formatBalance("0"),
-        sellingLiabilities: xlmBalance ? formatBalance(xlmBalance.selling_liabilities) : formatBalance("0"),
+        balance: xlmBalance
+          ? formatBalance(xlmBalance.balance)
+          : formatBalance("0.0000000"),
+        buyingLiabilities: xlmBalance
+          ? formatBalance(xlmBalance.buying_liabilities)
+          : formatBalance("0"),
+        sellingLiabilities: xlmBalance
+          ? formatBalance(xlmBalance.selling_liabilities)
+          : formatBalance("0"),
       },
       assets,
       assetCount: assets.length,
@@ -673,16 +996,36 @@ router.get("/:id", async (req, res, next) => {
       homeDomain: account.home_domain || null,
       lastModifiedLedger: account.last_modified_ledger,
       reserveBreakdown: {
-        baseReserve: { xlm: toXLM(baseReserve), stroops: toStroops(baseReserve) },
-        accountReserve: { xlm: toXLM(accountReserve), stroops: toStroops(accountReserve) },
-        subentryReserve: { xlm: toXLM(subentryReserve), stroops: toStroops(subentryReserve) },
-        totalLocked: { xlm: toXLM(totalLocked), stroops: toStroops(totalLocked) },
+        baseReserve: {
+          xlm: toXLM(baseReserve),
+          stroops: toStroops(baseReserve),
+        },
+        accountReserve: {
+          xlm: toXLM(accountReserve),
+          stroops: toStroops(accountReserve),
+        },
+        subentryReserve: {
+          xlm: toXLM(subentryReserve),
+          stroops: toStroops(subentryReserve),
+        },
+        totalLocked: {
+          xlm: toXLM(totalLocked),
+          stroops: toStroops(totalLocked),
+        },
         spendable: {
           xlm: toXLM(parseFloat(xlmBalance?.balance || "0") - totalLocked),
-          stroops: toStroops(parseFloat(xlmBalance?.balance || "0") - totalLocked),
+          stroops: toStroops(
+            parseFloat(xlmBalance?.balance || "0") - totalLocked,
+          ),
         },
       },
-    });
+    };
+
+    // Cache the response
+    cacheService.set(cacheKey, data, CACHE_TTL_ACCOUNT);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -699,7 +1042,8 @@ router.get("/:id/risk-score", async (req, res, next) => {
     const account = await server.loadAccount(id);
 
     // Get first operation to calculate account age
-    const firstOpResponse = await server.operations()
+    const firstOpResponse = await server
+      .operations()
       .forAccount(id)
       .order("asc")
       .limit(1)
@@ -707,7 +1051,8 @@ router.get("/:id/risk-score", async (req, res, next) => {
     const firstOp = firstOpResponse.records[0];
 
     // Get recent transactions
-    const recentTxResponse = await server.transactions()
+    const recentTxResponse = await server
+      .transactions()
       .forAccount(id)
       .order("desc")
       .limit(60)
@@ -722,14 +1067,14 @@ router.get("/:id/risk-score", async (req, res, next) => {
       const createdAt = new Date(firstOp.created_at);
       const now = new Date();
       const daysOld = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
-      
+
       if (daysOld > 365) {
         score += 15;
         factors.push({
           name: "Account Age",
           value: `${daysOld} days`,
           impact: "positive",
-          detail: "Account is over 1 year old, established reputation"
+          detail: "Account is over 1 year old, established reputation",
         });
       } else if (daysOld > 30) {
         score += 10;
@@ -737,7 +1082,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
           name: "Account Age",
           value: `${daysOld} days`,
           impact: "positive",
-          detail: "Account is over 1 month old"
+          detail: "Account is over 1 month old",
         });
       } else {
         score -= 15;
@@ -745,7 +1090,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
           name: "Account Age",
           value: `${daysOld} days`,
           impact: "negative",
-          detail: "Account is very new (less than 1 month)"
+          detail: "Account is very new (less than 1 month)",
         });
       }
     } else {
@@ -754,7 +1099,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Account Age",
         value: "No operations found",
         impact: "neutral",
-        detail: "No operations history found for account"
+        detail: "No operations history found for account",
       });
     }
 
@@ -765,7 +1110,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Home Domain",
         value: account.home_domain,
         impact: "positive",
-        detail: "Account has a home domain set"
+        detail: "Account has a home domain set",
       });
     } else {
       score -= 5;
@@ -773,7 +1118,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Home Domain",
         value: "Not set",
         impact: "neutral",
-        detail: "No home domain configured"
+        detail: "No home domain configured",
       });
     }
 
@@ -784,26 +1129,28 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Multi-signature",
         value: `${account.signers.length} signers`,
         impact: "positive",
-        detail: "Account uses multi-signature security"
+        detail: "Account uses multi-signature security",
       });
     } else {
       factors.push({
         name: "Multi-signature",
         value: "Single signer",
         impact: "neutral",
-        detail: "Account uses single signature"
+        detail: "Account uses single signature",
       });
     }
 
     // Factor 4: Number of trustlines
-    const trustlineCount = (account.balances || []).filter(b => b.asset_type !== "native").length;
+    const trustlineCount = (account.balances || []).filter(
+      (b) => b.asset_type !== "native",
+    ).length;
     if (trustlineCount > 30) {
       score -= 15;
       factors.push({
         name: "Trustline Count",
         value: `${trustlineCount} trustlines`,
         impact: "negative",
-        detail: "High number of trustlines may indicate risky behavior"
+        detail: "High number of trustlines may indicate risky behavior",
       });
     } else if (trustlineCount > 10) {
       score -= 5;
@@ -811,7 +1158,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Trustline Count",
         value: `${trustlineCount} trustlines`,
         impact: "neutral",
-        detail: "Moderate number of trustlines"
+        detail: "Moderate number of trustlines",
       });
     } else {
       score += 5;
@@ -819,7 +1166,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Trustline Count",
         value: `${trustlineCount} trustlines`,
         impact: "positive",
-        detail: "Low number of trustlines"
+        detail: "Low number of trustlines",
       });
     }
 
@@ -830,7 +1177,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Recent Activity",
         value: `${recentTxs.length} transactions in last limit`,
         impact: "negative",
-        detail: "Very high recent transaction activity"
+        detail: "Very high recent transaction activity",
       });
     } else if (recentTxs.length > 20) {
       score -= 5;
@@ -838,7 +1185,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Recent Activity",
         value: `${recentTxs.length} transactions in last limit`,
         impact: "neutral",
-        detail: "Moderate recent transaction activity"
+        detail: "Moderate recent transaction activity",
       });
     } else {
       score += 5;
@@ -846,7 +1193,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
         name: "Recent Activity",
         value: `${recentTxs.length} transactions in last limit`,
         impact: "positive",
-        detail: "Low recent transaction activity"
+        detail: "Low recent transaction activity",
       });
     }
 
@@ -864,7 +1211,7 @@ router.get("/:id/risk-score", async (req, res, next) => {
       score,
       label: rating, // For backwards compatibility with tests
       rating,
-      factors
+      factors,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -872,6 +1219,20 @@ router.get("/:id/risk-score", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/payments
+ * Returns only payment and create_account operations for an account,
+ * filtered from the full operations list.
+ *
+ * Query params:
+ *   - limit   (number, default: 10, max: 200)
+ *   - cursor  (string, pagination cursor from previous response)
+ *   - order   ("asc" | "desc", default: "desc")
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/payments
+ * GET /account/GAAZI4.../payments?limit=20&order=asc
  * GET /account/:id/subentry-health
  */
 router.get("/:id/subentry-health", async (req, res, next) => {
@@ -891,7 +1252,9 @@ router.get("/:id/subentry-health", async (req, res, next) => {
     if (usagePercentRaw > 95) warning = "critical";
     else if (usagePercentRaw > 80) warning = "approaching_limit";
 
-    const trustlines = (account.balances || []).filter((b) => b.asset_type !== "native").length;
+    const trustlines = (account.balances || []).filter(
+      (b) => b.asset_type !== "native",
+    ).length;
     const dataEntries = Object.keys(account.data_attr || {}).length;
     const additionalSigners = Math.max(0, (account.signers || []).length - 1);
     const inferredOffers = Math.max(
@@ -936,7 +1299,10 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       if (b.sponsor) {
         sponsoredEntries.push({
           type: "trustline",
-          asset: b.asset_type === "native" ? "XLM" : `${b.asset_code}:${b.asset_issuer}`,
+          asset:
+            b.asset_type === "native"
+              ? "XLM"
+              : `${b.asset_code}:${b.asset_issuer}`,
           sponsor: b.sponsor,
         });
       }
@@ -965,12 +1331,15 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       });
     }
 
-    const accountsSponsoring = (sponsoringResponse.records || []).map((acc) => acc.id);
+    const accountsSponsoring = (sponsoringResponse.records || []).map(
+      (acc) => acc.id,
+    );
 
     return success(res, {
       accountId: account.id,
       sponsoredEntries,
       accountsSponsoring,
+      count: sponsoredEntries.length,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -980,89 +1349,92 @@ router.get("/:id/sponsorship", async (req, res, next) => {
 /**
  * GET /account/:id/freeze-status/:assetCode/:assetIssuer
  */
-router.get("/:id/freeze-status/:assetCode/:assetIssuer", async (req, res, next) => {
-  try {
-    const { id, assetCode, assetIssuer } = req.params;
-    validateAccountId(id);
-    validateAssetCode(assetCode);
+router.get(
+  "/:id/freeze-status/:assetCode/:assetIssuer",
+  async (req, res, next) => {
+    try {
+      const { id, assetCode, assetIssuer } = req.params;
+      validateAccountId(id);
+      validateAssetCode(assetCode);
 
-    const normalizedAssetCode = assetCode.toUpperCase();
-    const normalizedAssetIssuer =
-      normalizedAssetCode === "XLM" ? assetIssuer.toLowerCase() : assetIssuer;
+      const normalizedAssetCode = assetCode.toUpperCase();
+      const normalizedAssetIssuer =
+        normalizedAssetCode === "XLM" ? assetIssuer.toLowerCase() : assetIssuer;
 
-    if (normalizedAssetCode !== "XLM") {
-      validateAccountId(assetIssuer);
+      if (normalizedAssetCode !== "XLM") {
+        validateAccountId(assetIssuer);
+      }
+
+      const account = await server.loadAccount(id);
+
+      const trustline =
+        normalizedAssetCode === "XLM"
+          ? (account.balances || []).find((b) => b.asset_type === "native")
+          : (account.balances || []).find(
+              (b) =>
+                b.asset_type !== "native" &&
+                b.asset_code === normalizedAssetCode &&
+                b.asset_issuer === assetIssuer,
+            );
+
+      if (!trustline) {
+        const notFoundErr = new Error(
+          `Account does not hold asset ${normalizedAssetCode}:${assetIssuer}.`,
+        );
+        notFoundErr.status = 404;
+        throw notFoundErr;
+      }
+
+      const isAuthorized = trustline.is_authorized !== false;
+      const isAuthorizedToMaintainLiabilities =
+        trustline.is_authorized_to_maintain_liabilities === true;
+
+      const isFrozen =
+        normalizedAssetCode === "XLM"
+          ? false
+          : !isAuthorized && !isAuthorizedToMaintainLiabilities;
+
+      const isPartiallyFrozen =
+        normalizedAssetCode !== "XLM" &&
+        !isAuthorized &&
+        isAuthorizedToMaintainLiabilities;
+
+      const canReceive = normalizedAssetCode === "XLM" ? true : isAuthorized;
+      const canSend =
+        normalizedAssetCode === "XLM"
+          ? true
+          : isAuthorized || isAuthorizedToMaintainLiabilities;
+
+      const detail = (() => {
+        if (normalizedAssetCode === "XLM") {
+          return "Native XLM is not subject to issuer freeze authorization.";
+        }
+        if (!isAuthorized && isAuthorizedToMaintainLiabilities) {
+          return "The issuer has revoked authorization for this trustline but allows the account to maintain liabilities.";
+        }
+        if (!isAuthorized) {
+          return "The issuer has revoked authorization for this trustline.";
+        }
+        return "The trustline is authorized and the account can send and receive this asset normally.";
+      })();
+
+      return success(res, {
+        accountId: account.id,
+        asset: {
+          assetCode: normalizedAssetCode,
+          assetIssuer: normalizedAssetCode === "XLM" ? "native" : assetIssuer,
+        },
+        isFrozen,
+        isPartiallyFrozen,
+        canSend,
+        canReceive,
+        detail,
+      });
+    } catch (err) {
+      handleAccountNotFound(err, next, req.params.id);
     }
-
-    const account = await server.loadAccount(id);
-
-    const trustline =
-      normalizedAssetCode === "XLM"
-        ? (account.balances || []).find((b) => b.asset_type === "native")
-        : (account.balances || []).find(
-            (b) =>
-              b.asset_type !== "native" &&
-              b.asset_code === normalizedAssetCode &&
-              b.asset_issuer === assetIssuer,
-          );
-
-    if (!trustline) {
-      const notFoundErr = new Error(
-        `Account does not hold asset ${normalizedAssetCode}:${assetIssuer}.`,
-      );
-      notFoundErr.status = 404;
-      throw notFoundErr;
-    }
-
-    const isAuthorized = trustline.is_authorized !== false;
-    const isAuthorizedToMaintainLiabilities =
-      trustline.is_authorized_to_maintain_liabilities === true;
-
-    const isFrozen =
-      normalizedAssetCode === "XLM"
-        ? false
-        : !isAuthorized && !isAuthorizedToMaintainLiabilities;
-
-    const isPartiallyFrozen =
-      normalizedAssetCode !== "XLM" &&
-      !isAuthorized &&
-      isAuthorizedToMaintainLiabilities;
-
-    const canReceive = normalizedAssetCode === "XLM" ? true : isAuthorized;
-    const canSend =
-      normalizedAssetCode === "XLM"
-        ? true
-        : isAuthorized || isAuthorizedToMaintainLiabilities;
-
-    const detail = (() => {
-      if (normalizedAssetCode === "XLM") {
-        return "Native XLM is not subject to issuer freeze authorization.";
-      }
-      if (!isAuthorized && isAuthorizedToMaintainLiabilities) {
-        return "The issuer has revoked authorization for this trustline but allows the account to maintain liabilities.";
-      }
-      if (!isAuthorized) {
-        return "The issuer has revoked authorization for this trustline.";
-      }
-      return "The trustline is authorized and the account can send and receive this asset normally.";
-    })();
-
-    return success(res, {
-      accountId: account.id,
-      asset: {
-        assetCode: normalizedAssetCode,
-        assetIssuer: normalizedAssetCode === "XLM" ? "native" : assetIssuer,
-      },
-      isFrozen,
-      isPartiallyFrozen,
-      canSend,
-      canReceive,
-      detail,
-    });
-  } catch (err) {
-    handleAccountNotFound(err, next, req.params.id);
-  }
-});
+  },
+);
 
 /**
  * GET /account/:id/age
@@ -1131,94 +1503,108 @@ router.get("/:id/inactivity", async (req, res, next) => {
 /**
  * GET /account/:id/can-receive/:assetCode/:assetIssuer
  */
-router.get("/:id/can-receive/:assetCode/:assetIssuer", async (req, res, next) => {
-  try {
-    const { id, assetCode, assetIssuer } = req.params;
-    validateAccountId(id);
-    validateAssetCode(assetCode);
+router.get(
+  "/:id/can-receive/:assetCode/:assetIssuer",
+  async (req, res, next) => {
+    try {
+      const { id, assetCode, assetIssuer } = req.params;
+      validateAccountId(id);
+      validateAssetCode(assetCode);
 
-    const normalizedAssetCode = assetCode.toUpperCase();
-    const normalizedAssetIssuer =
-      normalizedAssetCode === "XLM" ? assetIssuer.toLowerCase() : assetIssuer;
+      const normalizedAssetCode = assetCode.toUpperCase();
+      const normalizedAssetIssuer =
+        normalizedAssetCode === "XLM" ? assetIssuer.toLowerCase() : assetIssuer;
 
-    if (normalizedAssetCode === "XLM") {
-      if (normalizedAssetIssuer !== "native") {
-        const err = new Error('Invalid asset issuer for XLM. Use "native" as the issuer.');
-        err.isValidation = true;
-        err.status = 400;
-        throw err;
+      if (normalizedAssetCode === "XLM") {
+        if (normalizedAssetIssuer !== "native") {
+          const err = new Error(
+            'Invalid asset issuer for XLM. Use "native" as the issuer.',
+          );
+          err.isValidation = true;
+          err.status = 400;
+          throw err;
+        }
+      } else {
+        validateAccountId(assetIssuer);
       }
-    } else {
-      validateAccountId(assetIssuer);
-    }
 
-    const account = await server.loadAccount(id);
+      const account = await server.loadAccount(id);
 
-    if (normalizedAssetCode === "XLM") {
-      return success(res, {
-        accountId: account.id,
-        asset: { assetCode: "XLM", assetIssuer: "native" },
-        canReceive: true,
-        reasons: [],
-        trustlineExists: true,
-        isAuthorized: true,
-        availableCapacity: null,
-        currentBalance: parseFloat(
-          (account.balances || []).find((b) => b.asset_type === "native")?.balance || "0",
-        ),
-        limit: null,
-      });
-    }
+      if (normalizedAssetCode === "XLM") {
+        return success(res, {
+          accountId: account.id,
+          asset: { assetCode: "XLM", assetIssuer: "native" },
+          canReceive: true,
+          reasons: [],
+          trustlineExists: true,
+          isAuthorized: true,
+          availableCapacity: null,
+          currentBalance: parseFloat(
+            (account.balances || []).find((b) => b.asset_type === "native")
+              ?.balance || "0",
+          ),
+          limit: null,
+        });
+      }
 
-    const trustline = (account.balances || []).find(
-      (b) => b.asset_type !== "native" && b.asset_code === normalizedAssetCode && b.asset_issuer === assetIssuer,
-    );
+      const trustline = (account.balances || []).find(
+        (b) =>
+          b.asset_type !== "native" &&
+          b.asset_code === normalizedAssetCode &&
+          b.asset_issuer === assetIssuer,
+      );
 
-    if (!trustline) {
+      if (!trustline) {
+        return success(res, {
+          accountId: account.id,
+          asset: { assetCode: normalizedAssetCode, assetIssuer },
+          canReceive: false,
+          reasons: ["No trustline exists for this asset."],
+          trustlineExists: false,
+          isAuthorized: false,
+          availableCapacity: 0,
+          currentBalance: 0,
+          limit: 0,
+        });
+      }
+
+      const isAuthorized = trustline.is_authorized === true;
+      const currentBalance = parseFloat(trustline.balance || "0");
+      const limit = parseFloat(trustline.limit || "0");
+      const buyingLiabilities = parseFloat(trustline.buying_liabilities || "0");
+      const availableCapacity = Math.max(
+        0,
+        limit - currentBalance - buyingLiabilities,
+      );
+
+      const canReceive = isAuthorized && availableCapacity > 0;
+
+      const reasons = [];
+      if (!isAuthorized) {
+        reasons.push("Trustline is not authorized by the issuer.");
+      }
+      if (isAuthorized && availableCapacity <= 0) {
+        reasons.push(
+          "No available capacity on trustline (limit reached or fully utilized).",
+        );
+      }
+
       return success(res, {
         accountId: account.id,
         asset: { assetCode: normalizedAssetCode, assetIssuer },
-        canReceive: false,
-        reasons: ["No trustline exists for this asset."],
-        trustlineExists: false,
-        isAuthorized: false,
-        availableCapacity: 0,
-        currentBalance: 0,
-        limit: 0,
+        canReceive,
+        reasons,
+        trustlineExists: true,
+        isAuthorized,
+        availableCapacity,
+        currentBalance,
+        limit,
       });
+    } catch (err) {
+      handleAccountNotFound(err, next, req.params.id);
     }
-
-    const isAuthorized = trustline.is_authorized === true;
-    const currentBalance = parseFloat(trustline.balance || "0");
-    const limit = parseFloat(trustline.limit || "0");
-    const buyingLiabilities = parseFloat(trustline.buying_liabilities || "0");
-    const availableCapacity = Math.max(0, limit - currentBalance - buyingLiabilities);
-
-    const canReceive = isAuthorized && availableCapacity > 0;
-
-    const reasons = [];
-    if (!isAuthorized) {
-      reasons.push("Trustline is not authorized by the issuer.");
-    }
-    if (isAuthorized && availableCapacity <= 0) {
-      reasons.push("No available capacity on trustline (limit reached or fully utilized).");
-    }
-
-    return success(res, {
-      accountId: account.id,
-      asset: { assetCode: normalizedAssetCode, assetIssuer },
-      canReceive,
-      reasons,
-      trustlineExists: true,
-      isAuthorized,
-      availableCapacity,
-      currentBalance,
-      limit,
-    });
-  } catch (err) {
-    handleAccountNotFound(err, next, req.params.id);
-  }
-});
+  },
+);
 
 /**
  * GET /account/:id/volume?days=30
@@ -1230,7 +1616,9 @@ router.get("/:id/volume", async (req, res, next) => {
 
     const days = parseInt(req.query.days || "30", 10);
     if (isNaN(days) || days < 1 || days > 90) {
-      const err = new Error("Query parameter 'days': must be an integer between 1 and 90.");
+      const err = new Error(
+        "Query parameter 'days': must be an integer between 1 and 90.",
+      );
       err.isValidation = true;
       err.field = "days";
       err.receivedValue = String(req.query.days);
@@ -1246,11 +1634,7 @@ router.get("/:id/volume", async (req, res, next) => {
     let done = false;
 
     while (!done) {
-      let query = server
-        .payments()
-        .forAccount(id)
-        .limit(200)
-        .order("asc");
+      let query = server.payments().forAccount(id).limit(200).order("asc");
       if (cursor) query = query.cursor(cursor);
 
       const page = await query.call();
@@ -1271,7 +1655,9 @@ router.get("/:id/volume", async (req, res, next) => {
 
         const assetCode = op.asset_code || "XLM";
         const assetIssuer = op.asset_issuer || null;
-        const assetKey = assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode;
+        const assetKey = assetIssuer
+          ? `${assetCode}:${assetIssuer}`
+          : assetCode;
         const amount = parseFloat(op.amount || op.starting_balance || "0");
 
         if (!volumeMap[assetKey]) {
@@ -1283,7 +1669,9 @@ router.get("/:id/volume", async (req, res, next) => {
           };
         }
 
-        const isSent = (op.type === "payment" && op.from === id) || (op.type === "create_account" && op.funder === id);
+        const isSent =
+          (op.type === "payment" && op.from === id) ||
+          (op.type === "create_account" && op.funder === id);
         if (isSent) volumeMap[assetKey].totalSent += amount;
         else volumeMap[assetKey].totalReceived += amount;
 
@@ -1328,7 +1716,13 @@ router.get("/:id/offer-history", async (req, res, next) => {
     const records = opResponse.records || [];
 
     const offerOps = records
-      .filter((op) => ["manage_sell_offer", "manage_buy_offer", "create_passive_sell_offer"].includes(op.type))
+      .filter((op) =>
+        [
+          "manage_sell_offer",
+          "manage_buy_offer",
+          "create_passive_sell_offer",
+        ].includes(op.type),
+      )
       .map((op) => {
         let offerType = "updated";
         if (op.type === "create_passive_sell_offer") offerType = "created";
@@ -1343,8 +1737,16 @@ router.get("/:id/offer-history", async (req, res, next) => {
         return {
           offerId: op.offer_id,
           type: offerType,
-          sellingAsset: formatAsset(op.selling_asset_type, op.selling_asset_code, op.selling_asset_issuer),
-          buyingAsset: formatAsset(op.buying_asset_type, op.buying_asset_code, op.buying_asset_issuer),
+          sellingAsset: formatAsset(
+            op.selling_asset_type,
+            op.selling_asset_code,
+            op.selling_asset_issuer,
+          ),
+          buyingAsset: formatAsset(
+            op.buying_asset_type,
+            op.buying_asset_code,
+            op.buying_asset_issuer,
+          ),
           amount: op.amount,
           price: op.price,
           timestamp: toISOTimestamp(op.created_at),
@@ -1352,7 +1754,8 @@ router.get("/:id/offer-history", async (req, res, next) => {
         };
       });
 
-    const nextCursor = records.length > 0 ? records[records.length - 1].paging_token : null;
+    const nextCursor =
+      records.length > 0 ? records[records.length - 1].paging_token : null;
 
     return success(res, {
       items: offerOps,
@@ -1411,13 +1814,16 @@ router.get("/:id/pool-positions", async (req, res, next) => {
       const accountShares = parseFloat(trustline.balance);
       const totalShares = parseFloat(pool.total_shares);
 
-      const sharePercent = totalShares > 0 ? (accountShares / totalShares) * 100 : 0;
+      const sharePercent =
+        totalShares > 0 ? (accountShares / totalShares) * 100 : 0;
 
       const reserveA = pool.reserves[0];
       const reserveB = pool.reserves[1];
 
-      const equivalentReserveA = (parseFloat(reserveA.amount) * accountShares) / totalShares;
-      const equivalentReserveB = (parseFloat(reserveB.amount) * accountShares) / totalShares;
+      const equivalentReserveA =
+        (parseFloat(reserveA.amount) * accountShares) / totalShares;
+      const equivalentReserveB =
+        (parseFloat(reserveB.amount) * accountShares) / totalShares;
 
       positions.push({
         poolId: pool.id,
@@ -1464,7 +1870,9 @@ router.get("/:id/transaction-stats", async (req, res, next) => {
     const limitRaw = req.query.limit;
     const limit = limitRaw === undefined ? 200 : parseInt(limitRaw, 10);
     if (isNaN(limit) || limit < 1 || limit > 200) {
-      const err = new Error("Query parameter 'limit': must be an integer between 1 and 200.");
+      const err = new Error(
+        "Query parameter 'limit': must be an integer between 1 and 200.",
+      );
       err.isValidation = true;
       err.field = "limit";
       err.receivedValue = String(limitRaw);
@@ -1516,7 +1924,9 @@ router.get("/:id/transaction-stats", async (req, res, next) => {
       if (successful) bucket.successfulCount += 1;
       else bucket.failedCount += 1;
       bucket.totalFeeChargedStroops += feeChargedStroops;
-      bucket.totalFeeChargedXlm = (bucket.totalFeeChargedStroops / STROOPS_PER_XLM).toFixed(7);
+      bucket.totalFeeChargedXlm = (
+        bucket.totalFeeChargedStroops / STROOPS_PER_XLM
+      ).toFixed(7);
     }
 
     const successfulCount = records.filter((t) => t.successful === true).length;
@@ -1525,8 +1935,14 @@ router.get("/:id/transaction-stats", async (req, res, next) => {
     return success(res, {
       accountId: id,
       limit,
-      counts: { total: records.length, successful: successfulCount, failed: failedCount },
-      firstSeenAt: records.length ? toISOTimestamp(records[records.length - 1].created_at) : null,
+      counts: {
+        total: records.length,
+        successful: successfulCount,
+        failed: failedCount,
+      },
+      firstSeenAt: records.length
+        ? toISOTimestamp(records[records.length - 1].created_at)
+        : null,
       lastSeenAt: records.length ? toISOTimestamp(records[0].created_at) : null,
       byType: Array.from(perAsset.values()),
     });
@@ -1542,7 +1958,9 @@ router.post("/:id/multisig-plan", async (req, res, next) => {
 
     const { availableSigners } = req.body;
     if (!availableSigners || !Array.isArray(availableSigners)) {
-      const err = new Error("availableSigners must be an array of public keys.");
+      const err = new Error(
+        "availableSigners must be an array of public keys.",
+      );
       err.status = 400;
       return next(err);
     }
@@ -1559,7 +1977,11 @@ router.post("/:id/multisig-plan", async (req, res, next) => {
       .map((key) => accountSigners.find((s) => s.key === key))
       .filter(Boolean);
 
-    const signerWeights = availableMatches.map((s) => ({ key: s.key, weight: s.weight, type: s.type }));
+    const signerWeights = availableMatches.map((s) => ({
+      key: s.key,
+      weight: s.weight,
+      type: s.type,
+    }));
 
     const findMinimalCombinations = (signers, threshold) => {
       if (threshold <= 0) return [[]];
@@ -1588,7 +2010,9 @@ router.post("/:id/multisig-plan", async (req, res, next) => {
       const minSize = Math.min(...allCombinations.map((c) => c.length));
       const minimal = allCombinations
         .filter((c) => c.length === minSize)
-        .map((c) => c.map((s) => ({ key: s.key, weight: s.weight, type: s.type })));
+        .map((c) =>
+          c.map((s) => ({ key: s.key, weight: s.weight, type: s.type })),
+        );
 
       const unique = [];
       const seen = new Set();
@@ -1607,7 +2031,10 @@ router.post("/:id/multisig-plan", async (req, res, next) => {
     const validCombinations = {
       low: findMinimalCombinations(availableMatches, thresholds.low_threshold),
       med: findMinimalCombinations(availableMatches, thresholds.med_threshold),
-      high: findMinimalCombinations(availableMatches, thresholds.high_threshold),
+      high: findMinimalCombinations(
+        availableMatches,
+        thresholds.high_threshold,
+      ),
     };
 
     return success(res, {
@@ -1671,10 +2098,12 @@ router.get("/:id/data", async (req, res, next) => {
 
     const account = await server.loadAccount(id);
 
-    const dataEntries = Object.entries(account.data || {}).map(([key, value]) => ({
-      key,
-      value,
-    }));
+    const dataEntries = Object.entries(account.data || {}).map(
+      ([key, value]) => ({
+        key,
+        value,
+      }),
+    );
 
     return success(res, {
       items: dataEntries,
@@ -1686,4 +2115,3 @@ router.get("/:id/data", async (req, res, next) => {
 });
 
 module.exports = router;
-
