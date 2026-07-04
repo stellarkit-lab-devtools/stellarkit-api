@@ -4,6 +4,19 @@ Thank you for your interest in contributing! StellarKit API participates in the 
 
 ---
 
+## Table of Contents
+
+- [🌊 Stellar Wave Issues](#-stellar-wave-issues)
+- [📖 Documentation](#-documentation)
+- [🛠️ Development Setup](#️-development-setup)
+- [📋 How to Contribute](#-how-to-contribute)
+- [✅ PR Checklist](#-pr-checklist)
+- [🧱 Code Style](#-code-style)
+- [🔍 Linting](#-linting)
+- [💬 Questions?](#-questions)
+
+---
+
 ## 🌊 Stellar Wave Issues
 
 Issues with the **`Stellar Wave`** label are part of the Stellar Wave Program on Drips.
@@ -37,7 +50,7 @@ npm run dev
 
 ## 📋 How to Contribute
 
-1. **Find an issue** — Check the [Issues tab](../../issues) for open tasks. Wave issues are labeled with their complexity (`trivial`, `medium`, `high`).
+1. **Find an issue** — Check the [Issues tab](../../issues) for open tasks. If the issue has the `Stellar Wave` label, follow the [Stellar Wave Issues](#-stellar-wave-issues) rules before starting.
 2. **Comment or apply** — Leave a comment on the issue or apply via Drips Wave before starting.
 3. **Branch** — Create a branch: `git checkout -b feat/short-description` or `fix/short-description`.
 4. **Code** — Make your changes. Follow the existing patterns.
