@@ -6,11 +6,11 @@ Thank you for your interest in contributing! StellarKit API participates in the 
 
 ## Table of Contents
 
-- [🌊 Stellar Wave Issues](#-stellar-wave-issues)
-- [📖 Documentation](#-documentation)
-- [🛠️ Development Setup](#️-development-setup)
-- [📋 How to Contribute](#-how-to-contribute)
-- [✅ PR Checklist](#-pr-checklist)
+- [🌊 Stellar Wave Issues](#stellar-wave-issues)
+- [📖 Documentation](#documentation)
+- [🛠️ Development Setup](#development-setup)
+- [📋 How to Contribute](#how-to-contribute)
+- [✅ PR Checklist](#pr-checklist)
 - [🧱 Code Style](#-code-style)
 - [🔍 Linting](#-linting)
 - [💬 Questions?](#-questions)
