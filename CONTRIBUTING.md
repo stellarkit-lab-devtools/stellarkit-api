@@ -4,14 +4,14 @@ Thank you for your interest in contributing! StellarKit API participates in the 
 
 ---
 
-## 🌊 Stellar Wave Program
+## 🌊 Stellar Wave Issues
 
-This repo is part of the Stellar Wave Program. During each monthly Wave (a 7-day sprint), contributors can:
+Issues with the **`Stellar Wave`** label are part of the Stellar Wave Program on Drips.
 
-1. Browse open issues labeled with point values
-2. Apply to work on an issue via the Drips Wave app
-3. Submit a Pull Request
-4. Earn Points → converted to real rewards
+1. The label means the issue is included in the active Wave and should be handled under Wave rules.
+2. Issues with this label carry **Point rewards** in Drips Wave.
+3. You must **apply via Drips Wave before starting work** on the issue.
+4. Your PR must be **merged before the current Wave ends** for points to be awarded.
 
 **Get started:** [drips.network/wave/stellar](https://www.drips.network/wave/stellar)
 
