@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, Ledger-Sequence]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, Ledger-Sequence]
   schedule:
     # Run security audit daily at 06:00 UTC to catch newly disclosed vulnerabilities
     - cron: '0 6 * * *'

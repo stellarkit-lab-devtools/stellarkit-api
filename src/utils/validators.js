@@ -27,21 +27,8 @@ function makeValidationError(message, field, receivedValue, expectedFormat) {
  * @throws {Error} Throws a validation error when the account ID is missing or invalid.
  */
 function validateAccountId(accountId) {
-  if (!accountId) {
-    throw makeValidationError(
-      qp("accountId", "is required."),
-      "accountId",
-      accountId,
-      "G... (valid Ed25519 public key)"
-    );
-  }
-  if (!StrKey.isValidEd25519PublicKey(accountId)) {
-    throw makeValidationError(
-      qp("accountId", 'must be a valid Ed25519 public key starting with "G".'),
-      "accountId",
-      accountId,
-      "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
-    );
+  if (typeof accountId !== "string" || !StrKey.isValidEd25519PublicKey(accountId)) {
+    throw makeInvalidAccountIdError(accountId);
   }
 }
 

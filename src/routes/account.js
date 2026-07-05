@@ -23,7 +23,7 @@ const { Asset } = require("@stellar/stellar-sdk");
 
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
-const cacheService = require("../services/cache");
+
 const cacheTTL = require("../config/cacheConfig");
 
 // Cache TTL for account endpoint responses (in seconds)
@@ -337,9 +337,11 @@ router.get("/:id/payments", async (req, res, next) => {
       : null;
     const filterIssuer = req.query.assetIssuer || null;
 
-    let query = server.operations().forAccount(id).limit(limit).order(order);
+    let query = server.payments().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
 
+    const paymentResponse = await query.call();
+    const rawRecords = paymentResponse.records || [];
     const opResponse = await query.call();
     const rawRecords = opResponse.records || [];
 
@@ -413,17 +415,29 @@ router.get("/:id/payments", async (req, res, next) => {
       }
     }
 
-    const lastIdx = rawRecords.length ? rawRecords.length - 1 : -1;
-    const nextCursor =
-      rawRecords[lastIdx] && rawRecords[lastIdx].paging_token
-        ? rawRecords[lastIdx].paging_token
-        : null;
+    const payments = rawRecords.map((op) => {
+      const isPayment = op.type === "payment";
+      const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
+      const assetIssuer = isPayment ? op.asset_issuer || null : null;
+      return {
+        paymentId: op.id,
+        from: isPayment ? op.from : op.funder,
+        to: isPayment ? op.to : op.account,
+        asset: assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode,
+        amount: isPayment ? op.amount : op.starting_balance,
+        createdAt: toISOTimestamp(op.created_at),
+        transactionHash: op.transaction_hash,
+      };
+    });
+
+    const lastRecord = rawRecords[rawRecords.length - 1];
+    const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
     return success(res, {
-      items: paymentOps,
-      total: paymentOps.length,
+      payments,
+      total: payments.length,
       limit,
-      cursor: paymentOps.length ? nextCursor : null,
+      cursor: payments.length ? nextCursor : null,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
