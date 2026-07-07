@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
+const { makeAccountNotFoundError } = require("../utils/errors");
 const cacheService = require("../services/cache");
 
 const {
@@ -27,48 +28,6 @@ const cacheTTL = require("../config/cacheConfig");
 
 // Cache TTL for account endpoint responses (in seconds)
 const CACHE_TTL_ACCOUNT = parseInt(process.env.CACHE_TTL_ACCOUNT_MS, 10) / 1000 || 10;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Ledger Sequence to Approximate Date Converter
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * GET /account/ledger/:sequence/date
- *
- * Converts a Stellar ledger sequence number to an approximate UTC date.
- * Calculation: genesis (2015-09-30) + (sequence - 1) × 5 seconds
- */
-router.get("/ledger/:sequence/date", async (req, res, next) => {
-  try {
-    const sequence = parseInt(req.params.sequence, 10);
-
-    if (isNaN(sequence) || sequence < 1) {
-      const err = new Error("Ledger sequence must be a positive integer (≥ 1).");
-      err.isValidation = true;
-      err.field = "sequence";
-      err.receivedValue = req.params.sequence;
-      err.expectedFormat = "positive integer";
-      err.status = 400;
-      return next(err);
-    }
-
-    const GENESIS_TIMESTAMP = 1443571200; // 2015-09-30T00:00:00Z
-    const AVERAGE_LEDGER_CLOSE_SEC = 5;
-
-    const approximateTimestamp = GENESIS_TIMESTAMP + (sequence - 1) * AVERAGE_LEDGER_CLOSE_SEC;
-    const approximateDate = new Date(approximateTimestamp * 1000);
-
-    return success(res, {
-      sequence,
-      approximate_date: approximateDate.toISOString(),
-      unix_timestamp: approximateTimestamp,
-      human_readable: approximateDate.toUTCString(),
-      note: "Date is approximate based on an average 5-second ledger close time.",
-    });
-  } catch (err) {
-    next(err);
-  }
-});
 
 function validateLimit(limit, max = 200) {
   const n = Number(limit);
