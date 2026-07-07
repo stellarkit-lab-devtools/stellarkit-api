@@ -43,6 +43,7 @@ This project is ideal for:
 
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
 - [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
+- [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
 
 ---
 
