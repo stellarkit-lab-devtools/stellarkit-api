@@ -11,7 +11,7 @@
 [![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-StellarKit API encapsule l'[API Horizon de Stellar](https://developers.stellar.org/api/horizon) dans des points de terminaison (endpoints) REST clairs et adaptés aux développeurs. Elle aide les développeurs créant sur Stellar à accéder rapidement aux estimations de frais, aux données de compte, à l'historique des transactions, à l'état du réseau et aux métadonnées des actifs — sans avoir à analyser les réponses brutes d'Horizon.
+StellarKit API encapsule l'[API Horizon de Stellar](http://web.archive.org/web/20240226022606/http://web.archive.org/web/20240226022606/https://developers.stellar.org/api/horizon) dans des points de terminaison (endpoints) REST clairs et adaptés aux développeurs. Elle aide les développeurs créant sur Stellar à accéder rapidement aux estimations de frais, aux données de compte, à l'historique des transactions, à l'état du réseau et aux métadonnées des actifs — sans avoir à analyser les réponses brutes d'Horizon.
 
 ---
 
