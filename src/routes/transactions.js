@@ -7,6 +7,7 @@ const { success, toISOTimestamp } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
 const { makeAccountNotFoundError } = require("../utils/errors");
+const { normalizeAsset } = require("../utils/asset");
 
 function handleAccountNotFound(err, next, accountId) {
   if (err && err.response && err.response.status === 404) {
@@ -223,8 +224,11 @@ router.get("/:id/operations", async (req, res, next) => {
 
       // Add type-specific fields
       if (op.type === "payment") {
-        formatted.assetCode = op.asset_code || "XLM";
-        formatted.assetIssuer = op.asset_issuer || "native";
+        formatted.asset = normalizeAsset(
+          op.asset_code || "XLM",
+          op.asset_issuer || null,
+          op.asset_type || "native",
+        );
         formatted.amount = op.amount;
         formatted.from = op.from;
         formatted.to = op.to;
@@ -233,8 +237,7 @@ router.get("/:id/operations", async (req, res, next) => {
         formatted.funder = op.funder;
         formatted.account = op.account;
       } else if (op.type === "change_trust") {
-        formatted.assetCode = op.asset_code;
-        formatted.assetIssuer = op.asset_issuer;
+        formatted.asset = normalizeAsset(op.asset_code, op.asset_issuer, op.asset_type);
         formatted.trustor = op.trustor;
         formatted.trustee = op.trustee;
       }

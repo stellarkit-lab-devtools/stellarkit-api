@@ -6,6 +6,7 @@ registerParamValidation(router);
 const { server } = require("../config/stellar");
 const { StrKey } = require("@stellar/stellar-sdk");
 const { formatTransaction } = require("../utils/formatTransaction");
+const { normalizeAsset } = require("../utils/asset");
 
 /**
  * Error codes for SSE stream errors
@@ -277,7 +278,7 @@ router.get("/payments/:id", async (req, res, next) => {
           const payload = {
             type: op.type,
             amount: op.amount || op.starting_balance || null,
-            assetCode: op.asset_type === "native" ? "XLM" : (op.asset_code || null),
+            asset: normalizeAsset(op.asset_code, op.asset_issuer, op.asset_type),
             from: op.from || op.funder || op.source_account || null,
             to: op.to || op.account || null,
             timestamp: op.created_at || null,

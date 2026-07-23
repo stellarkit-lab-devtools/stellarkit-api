@@ -33,8 +33,9 @@ describe("GET /asset/:code/:issuer/price", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.assetCode).toBe(ASSET_CODE);
-    expect(res.body.data.assetIssuer).toBe(ASSET_ISSUER);
+    expect(res.body.data.asset.code).toBe(ASSET_CODE);
+    expect(res.body.data.asset.issuer).toBe(ASSET_ISSUER);
+    expect(res.body.data.asset.type).toBe("credit_alphanum4");
     expect(res.body.data.priceInXlm).toBe("0.1250000");
     expect(res.body.data.quoteAsset).toBe("XLM");
     expect(res.headers["x-cache"]).toBe("MISS");

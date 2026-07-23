@@ -89,7 +89,7 @@ describe("GET /account/:id/payments", () => {
     expect(p.paymentId).toBe("12345");
     expect(p.from).toBe(VALID_ACCOUNT);
     expect(p.to).toBe("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
-    expect(p.asset).toBe("USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+    expect(p.asset).toEqual({ code: "USDC", issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", type: "credit_alphanum4" });
     expect(p.amount).toBe("100.0000000");
     expect(p.createdAt).toBeDefined();
     expect(p.transactionHash).toBe("abc123def456");
@@ -115,7 +115,7 @@ describe("GET /account/:id/payments", () => {
     const res = await request(app).get(`/account/${VALID_ACCOUNT}/payments`);
     expect(res.statusCode).toBe(200);
     const p = res.body.data.payments[0];
-    expect(p.asset).toBe("XLM");
+    expect(p.asset).toEqual({ code: "XLM", issuer: null, type: "native" });
   });
 
   it("handles create_account operations", async () => {
@@ -140,7 +140,7 @@ describe("GET /account/:id/payments", () => {
     expect(p.paymentId).toBe("11111");
     expect(p.from).toBe(VALID_ACCOUNT);
     expect(p.to).toBe("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
-    expect(p.asset).toBe("XLM");
+    expect(p.asset).toEqual({ code: "XLM", issuer: null, type: "native" });
     expect(p.amount).toBe("10.0000000");
     expect(p.transactionHash).toBe("create123");
   });

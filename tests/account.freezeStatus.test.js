@@ -50,8 +50,9 @@ describe("Account Freeze Status API", () => {
         expect(res.body.data).toEqual({
             accountId,
             asset: {
-                assetCode: "USD",
-                assetIssuer: issuerPublicKey,
+                code: "USD",
+                issuer: issuerPublicKey,
+                type: "credit_alphanum4",
             },
             isFrozen: false,
             isPartiallyFrozen: false,

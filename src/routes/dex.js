@@ -6,7 +6,7 @@ const { Asset } = require("@stellar/stellar-sdk");
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { validateAssetCode, validateAccountId, validateAsset } = require("../utils/validators");
-const { parseStellarAsset } = require("../utils/asset");
+const { parseStellarAsset, normalizeAsset } = require("../utils/asset");
 
 /**
  * GET /dex/arbitrage/:assetCode/:assetIssuer
@@ -39,11 +39,9 @@ router.get("/arbitrage/:assetCode/:assetIssuer", async (req, res, next) => {
       .map((path) => ({
         sourceAmount: path.source_amount,
         destinationAmount: path.destination_amount,
-        path: path.path.map((hop) => ({
-          assetCode: hop.asset_code || "XLM",
-          assetIssuer: hop.asset_issuer || "native",
-          assetType: hop.asset_type,
-        })),
+        path: path.path.map((hop) =>
+          normalizeAsset(hop.asset_code, hop.asset_issuer, hop.asset_type),
+        ),
         isProfitable: parseFloat(path.source_amount) < parseFloat(path.destination_amount),
       }))
       .filter((p) => p.path.length > 0);
@@ -430,10 +428,9 @@ router.get("/price/:sellAsset/:buyAsset", async (req, res, next) => {
     const buyAmount = parseFloat(best.destination_amount);
     const effectiveRate = buyAmount / sellAmount;
 
-    const bestPath = best.path.map((hop) => ({
-      assetCode: hop.asset_code || "XLM",
-      assetIssuer: hop.asset_issuer || "native",
-    }));
+    const bestPath = best.path.map((hop) =>
+      normalizeAsset(hop.asset_code, hop.asset_issuer, hop.asset_type),
+    );
 
     return success(res, {
       sellAsset,

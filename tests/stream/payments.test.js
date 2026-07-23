@@ -56,6 +56,7 @@ describe("GET /stream/payments/:id — SSE Endpoint", () => {
         amount: "50.0000000",
         asset_type: "credit_alphanum4",
         asset_code: "USDC",
+        asset_issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
         from: VALID_KEY,
         to: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
         created_at: "2024-01-01T12:00:00Z",
@@ -88,7 +89,9 @@ describe("GET /stream/payments/:id — SSE Endpoint", () => {
           const parsed = JSON.parse(dataLines[0].replace("data: ", ""));
           expect(parsed.type).toBe("payment");
           expect(parsed.amount).toBe("50.0000000");
-          expect(parsed.assetCode).toBe("USDC");
+          expect(parsed.asset.code).toBe("USDC");
+          expect(parsed.asset.issuer).toBe("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+          expect(parsed.asset.type).toBe("credit_alphanum4");
           expect(parsed.from).toBe(VALID_KEY);
           expect(parsed.to).toBe("GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
           expect(parsed.timestamp).toBe("2024-01-01T12:00:00Z");
@@ -136,7 +139,9 @@ describe("GET /stream/payments/:id — SSE Endpoint", () => {
           const parsed = JSON.parse(dataLines[0].replace("data: ", ""));
           expect(parsed.type).toBe("create_account");
           expect(parsed.amount).toBe("1.0000000");
-          expect(parsed.assetCode).toBe("XLM");
+          expect(parsed.asset.code).toBe("XLM");
+          expect(parsed.asset.issuer).toBeNull();
+          expect(parsed.asset.type).toBe("native");
           callback(null, {});
           done();
         });
