@@ -18,6 +18,7 @@ const errorHandler = require("./middleware/errorHandler");
 const requestIdMiddleware = require("./middleware/requestId");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
 const sanitize = require("./middleware/sanitize");
+const coerceQueryParams = require("./middleware/coerceQueryParams");
 
 const networkStatusRouter = require("./routes/networkStatus");
 const feeEstimateRouter = require("./routes/feeEstimate");
@@ -186,6 +187,7 @@ app.use(rateLimiter);
 
 // ── Input Sanitization ──────────────────────────────────────────────────────
 app.use(sanitize);
+app.use(coerceQueryParams);
 
 // ── Health Check ────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
