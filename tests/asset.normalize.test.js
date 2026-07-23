@@ -67,6 +67,8 @@ describe('Asset Code Normalizer Middleware', () => {
     const res = await request(app).get(`/asset/search?code=${mixedCase}`);
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.items[0].assetCode).toBe(ASSET_CODE);
+    expect(res.body.data.items[0].asset.code).toBe(ASSET_CODE);
+    expect(res.body.data.items[0].asset.issuer).toBe(ASSET_ISSUER);
+    expect(res.body.data.items[0].asset.type).toBe("credit_alphanum4");
   });
 });

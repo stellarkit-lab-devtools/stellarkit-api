@@ -43,8 +43,9 @@ describe("Account Can Receive API", () => {
             expect(res.body.data).toEqual({
                 accountId,
                 asset: {
-                    assetCode: "XLM",
-                    assetIssuer: "native",
+                    code: "XLM",
+                    issuer: null,
+                    type: "native",
                 },
                 canReceive: true,
                 reasons: [],

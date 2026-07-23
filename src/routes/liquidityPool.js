@@ -8,6 +8,7 @@ const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { parsePaginationParams } = require("../utils/pagination");
 const { StrKey } = require("@stellar/stellar-sdk");
+const { normalizeAssetFromString } = require("../utils/asset");
 
 function makeAssetQueryValidationError(field, value) {
   const err = new Error(
@@ -194,11 +195,11 @@ router.get("/:id/profitability", async (req, res, next) => {
       estimatedDailyFeeIncome: estimatedDailyFeeIncome.toFixed(7),
       estimatedAnnualFeeIncome: estimatedAnnualFeeIncome.toFixed(7),
       reserveA: {
-        asset: pool.reserves[0].asset,
+        asset: normalizeAssetFromString(pool.reserves[0].asset),
         amount: pool.reserves[0].amount,
       },
       reserveB: {
-        asset: pool.reserves[1].asset,
+        asset: normalizeAssetFromString(pool.reserves[1].asset),
         amount: pool.reserves[1].amount,
       },
       totalShares: pool.total_shares,
@@ -237,11 +238,11 @@ router.get("/:id/reserve-ratio", async (req, res, next) => {
     }
 
     const reserveA = {
-      asset: pool.reserves[0].asset,
+      asset: normalizeAssetFromString(pool.reserves[0].asset),
       amount: pool.reserves[0].amount,
     };
     const reserveB = {
-      asset: pool.reserves[1].asset,
+      asset: normalizeAssetFromString(pool.reserves[1].asset),
       amount: pool.reserves[1].amount,
     };
 

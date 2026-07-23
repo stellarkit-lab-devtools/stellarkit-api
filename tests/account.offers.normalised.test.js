@@ -64,15 +64,15 @@ describe("GET /account/:id/offers — normalised response", () => {
     expect(offer).not.toHaveProperty("last_modified_ledger");
   });
 
-  it("all asset fields are camelCase", async () => {
+  it("all asset fields are { code, issuer, type }", async () => {
     const res = await request(app).get(`/account/${accountId}/offers`);
     const offer = res.body.data.items[0];
-    expect(offer.selling).toHaveProperty("assetType");
-    expect(offer.selling).toHaveProperty("assetCode");
-    expect(offer.selling).toHaveProperty("assetIssuer");
-    expect(offer.buying).toHaveProperty("assetType");
-    expect(offer.buying).toHaveProperty("assetCode");
-    expect(offer.buying).toHaveProperty("assetIssuer");
+    expect(offer.selling).toHaveProperty("code");
+    expect(offer.selling).toHaveProperty("issuer");
+    expect(offer.selling).toHaveProperty("type");
+    expect(offer.buying).toHaveProperty("code");
+    expect(offer.buying).toHaveProperty("issuer");
+    expect(offer.buying).toHaveProperty("type");
     // no raw snake_case fields
     expect(offer).not.toHaveProperty("selling_asset_type");
     expect(offer).not.toHaveProperty("last_modified_ledger");
@@ -81,8 +81,8 @@ describe("GET /account/:id/offers — normalised response", () => {
   it("native selling asset normalises to XLM with null issuer", async () => {
     const res = await request(app).get(`/account/${accountId}/offers`);
     const selling = res.body.data.items[0].selling;
-    expect(selling.assetType).toBe("native");
-    expect(selling.assetCode).toBe("XLM");
-    expect(selling.assetIssuer).toBeNull();
+    expect(selling.type).toBe("native");
+    expect(selling.code).toBe("XLM");
+    expect(selling.issuer).toBeNull();
   });
 });

@@ -64,8 +64,8 @@ describe("Account Offer History API", () => {
     expect(res.body.data.items).toHaveLength(2);
     expect(res.body.data.items[0].type).toBe("updated");
     expect(res.body.data.items[1].type).toBe("deleted");
-    expect(res.body.data.items[0].sellingAsset).toBe("XLM");
-    expect(res.body.data.items[0].buyingAsset).toBe("USDC:G_ISSUER");
+    expect(res.body.data.items[0].sellingAsset).toEqual({ code: "XLM", issuer: null, type: "native" });
+    expect(res.body.data.items[0].buyingAsset).toEqual({ code: "USDC", issuer: "G_ISSUER", type: "credit_alphanum4" });
     expect(res.body.data).toHaveProperty("total", 2);
     expect(res.body.data).toHaveProperty("limit");
     expect(res.body.data).toHaveProperty("cursor");
