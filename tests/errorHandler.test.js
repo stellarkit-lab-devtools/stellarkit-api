@@ -16,7 +16,7 @@ describe("ErrorHandler Middleware", () => {
   });
 
   describe("Horizon Errors", () => {
-    it("should map transaction result code tx_bad_seq to 409 status code", () => {
+    it("maps a failed transaction submission (tx_bad_seq) to TransactionSubmissionFailed at 409", () => {
       const err = {
         response: {
           status: 400,
@@ -38,18 +38,16 @@ describe("ErrorHandler Middleware", () => {
       expect(res.json).toHaveBeenCalledWith({
         success: false,
         error: {
-          type: "HorizonError",
-          title: "Transaction Failed",
-          detail: "The transaction failed due to bad sequence.",
-          status: 400,
-          extras: err.response.data.extras,
-          code: "tx_bad_seq",
-          message: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
+          type: "TransactionSubmissionFailed",
+          message: "Transaction failed.",
+          resultCodes: { transaction: "tx_bad_seq", operations: [] },
+          suggestion:
+            "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
         },
       });
     });
 
-    it("should map operation result code op_no_destination to 404 status code", () => {
+    it("maps a failed transaction submission (op_no_destination) to TransactionSubmissionFailed at 404", () => {
       const err = {
         response: {
           status: 400,
@@ -71,13 +69,11 @@ describe("ErrorHandler Middleware", () => {
       expect(res.json).toHaveBeenCalledWith({
         success: false,
         error: {
-          type: "HorizonError",
-          title: "Transaction Failed",
-          detail: "The destination account was not found.",
-          status: 400,
-          extras: err.response.data.extras,
-          code: "op_no_destination",
-          message: "The destination account does not exist. Create the account first with a createAccount operation.",
+          type: "TransactionSubmissionFailed",
+          message: "Transaction failed.",
+          resultCodes: { transaction: null, operations: ["op_no_destination"] },
+          suggestion:
+            "The destination account does not exist. Create the account first with a createAccount operation.",
         },
       });
     });

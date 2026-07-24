@@ -459,7 +459,7 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       server.accounts().sponsor(id).call(),
     ]);
 
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const sponsoredEntries = [];
 
     (account.balances || []).forEach((b) => {
       if (b.sponsor) {
@@ -491,43 +491,147 @@ router.get("/:id/sponsorship", async (req, res, next) => {
             sponsor: dataSponsors[key],
           });
         }
-        if (!op.transaction_successful) {
-          cursor = op.paging_token;
-          continue;
-        }
-
-        const assetCode = op.asset_code || "XLM";
-        const assetIssuer = op.asset_issuer || null;
-        const assetKey = assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode;
-        const amount = parseFloat(op.amount || op.starting_balance || "0");
-
-        if (!volumeMap[assetKey]) {
-          volumeMap[assetKey] = {
-            assetCode,
-            assetIssuer,
-            totalSent: 0,
-            totalReceived: 0,
-          };
-        }
-
-        const isSent = (op.type === "payment" && op.from === id) || (op.type === "create_account" && op.funder === id);
-        if (isSent) volumeMap[assetKey].totalSent += amount;
-        else volumeMap[assetKey].totalReceived += amount;
-
-        totalTransactions++;
-        cursor = op.paging_token;
-      }
-
-      if (records.length < 200) done = true;
+      });
     }
 
     const accountsSponsoring = (sponsoringResponse.records || []).map((acc) => acc.id);
 
     return success(res, {
-      period: { days, from: since.toISOString(), to: new Date().toISOString() },
-      totalTransactions,
-      volumeByAsset,
+      accountId: account.id,
+      accountSponsor: account.sponsor || null,
+      sponsoredEntries,
+      accountsSponsoring,
     });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+const BASE_RESERVE_XLM = 0.5;
+const ACCOUNT_RESERVE_UNITS = 2;
+
+/**
+ * Builds the list of entries sponsored *for* this account (i.e. this
+ * account is the beneficiary and `address` identifies each sponsor).
+ */
+function buildSponsoredByEntries(account) {
+  const entries = [];
+
+  if (account.sponsor) {
+    entries.push({
+      type: "account",
+      address: account.sponsor,
+      reserveAmount: (ACCOUNT_RESERVE_UNITS * BASE_RESERVE_XLM).toFixed(7),
+    });
+  }
+
+  (account.balances || []).forEach((b) => {
+    if (b.sponsor) {
+      entries.push({
+        type: "trustline",
+        address: b.sponsor,
+        reserveAmount: BASE_RESERVE_XLM.toFixed(7),
+      });
+    }
+  });
+
+  (account.signers || []).forEach((s) => {
+    if (s.sponsor) {
+      entries.push({
+        type: "signer",
+        address: s.sponsor,
+        reserveAmount: BASE_RESERVE_XLM.toFixed(7),
+      });
+    }
+  });
+
+  if (account.data_attr) {
+    const dataSponsors = account.data_sponsors || {};
+    Object.keys(account.data_attr).forEach((key) => {
+      if (dataSponsors[key]) {
+        entries.push({
+          type: "data_entry",
+          address: dataSponsors[key],
+          reserveAmount: BASE_RESERVE_XLM.toFixed(7),
+        });
+      }
+    });
+  }
+
+  return entries;
+}
+
+/**
+ * Builds the list of entries this account sponsors *for another account*
+ * (i.e. this account is the sponsor and `address` identifies the beneficiary).
+ */
+function buildSponsoringEntries(sponsoredAccount, sponsorId) {
+  const entries = [];
+  const address = sponsoredAccount.id || sponsoredAccount.account_id;
+
+  if (sponsoredAccount.sponsor === sponsorId) {
+    entries.push({
+      type: "account",
+      address,
+      reserveAmount: (ACCOUNT_RESERVE_UNITS * BASE_RESERVE_XLM).toFixed(7),
+    });
+  }
+
+  (sponsoredAccount.balances || []).forEach((b) => {
+    if (b.sponsor === sponsorId) {
+      entries.push({
+        type: "trustline",
+        address,
+        reserveAmount: BASE_RESERVE_XLM.toFixed(7),
+      });
+    }
+  });
+
+  (sponsoredAccount.signers || []).forEach((s) => {
+    if (s.sponsor === sponsorId) {
+      entries.push({
+        type: "signer",
+        address,
+        reserveAmount: BASE_RESERVE_XLM.toFixed(7),
+      });
+    }
+  });
+
+  if (sponsoredAccount.data_attr) {
+    const dataSponsors = sponsoredAccount.data_sponsors || {};
+    Object.keys(sponsoredAccount.data_attr).forEach((key) => {
+      if (dataSponsors[key] === sponsorId) {
+        entries.push({
+          type: "data_entry",
+          address,
+          reserveAmount: BASE_RESERVE_XLM.toFixed(7),
+        });
+      }
+    });
+  }
+
+  return entries;
+}
+
+/**
+ * GET /account/:id/sponsorships
+ */
+router.get("/:id/sponsorships", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const [account, sponsoringResponse] = await Promise.all([
+      server.loadAccount(id),
+      server.accounts().sponsor(id).call(),
+    ]);
+
+    const sponsoredBy = buildSponsoredByEntries(account);
+    const sponsoring = (sponsoringResponse.records || []).flatMap((sponsoredAccount) =>
+      buildSponsoringEntries(sponsoredAccount, id),
+    );
+
+    return success(res, { sponsoring, sponsoredBy });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -983,6 +1087,68 @@ router.get("/:id/pool-positions", async (req, res, next) => {
     return success(res, positions, {
       meta: { count: positions.length, accountId: id },
     });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/liquidity-pool-shares
+ */
+router.get("/:id/liquidity-pool-shares", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    const poolShareTrustlines = (account.balances || []).filter(
+      (balance) => balance.asset_type === "liquidity_pool_shares",
+    );
+
+    if (poolShareTrustlines.length === 0) {
+      return success(res, { shares: [], total: 0 });
+    }
+
+    const poolDetailsPromises = poolShareTrustlines.map((trustline) =>
+      server
+        .liquidityPools()
+        .liquidityPoolId(trustline.liquidity_pool_id)
+        .call()
+        .catch((err) => {
+          if (err && err.response && err.response.status === 404) return null;
+          throw err;
+        }),
+    );
+
+    const poolDetails = await Promise.all(poolDetailsPromises);
+
+    const shares = [];
+
+    for (let i = 0; i < poolShareTrustlines.length; i++) {
+      const trustline = poolShareTrustlines[i];
+      const pool = poolDetails[i];
+      if (!pool) continue;
+
+      const reserveA = pool.reserves[0];
+      const reserveB = pool.reserves[1];
+
+      shares.push({
+        poolId: pool.id,
+        shares: parseFloat(trustline.balance).toFixed(7),
+        totalPoolShares: parseFloat(pool.total_shares).toFixed(7),
+        reserveA: {
+          asset: reserveA.asset,
+          amount: parseFloat(reserveA.amount).toFixed(7),
+        },
+        reserveB: {
+          asset: reserveB.asset,
+          amount: parseFloat(reserveB.amount).toFixed(7),
+        },
+      });
+    }
+
+    return success(res, { shares, total: shares.length });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
