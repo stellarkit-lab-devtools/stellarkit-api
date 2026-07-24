@@ -45,6 +45,39 @@ export interface NativeBalance {
 }
 
 /**
+ * A single sponsored entry for an account.
+ */
+export interface SponsoredEntry {
+  /** Type of the sponsored entry (e.g. "trustline", "signer", "data_entry"). */
+  type: string;
+  /** Asset identifier for trustlines (e.g. "USDC:GA5Z...") or key for signers/data. */
+  address?: string;
+  /** Key for signers or data entries. */
+  key?: string;
+  /** Asset code and issuer for trustlines. */
+  asset?: string;
+  /** Stellar account address sponsoring this entry. */
+  sponsor: string;
+  /** XLM amount reserved for this sponsored entry. */
+  reserveAmount?: string;
+}
+
+/**
+ * Sponsorship details for an account.
+ * Contains both entries sponsored by others and accounts this account is sponsoring.
+ */
+export interface Sponsorships {
+  /** Stellar account public key. */
+  accountId: string;
+  /** Entries on this account that are sponsored by other accounts. */
+  sponsoredBy: SponsoredEntry[];
+  /** Accounts that this account is currently sponsoring. */
+  sponsoring: string[];
+  /** Total number of sponsored entries. */
+  count: number;
+}
+
+/**
  * AccountModule wraps all `/account/:id/*` routes of the StellarKit API
  * into fully-typed async methods.
  *
@@ -227,6 +260,34 @@ export class AccountModule {
    */
   async getAccountData(id: string): Promise<AccountResponse["data"]> {
     return this.getAccount(id);
+  }
+
+  /**
+   * Get the sponsorship relationships for an account.
+   *
+   * Resolves both the entries on this account that are sponsored by other accounts
+   * (sponsoredBy) and the accounts that this account is currently sponsoring (sponsoring).
+   *
+   * Calls `GET /account/:id/sponsorships`.
+   *
+   * @param id - Stellar account public key (non-empty string starting with G).
+   * @returns Resolves to a Sponsorships object with `sponsoring` and `sponsoredBy` arrays.
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404 when the account does not exist).
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const sponsorships = await account.getSponsorships(
+   *   "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
+   * );
+   * console.log(sponsorships.count);               // number of sponsored entries
+   * console.log(sponsorships.sponsoredBy);          // entries sponsored by others
+   * console.log(sponsorships.sponsoring);           // accounts this account sponsors
+   */
+  async getSponsorships(id: string): Promise<Sponsorships> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    return this._get<Sponsorships>(`/account/${id}/sponsorships`);
   }
 
   /**
