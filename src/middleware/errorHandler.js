@@ -38,12 +38,75 @@ function logError(status, req, message) {
   }
 }
 
+/**
+ * A Horizon error is specifically a failed transaction submission (as opposed
+ * to any other Horizon error, e.g. a 404 on an account/asset lookup) when it
+ * carries the "Transaction Failed" problem type along with result codes.
+ */
+function isTransactionSubmissionFailure(horizonError) {
+  return Boolean(
+    horizonError &&
+      horizonError.title === "Transaction Failed" &&
+      horizonError.extras &&
+      horizonError.extras.result_codes
+  );
+}
+
+/**
+ * Picks the most specific result code out of a Horizon result_codes object.
+ * Horizon sets `transaction: "tx_failed"` as a generic wrapper whenever an
+ * operation is what actually failed, so the specific operation code (if any)
+ * is preferred over that generic marker.
+ */
+function pickMostSpecificResultCode(resultCodes) {
+  if (!resultCodes) return null;
+  if (resultCodes.transaction && resultCodes.transaction !== "tx_failed") {
+    return resultCodes.transaction;
+  }
+  const opCode = (resultCodes.operations || []).find((code) => code && code !== "op_success");
+  return opCode || resultCodes.transaction || null;
+}
+
+function buildTransactionSubmissionFailedError(horizonError) {
+  const resultCodes = horizonError.extras.result_codes;
+  const suggestionCode = pickMostSpecificResultCode(resultCodes);
+  const suggestion =
+    (suggestionCode && translateHorizonError(suggestionCode)) ||
+    "Review the transaction result codes and adjust the transaction before resubmitting.";
+
+  return {
+    type: "TransactionSubmissionFailed",
+    message: "Transaction failed.",
+    resultCodes: {
+      transaction: resultCodes.transaction || null,
+      operations: resultCodes.operations || [],
+    },
+    suggestion,
+  };
+}
+
 function errorHandler(err, req, res, next) {
   // Horizon errors returned from horizon-client / Stellar SDK
   if (err && err.response && err.response.data) {
     const horizonError = err.response.data;
     const extras = horizonError.extras !== undefined ? horizonError.extras : null;
 
+    const resultCode = pickMostSpecificResultCode(horizonError?.extras?.result_codes);
+
+    const mappedStatus = mapHorizonErrorToStatus(resultCode);
+    const status = mappedStatus ?? err.response.status ?? 400;
+
+    if (isTransactionSubmissionFailure(horizonError)) {
+      const body = buildTransactionSubmissionFailedError(horizonError);
+      logError(status, req, body.message);
+      return res.status(status).json({ success: false, error: body });
+    }
+
+    const message = horizonError.detail || horizonError.title || "Horizon Error";
+    const code = resultCode;
+    const humanMessage = code ? translateHorizonError(code) : null;
+    logError(status, req, message);
+    return res.status(status).json({
     let resultCode = null;
     if (extras && extras.result_codes) {
       if (typeof extras.result_codes.transaction === "string") {

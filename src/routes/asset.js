@@ -6,6 +6,7 @@ const { Asset } = require("@stellar/stellar-sdk");
 const { server, NETWORK } = require("../config/stellar");
 const { success } = require("../utils/response");
 const { formatBalance } = require("../utils/formatBalance");
+const cacheService = require("../services/cache");
 const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
 const { validateAccountId, validateAssetCode, validateAsset, validateLimit } = require("../utils/validators");
@@ -15,6 +16,13 @@ const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 router.use(normalizeAssetCode);
 
+const DEFAULT_ASSET_HOLDERS_CACHE_TTL_MS = 30000;
+
+function getAssetHoldersCacheTtlSeconds() {
+  const parsed = Number.parseInt(process.env.CACHE_TTL_ASSET_HOLDERS_MS, 10);
+  const ttlMs = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ASSET_HOLDERS_CACHE_TTL_MS;
+  return ttlMs / 1000;
+}
 
 function findAssetBalance(account, assetCode, issuer) {
   return (account.balances || []).find(
@@ -64,6 +72,17 @@ router.get(
       const assetCode = code.toUpperCase();
       const { limit, order, cursor } = parsePaginationParams(req.query);
 
+      const fresh = req.query.fresh === "true";
+      const cacheKey = `asset-holders:${assetCode}:${issuer}:${limit}:${order}:${cursor || ""}`;
+
+      if (!fresh) {
+        const cached = cacheService.get(cacheKey);
+        if (cached) {
+          res.set("X-Cache", "HIT");
+          return success(res, cached.holders, { meta: cached.meta });
+        }
+      }
+
       let query = server
         .accounts()
         .forAsset(new Asset(assetCode, issuer))
@@ -80,6 +99,18 @@ router.get(
       const lastRecord = records[records.length - 1];
       const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
+      const meta = {
+        count: holders.length,
+        limit,
+        order,
+        nextCursor,
+        hasMore: holders.length === limit,
+      };
+
+      cacheService.set(cacheKey, { holders, meta }, getAssetHoldersCacheTtlSeconds());
+
+      res.set("X-Cache", "MISS");
+      return success(res, holders, { meta });
       return success(res, {
         items: holders,
         total: holders.length,

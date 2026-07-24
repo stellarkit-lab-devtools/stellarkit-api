@@ -10,6 +10,8 @@ const logger = require("./utils/logger");
 const { setupWebSocket } = require("./websocket");
 const { server } = require("./config/stellar");
 const cacheService = require("./services/cache");
+const networkStatusCache = cacheService;
+const feeEstimateCache = cacheService;
 
 const rateLimiter = require("./middleware/rateLimiter");
 const contentTypeValidator = require("./middleware/contentTypeValidator");
