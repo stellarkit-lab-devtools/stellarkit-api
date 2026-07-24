@@ -2,13 +2,11 @@ const express = require("express");
 const router = express.Router();
 const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
-const { makeAccountNotFoundError } = require("../utils/errors");
-const cacheService = require("../services/cache");
-
 const {
   makeAccountNotFoundError,
   makeClaimableBalanceNotFoundError,
 } = require("../utils/errors");
+const cacheService = require("../services/cache");
 const { validateAccountId, validateAssetCode } = require("../utils/validators");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const registerParamValidation = require("../middleware/validateRouteParams");
@@ -340,9 +338,9 @@ router.get("/:id/payments", async (req, res, next) => {
     let query = server.payments().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
 
-    const paymentResponse = await query.call();
-    const rawRecords = paymentResponse.records || [];
-    const opResponse = await query.call();
+    // Use operations endpoint to get payment + create_account ops
+    const opQuery = server.operations().forAccount(id).limit(limit).order(order);
+    const opResponse = await (cursor ? opQuery.cursor(cursor) : opQuery).call();
     const rawRecords = opResponse.records || [];
 
     const issuerCache = new Map();
@@ -402,11 +400,6 @@ router.get("/:id/payments", async (req, res, next) => {
         paymentOps.push({
           type: op.type,
           amount: isPayment ? op.amount : op.starting_balance,
-          asset: {
-            code: assetCode,
-            issuer: assetIssuer,
-            type: isPayment ? op.asset_type || "native" : "native",
-          },
           asset: assetDetail,
           sender: isPayment ? op.from : op.funder,
           receiver: isPayment ? op.to : op.account,
@@ -415,29 +408,14 @@ router.get("/:id/payments", async (req, res, next) => {
       }
     }
 
-    const payments = rawRecords.map((op) => {
-      const isPayment = op.type === "payment";
-      const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
-      const assetIssuer = isPayment ? op.asset_issuer || null : null;
-      return {
-        paymentId: op.id,
-        from: isPayment ? op.from : op.funder,
-        to: isPayment ? op.to : op.account,
-        asset: assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode,
-        amount: isPayment ? op.amount : op.starting_balance,
-        createdAt: toISOTimestamp(op.created_at),
-        transactionHash: op.transaction_hash,
-      };
-    });
-
     const lastRecord = rawRecords[rawRecords.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
     return success(res, {
-      payments,
-      total: payments.length,
+      items: paymentOps,
+      total: paymentOps.length,
       limit,
-      cursor: payments.length ? nextCursor : null,
+      cursor: paymentOps.length ? nextCursor : null,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -2068,6 +2046,106 @@ router.get("/:id/data", async (req, res, next) => {
       items: dataEntries,
       total: dataEntries.length,
     });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/signing-keys
+ *
+ * Returns all signers for an account, each normalised with key, weight, type,
+ * and sponsoredBy where applicable.  Also returns the master key weight and
+ * the three signing thresholds.
+ *
+ * Query params:
+ *   - weight  (positive integer, optional) — return only signers with weight >= value
+ *   - fresh   (boolean, default: false)    — bypass cache when set to "true"
+ *
+ * Cache:
+ *   Keyed by account ID. TTL defaults to 20 s, configurable via
+ *   CACHE_TTL_SIGNING_KEYS_MS. X-Cache header is always present.
+ */
+router.get("/:id/signing-keys", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // --- ?weight validation ---
+    const rawWeight = req.query.weight;
+    let minWeight = null;
+    if (rawWeight !== undefined) {
+      const parsed = Number(rawWeight);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        const err = new Error(
+          "Query parameter 'weight': must be a positive integer.",
+        );
+        err.isValidation = true;
+        err.field = "weight";
+        err.receivedValue = String(rawWeight);
+        err.expectedFormat = "positive integer (e.g. 1, 2, 3)";
+        throw err;
+      }
+      minWeight = parsed;
+    }
+
+    const fresh = req.query.fresh === "true";
+    const cacheKey = `signing-keys:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        // Apply weight filter to the cached payload before responding
+        const data =
+          minWeight !== null
+            ? {
+                ...cached,
+                signers: cached.signers.filter((s) => s.weight >= minWeight),
+              }
+            : cached;
+        return success(res, data);
+      }
+    }
+
+    const account = await server.loadAccount(id);
+
+    // Normalise every signer entry from Horizon into a clean shape
+    const signers = (account.signers || []).map((s) => ({
+      key: s.key,
+      weight: Number(s.weight),
+      type: s.type || "ed25519_public_key",
+      ...(s.sponsor ? { sponsoredBy: s.sponsor } : {}),
+    }));
+
+    // Master weight is the weight of the account's own key in the signers list.
+    // Horizon always includes the master key; fall back to thresholds.master_weight
+    // if the SDK exposes it differently.
+    const masterSigner = signers.find((s) => s.key === account.id);
+    const masterWeight =
+      masterSigner !== undefined
+        ? masterSigner.weight
+        : Number(account.master_weight ?? 0);
+
+    const thresholds = {
+      low: Number(account.thresholds?.low_threshold ?? 0),
+      medium: Number(account.thresholds?.med_threshold ?? 0),
+      high: Number(account.thresholds?.high_threshold ?? 0),
+    };
+
+    const payload = { signers, masterWeight, thresholds };
+
+    cacheService.set(cacheKey, payload, cacheTTL.signingKeys);
+    res.set("X-Cache", "MISS");
+
+    // Apply weight filter after caching the full payload so the cache always
+    // stores the complete list and each weight threshold is a view over it.
+    const data =
+      minWeight !== null
+        ? { ...payload, signers: signers.filter((s) => s.weight >= minWeight) }
+        : payload;
+
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }

@@ -1,6 +1,46 @@
 const { StrKey } = require("@stellar/stellar-sdk");
 
 /**
+ * Build a query-parameter error message in the form "Query parameter '<field>': <detail>".
+ * @param {string} field
+ * @param {string} detail
+ * @returns {string}
+ */
+function qp(field, detail) {
+  return `Query parameter '${field}': ${detail}`;
+}
+
+/**
+ * Creates a structured InvalidAccountId error.
+ * @param {string} accountId
+ * @returns {Error}
+ */
+function makeInvalidAccountIdError(accountId) {
+  const err = new Error(
+    `"${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
+  );
+  err.isInvalidAccountId = true;
+  err.accountId = accountId;
+  err.suggestion = "Account addresses start with G and are 56 characters long.";
+  err.status = 400;
+  return err;
+}
+
+/**
+ * Creates a structured InvalidAsset error.
+ * @param {string} message
+ * @param {string} suggestion
+ * @returns {Error}
+ */
+function makeInvalidAssetError(message, suggestion) {
+  const err = new Error(message);
+  err.isInvalidAsset = true;
+  err.suggestion = suggestion || null;
+  err.status = 400;
+  return err;
+}
+
+/**
  * Create a structured validation error for invalid input.
  *
  * @param {string} message - Human-readable error message.

@@ -15,6 +15,7 @@
  *   CACHE_TTL_ASSET_PRICE_MS     — /asset price endpoint      (default: 5 000 ms)
  *   CACHE_TTL_CLAIMABLE_BALANCES_MS — /account/:id/claimable-balances (default: 20 000 ms)
  *   CACHE_TTL_EFFECTS_MS         — /account/:id/effects          (default: 30 000 ms)
+ *   CACHE_TTL_SIGNING_KEYS_MS   — /account/:id/signing-keys     (default: 20 000 ms)
  *
  * The legacy CACHE_TTL_MS variable is still respected as a global fallback so
  * existing deployments are not broken.
@@ -74,6 +75,12 @@ const cacheTTL = {
   effects: msToSeconds(
     process.env.CACHE_TTL_EFFECTS_MS,
     30000
+  ),
+
+  /** /account/:id/signing-keys — signers change only on explicit signer ops */
+  signingKeys: msToSeconds(
+    process.env.CACHE_TTL_SIGNING_KEYS_MS,
+    20000
   ),
 };
 
