@@ -192,7 +192,7 @@ describe("Account Timeline API", () => {
       const res = await request(app).get("/account/INVALID_ID/timeline");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.message).toContain("Invalid Stellar account ID");
+      expect(res.body.error.message).toContain("is not a valid Stellar account address");
     });
 
     it("supports limit pagination", async () => {

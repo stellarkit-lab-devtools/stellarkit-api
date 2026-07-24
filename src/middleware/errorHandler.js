@@ -179,6 +179,19 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // Transaction not found errors
+  if (err.isTransactionNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "NotFound",
+        message: err.message,
+        suggestion: "Verify the transaction hash is correct.",
+      },
+    });
+  }
+
   // Offer not found errors
   if (err.isOfferNotFound) {
     logError(404, req, err.message);

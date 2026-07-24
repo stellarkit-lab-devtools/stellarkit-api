@@ -5,7 +5,7 @@ const { Keypair } = require("@stellar/stellar-sdk");
 
 jest.mock("../src/config/stellar", () => ({
   ...jest.requireActual("../src/config/stellar"),
-  server: { operations: jest.fn() },
+  server: { operations: jest.fn(), payments: jest.fn() },
 }));
 
 const accountId = Keypair.random().publicKey();
@@ -27,11 +27,13 @@ function mockOps(capturedOrder) {
     if (capturedOrder) capturedOrder.value = o;
     return { call: jest.fn().mockResolvedValue({ records: [mockPayment] }) };
   });
-  server.operations.mockReturnValue({
+  const mockBuilder = {
     forAccount: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
     order: orderMock,
-  });
+  };
+  server.operations.mockReturnValue(mockBuilder);
+  server.payments.mockReturnValue(mockBuilder);
   return orderMock;
 }
 

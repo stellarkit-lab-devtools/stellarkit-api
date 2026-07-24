@@ -9,31 +9,20 @@ const { Asset } = require("@stellar/stellar-sdk");
 const {
   validateAccountId,
   validateAssetCode,
-  validateLimit,
 } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
-const { makeAccountNotFoundError } = require("../utils/errors");
-const cacheService = require("../services/cache");
-
 const {
   makeAccountNotFoundError,
   makeClaimableBalanceNotFoundError,
 } = require("../utils/errors");
-const { validateAccountId, validateAssetCode } = require("../utils/validators");
+const cacheService = require("../services/cache");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 
-const { parsePaginationParams } = require("../utils/pagination");
 const { buildAccountAgeResponse } = require("../utils/accountAge");
 const { validateEffectType } = require("../utils/effectTypes");
-
 const axios = require("axios");
-const { Asset } = require("@stellar/stellar-sdk");
-
-const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
-const { formatBalance } = require("../utils/formatBalance");
-const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 
 // Cache TTL for account endpoint responses (in seconds)
@@ -370,8 +359,6 @@ router.get("/:id/payments", async (req, res, next) => {
 
     const paymentResponse = await query.call();
     const rawRecords = paymentResponse.records || [];
-    const opResponse = await query.call();
-    const rawRecords = opResponse.records || [];
 
     const issuerCache = new Map();
     const tomlCache = new Map();
@@ -1703,33 +1690,6 @@ router.get("/:id/offer-history", async (req, res, next) => {
     const opResponse = await query.call();
     const records = opResponse.records || [];
 
-      if (memoMatches) {
-        const chargedInStroops = parseInt(tx.fee_charged, 10);
-        const opCount = tx.operation_count || 1;
-        const perOpStroops = Math.floor(chargedInStroops / opCount);
-
-        matchingTransactions.push({
-          id: tx.id,
-          hash: tx.hash,
-          ledger: typeof tx.ledger === "number" ? tx.ledger : tx.ledger_attr,
-          createdAt: tx.created_at,
-          sourceAccount: tx.source_account,
-          fee: {
-            charged: tx.fee_charged,
-            account: tx.fee_account,
-          },
-          feeSummary: {
-            chargedInStroops,
-            chargedInXLM: (chargedInStroops / STROOPS_PER_XLM).toFixed(7),
-            perOperationInStroops: perOpStroops,
-            perOperationInXLM: (perOpStroops / STROOPS_PER_XLM).toFixed(7),
-          },
-          operationCount: tx.operation_count,
-          memoType: tx.memo_type,
-          memo: tx.memo || null,
-          successful: tx.successful,
-          envelopeXdr: tx.envelope_xdr,
-        });
     const offerOps = records
       .filter((op) =>
         [
@@ -2112,17 +2072,58 @@ router.get("/:id/data", async (req, res, next) => {
     validateAccountId(id);
 
     const account = await server.loadAccount(id);
+    const dataEntries = account.data_attr || {};
 
-    const dataEntries = Object.entries(account.data || {}).map(
-      ([key, value]) => ({
+    const formattedData = Object.entries(dataEntries).map(([key, rawValue]) => {
+      let decodedValue = null;
+      try {
+        decodedValue = Buffer.from(rawValue, "base64").toString("utf8");
+      } catch (e) {
+        // Not decodable as UTF-8
+      }
+
+      return {
         key,
-        value,
-      }),
-    );
+        rawValue,
+        decodedValue,
+      };
+    });
+
+    return success(res, formattedData);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/data/:key
+ * Returns a single data entry by key.
+ */
+router.get("/:id/data/:key", async (req, res, next) => {
+  try {
+    const { id, key } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+    const rawValue = account.data_attr ? account.data_attr[key] : null;
+
+    if (!rawValue) {
+      const err = new Error(`Data entry with key "${key}" not found.`);
+      err.status = 404;
+      return next(err);
+    }
+
+    let decodedValue = null;
+    try {
+      decodedValue = Buffer.from(rawValue, "base64").toString("utf8");
+    } catch (e) {
+      // Not decodable as UTF-8
+    }
 
     return success(res, {
-      items: dataEntries,
-      total: dataEntries.length,
+      key,
+      rawValue,
+      decodedValue,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -2256,5 +2257,306 @@ router.get("/:id/signers", async (req, res, next) => {
     handleAccountNotFound(err, next);
   }
 });
+
+/**
+ * GET /account/:id/operation-breakdown
+ * Analyzes the last 200 operations and returns a breakdown by operation type.
+ * Useful for understanding how an account is being used.
+ *
+ * @param {string} id - Stellar account public key (G...)
+ */
+router.get("/:id/operation-breakdown", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Fetch last 200 operations
+    const opResponse = await server
+      .operations()
+      .forAccount(id)
+      .limit(200)
+      .order("desc")
+      .call();
+
+    const records = opResponse.records;
+    const total = records.length;
+
+    if (total === 0) {
+      return success(res, {
+        total: 0,
+        breakdown: [],
+        mostUsedOperation: null,
+        leastUsedOperation: null,
+      });
+    }
+
+    const counts = {};
+    records.forEach((op) => {
+      counts[op.type] = (counts[op.type] || 0) + 1;
+    });
+
+    const breakdown = Object.entries(counts)
+      .map(([type, count]) => ({
+        type,
+        count,
+        percentage: parseFloat(((count / total) * 100).toFixed(2)),
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return success(res, {
+      total,
+      breakdown,
+      mostUsedOperation: breakdown[0].type,
+      leastUsedOperation: breakdown[breakdown.length - 1].type,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+router.get("/:id/timeline", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const { limit, cursor } = parsePaginationParams(req.query, 50);
+
+    let query = server.operations().forAccount(id).limit(limit).order("desc");
+
+    if (cursor) query = query.cursor(cursor);
+
+    const opResponse = await query.call();
+    const records = opResponse.records;
+
+    const timeline = records.map((op) => {
+      const base = {
+        id: op.id,
+        timestamp: op.created_at,
+        transactionHash: op.transaction_hash,
+      };
+
+      switch (op.type) {
+        case "create_account":
+          if (op.account === id) {
+            return {
+              ...base,
+              type: "account_created",
+              description: `Account created with ${op.starting_balance} XLM by ${op.funder}`,
+              amount: op.starting_balance,
+              asset: "XLM",
+              counterparty: op.funder,
+            };
+          } else {
+            return {
+              ...base,
+              type: "payment_sent",
+              description: `Sent ${op.starting_balance} XLM to create account ${op.account}`,
+              amount: op.starting_balance,
+              asset: "XLM",
+              counterparty: op.account,
+            };
+          }
+
+        case "payment":
+          const isSent = op.from === id;
+          const assetCode = op.asset_type === "native" ? "XLM" : op.asset_code;
+          return {
+            ...base,
+            type: isSent ? "payment_sent" : "payment_received",
+            description: isSent
+              ? `Sent ${op.amount} ${assetCode} to ${op.to}`
+              : `Received ${op.amount} ${assetCode} from ${op.from}`,
+            amount: op.amount,
+            asset: assetCode,
+            counterparty: isSent ? op.to : op.from,
+          };
+
+        case "path_payment_strict_receive":
+        case "path_payment_strict_send":
+          const isPathSent = op.from === id;
+          const sentAsset =
+            op.source_asset_type === "native" ? "XLM" : op.source_asset_code;
+          const receivedAsset =
+            op.asset_type === "native" ? "XLM" : op.asset_code;
+
+          if (isPathSent) {
+            return {
+              ...base,
+              type: "payment_sent",
+              description: `Sent ${op.source_amount} ${sentAsset} (converted to ${op.amount} ${receivedAsset}) to ${op.to}`,
+              amount: op.source_amount,
+              asset: sentAsset,
+              counterparty: op.to,
+            };
+          } else {
+            return {
+              ...base,
+              type: "payment_received",
+              description: `Received ${op.amount} ${receivedAsset} (converted from ${op.source_amount} ${sentAsset}) from ${op.from}`,
+              amount: op.amount,
+              asset: receivedAsset,
+              counterparty: op.from,
+            };
+          }
+
+        case "change_trust":
+          const isAdded = parseFloat(op.limit) > 0;
+          return {
+            ...base,
+            type: isAdded ? "trustline_added" : "trustline_removed",
+            description: isAdded
+              ? `Added trustline for ${op.asset_code}`
+              : `Removed trustline for ${op.asset_code}`,
+            amount: op.limit,
+            asset: op.asset_code,
+            counterparty: op.asset_issuer,
+          };
+
+        case "manage_sell_offer":
+        case "manage_buy_offer":
+        case "create_passive_sell_offer":
+          const isRemove =
+            op.type !== "create_passive_sell_offer" &&
+            parseFloat(op.amount) === 0 &&
+            op.offer_id !== "0";
+          const sellAsset =
+            op.selling_asset_type === "native" ? "XLM" : op.selling_asset_code;
+          const buyAsset =
+            op.buying_asset_type === "native" ? "XLM" : op.buying_asset_code;
+
+          if (isRemove) {
+            return {
+              ...base,
+              type: "offer_removed",
+              description: `Cancelled offer #${op.offer_id}`,
+              amount: null,
+              asset: null,
+              counterparty: null,
+            };
+          } else {
+            return {
+              ...base,
+              type: "offer_created",
+              description: `Created offer to sell ${op.amount} ${sellAsset} for ${buyAsset}`,
+              amount: op.amount,
+              asset: sellAsset,
+              counterparty: null,
+            };
+          }
+
+        default:
+          return {
+            ...base,
+            type: op.type,
+            description: `Operation of type ${op.type}`,
+            amount: null,
+            asset: null,
+            counterparty: null,
+          };
+      }
+    });
+
+    const lastRecord = records[records.length - 1];
+    const nextCursor = lastRecord ? lastRecord.paging_token : null;
+
+    return success(res, timeline, {
+      meta: {
+        count: timeline.length,
+        limit,
+        nextCursor,
+        hasMore: records.length === limit,
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ AccountTrustlineHealthDasboardEndpoint
+ * GET /account/:id/trustline-health
+ * Returns a complete health overview of all trustlines on an account,
+ * including authorization status, liability usage, available capacity,
+ * and warnings for trustlines near their limits.
+
+ * GET /account/:id/age
+ * Returns account age and longevity metrics for trust and reputation systems.
+ *
+ * Fetches the account's first funding transaction from Horizon and calculates:
+ * - ageInDays: Complete days since account creation
+ * - ageInMonths: Floored months (ageInDays / 30.4375)
+ * - ageInYears: Floored years (ageInDays / 365.25)
+ * - maturity: 'new' (<30 days), 'established' (30–364 days), or 'veteran' (≥365 days)
+ * - createdAt: ISO 8601 timestamp of account creation
+ * - createdAtLedger: Ledger sequence number of first funding transaction
+ main
+ *
+ * @param {string} id - Stellar account public key (G...)
+ *
+ * @example
+ AccountTrustlineHealthDasboardEndpoint
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustline-health
+ */
+router.get("/:id/trustline-health", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await server.loadAccount(id);
+
+    // Filter out native XLM and extract trustline health data
+    const trustlines = account.balances
+      .filter((b) => b.asset_type !== "native")
+      .map((trustline) => {
+        const balance = parseFloat(trustline.balance || "0");
+        const limit = parseFloat(trustline.limit || "0");
+        const buyingLiabilities = parseFloat(
+          trustline.buying_liabilities || "0",
+        );
+        const sellingLiabilities = parseFloat(
+          trustline.selling_liabilities || "0",
+        );
+
+        // Calculate usage percentage
+        // Usage = (balance + buying liabilities) / limit * 100
+        const usageAmount = balance + buyingLiabilities;
+        const usagePercent = limit > 0 ? (usageAmount / limit) * 100 : 0;
+
+        // Calculate available capacity
+        // Available = limit - balance - buying liabilities
+        const availableCapacity = Math.max(0, limit - usageAmount);
+
+        // Flag as warning if usage exceeds 90%
+        const warning = usagePercent > 90 ? "near_limit" : null;
+
+        return {
+          assetCode: trustline.asset_code,
+          assetIssuer: trustline.asset_issuer,
+          balance: balance.toString(),
+          limit: limit.toString(),
+          buyingLiabilities: buyingLiabilities.toString(),
+          sellingLiabilities: sellingLiabilities.toString(),
+          usagePercent: Math.round(usagePercent * 100) / 100, // Round to 2 decimals
+          availableCapacity: availableCapacity.toString(),
+          isAuthorized: trustline.is_authorized === true,
+          isClawbackEnabled: trustline.is_clawback_enabled || false,
+          warning: warning,
+        };
+      });
+
+    // Count warnings
+    const warningCount = trustlines.filter((t) => t.warning !== null).length;
+
+    return success(res, {
+      accountId: account.id,
+      trustlineCount: trustlines.length,
+      warningCount: warningCount,
+      trustlines: trustlines,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next);
+  }
+});
+
 
 module.exports = router;
