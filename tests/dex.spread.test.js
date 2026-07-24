@@ -60,7 +60,7 @@ describe("GET /dex/spread/:sellAsset/:buyAsset", () => {
             expect(data).toHaveProperty("orderBookDepth");
         } else if (response.status === 404) {
             expect(response.body).toHaveProperty("success", false);
-            expect(response.body.error.message).toContain("No order book exists");
+            expect(response.body.error.message).toContain("No active order book found");
         }
     }, 15000);
 
@@ -77,7 +77,7 @@ describe("GET /dex/spread/:sellAsset/:buyAsset", () => {
         if (response.status === 404) {
             expect(response.body).toHaveProperty("success", false);
             expect(response.body).toHaveProperty("error");
-            expect(response.body.error.message).toContain("No order book exists");
+            expect(response.body.error.message).toContain("No active order book found");
         }
     }, 15000);
 

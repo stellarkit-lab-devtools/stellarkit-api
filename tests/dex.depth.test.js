@@ -80,7 +80,8 @@ describe("DEX Order Book Depth API", () => {
 
       expect(res.statusCode).toBe(404);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("NotFound");
+      expect(res.body.error.type).toBe("OrderBookEmpty");
+      expect(res.body.error.message).toContain("No active order book found for XLM/USDC");
     });
 
     it("returns 400 for invalid asset formats", async () => {

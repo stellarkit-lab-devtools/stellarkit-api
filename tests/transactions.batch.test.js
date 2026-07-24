@@ -47,8 +47,9 @@ describe("Transaction Batch Status Checker", () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data).toHaveLength(2);
-      expect(res.body.data[0]).toEqual({
+      expect(res.body.data.total).toBe(2);
+      expect(res.body.data.items).toHaveLength(2);
+      expect(res.body.data.items[0]).toEqual({
         hash: VALID_HASH,
         found: true,
         successful: true,
@@ -56,7 +57,7 @@ describe("Transaction Batch Status Checker", () => {
         createdAt: "2024-05-28T10:00:00.000Z",
         fee: "100",
       });
-      expect(res.body.data[1]).toEqual({
+      expect(res.body.data.items[1]).toEqual({
         hash: ANOTHER_VALID_HASH,
         found: true,
         successful: false,
@@ -79,10 +80,20 @@ describe("Transaction Batch Status Checker", () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data[0]).toEqual({
+      expect(res.body.data.items[0]).toEqual({
         hash: VALID_HASH,
         found: false,
       });
+    });
+
+    it("returns an empty items array and total 0 for an empty hashes array", async () => {
+      const res = await request(app)
+        .post("/transactions/batch-status")
+        .send({ hashes: [] });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual({ items: [], total: 0 });
     });
 
     it("returns 400 if more than 20 hashes are provided", async () => {
