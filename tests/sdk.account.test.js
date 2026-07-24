@@ -80,6 +80,12 @@ try {
       const path = `/account/${id}/offers${query ? `?${query}` : ""}`;
       return this._get(path);
     }
+    async getSponsorships(id) {
+      if (!id || typeof id !== "string" || id.trim() === "") {
+        throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+      }
+      return this._get(`/account/${id}/sponsorships`);
+    }
   };
 }
 
@@ -180,6 +186,20 @@ const OFFERS_DATA = {
   total: 1,
   limit: 10,
   cursor: "54321",
+};
+
+const SPONSORSHIPS_DATA = {
+  accountId: ACCOUNT_ID,
+  sponsoredBy: [
+    {
+      type: "trustline",
+      address: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+      sponsor: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+      reserveAmount: "0.5000000",
+    },
+  ],
+  sponsoring: ["GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"],
+  count: 1,
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -455,9 +475,68 @@ describe("AccountModule", () => {
     });
   });
 
-  // ── API key forwarding ─────────────────────────────────────────────────────
+  // ── getSponsorships ────────────────────────────────────────────────────────
 
-  describe("API key header", () => {
+  describe("getSponsorships", () => {
+    it("calls GET /account/:id/sponsorships and resolves data", async () => {
+      mockFetch(200, { success: true, data: SPONSORSHIPS_DATA });
+      const data = await module.getSponsorships(ACCOUNT_ID);
+      expect(data.accountId).toBe(ACCOUNT_ID);
+      expect(data.count).toBe(1);
+      expect(Array.isArray(data.sponsoredBy)).toBe(true);
+      expect(data.sponsoredBy[0].type).toBe("trustline");
+      expect(data.sponsoredBy[0].address).toBe(
+        "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+      );
+      expect(data.sponsoredBy[0].reserveAmount).toBe("0.5000000");
+      expect(Array.isArray(data.sponsoring)).toBe(true);
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/sponsorships`,
+        expect.any(Object),
+      );
+    });
+
+    it("throws StellarKitError with status 400 when id is empty", async () => {
+      await expect(module.getSponsorships("")).rejects.toThrow(StellarKitError);
+      try {
+        await module.getSponsorships("");
+      } catch (err) {
+        expect(err.status).toBe(400);
+        expect(err.type).toBe("ValidationError");
+      }
+    });
+
+    it("throws StellarKitError with status 400 when id is whitespace", async () => {
+      await expect(module.getSponsorships("   ")).rejects.toThrow(StellarKitError);
+    });
+
+    it("throws StellarKitError on non-2xx API response (e.g. 404)", async () => {
+      mockFetch(404, {
+        success: false,
+        error: { message: "Account not found", type: "AccountNotFound" },
+      });
+      try {
+        await module.getSponsorships(ACCOUNT_ID);
+        fail("Expected StellarKitError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(StellarKitError);
+        expect(err.status).toBe(404);
+        expect(err.type).toBe("AccountNotFound");
+        expect(err.message).toBe("Account not found");
+      }
+    });
+
+    it("returns empty sponsoredBy and sponsoring arrays when account has no sponsorships", async () => {
+      const empty = { accountId: ACCOUNT_ID, sponsoredBy: [], sponsoring: [], count: 0 };
+      mockFetch(200, { success: true, data: empty });
+      const data = await module.getSponsorships(ACCOUNT_ID);
+      expect(data.sponsoredBy).toHaveLength(0);
+      expect(data.sponsoring).toHaveLength(0);
+      expect(data.count).toBe(0);
+    });
+  });
+
+  // ── API key forwarding ─────────────────────────────────────────────────────  describe("API key header", () => {
     it("sends X-API-Key header when apiKey is provided", async () => {
       const m = new AccountModule({ baseUrl: BASE_URL, apiKey: "test-key" });
       mockFetch(200, { success: true, data: ACCOUNT_DATA });

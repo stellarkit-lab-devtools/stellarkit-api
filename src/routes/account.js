@@ -2073,4 +2073,87 @@ router.get("/:id/data", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /account/:id/sponsorships
+ *
+ * Returns a typed sponsorship summary for the account.
+ * Includes all entries sponsored by other accounts (sponsoredBy) and
+ * accounts that this account is currently sponsoring (sponsoring).
+ *
+ * Each sponsoredBy entry contains:
+ *   - type: "trustline" | "signer" | "data_entry"
+ *   - address: asset string for trustlines, key for signers/data entries
+ *   - sponsor: the account paying the reserve
+ *   - reserveAmount: "0.5000000" (base reserve per subentry)
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorships
+ */
+router.get("/:id/sponsorships", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const [account, sponsoringResponse] = await Promise.all([
+      server.loadAccount(id),
+      server.accounts().sponsor(id).call(),
+    ]);
+
+    // Base reserve per sponsored subentry on Stellar (0.5 XLM)
+    const RESERVE_PER_SUBENTRY = "0.5000000";
+
+    const sponsoredBy = [];
+
+    (account.balances || []).forEach((b) => {
+      if (b.sponsor) {
+        sponsoredBy.push({
+          type: "trustline",
+          address:
+            b.asset_type === "native"
+              ? "XLM"
+              : `${b.asset_code}:${b.asset_issuer}`,
+          sponsor: b.sponsor,
+          reserveAmount: RESERVE_PER_SUBENTRY,
+        });
+      }
+    });
+
+    (account.signers || []).forEach((s) => {
+      if (s.sponsor) {
+        sponsoredBy.push({
+          type: "signer",
+          address: s.key,
+          sponsor: s.sponsor,
+          reserveAmount: RESERVE_PER_SUBENTRY,
+        });
+      }
+    });
+
+    if (account.data_attr) {
+      const dataSponsors = account.data_sponsors || {};
+      Object.keys(account.data_attr).forEach((key) => {
+        if (dataSponsors[key]) {
+          sponsoredBy.push({
+            type: "data_entry",
+            address: key,
+            sponsor: dataSponsors[key],
+            reserveAmount: RESERVE_PER_SUBENTRY,
+          });
+        }
+      });
+    }
+
+    const sponsoring = (sponsoringResponse.records || []).map((acc) => acc.id);
+
+    return success(res, {
+      accountId: account.id,
+      sponsoredBy,
+      sponsoring,
+      count: sponsoredBy.length,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 module.exports = router;

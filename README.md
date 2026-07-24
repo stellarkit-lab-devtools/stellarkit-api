@@ -74,18 +74,22 @@ This project is ideal for:
 | GET | `/account/:id` | Account details, balances, reserve breakdown | — |
 | GET | `/account/:id/age` | Account age and longevity metrics | — |
 | GET | `/account/:id/balances` | XLM and asset balances | — |
+| GET | `/account/:id/native-balance` | Native XLM balance only | — |
 | GET | `/account/:id/sequence` | Current sequence number | — |
-| GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | — |
-| GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor` |
+| GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode` |
+| GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor`, `assetCode`, `assetIssuer` |
+| GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
 | GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
 | GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
 | GET | `/account/:id/analytics` | Basic account activity analytics | — |
 | GET | `/account/:id/inactivity` | Days since last transaction and status | — |
 | GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
+| GET | `/account/:id/risk-score` | Computed risk score and contributing factors | — |
 | GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
 | GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
 | GET | `/account/:id/subentry-health` | Subentry usage and remaining capacity | — |
 | GET | `/account/:id/sponsorship` | Sponsorship relationships for the account | — |
+| GET | `/account/:id/sponsorships` | Typed sponsorship summary with sponsoredBy and sponsoring arrays | — |
 | GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
@@ -497,13 +501,61 @@ Calculates a fee estimate for a transaction using the current network base fee a
 
 Fetches account details, balances, signers, thresholds, flags, and spendable balance for the given Stellar public key.
 
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
+```
+
 ### `GET /account/:id/balances`
 
 Returns account balance details for XLM and all non-native assets.
 
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/balances"
+```
+
+### `GET /account/:id/native-balance`
+
+Returns only the native XLM balance with buying and selling liabilities.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/native-balance"
+```
+
+### `GET /account/:id/sequence`
+
+Returns the current sequence number for an account.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sequence"
+```
+
+### `GET /account/:id/age`
+
+Returns account age, creation ledger, and maturity category.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/age"
+```
+
+### `GET /account/:id/trustlines`
+
+Returns all trustlines for the account with TOML metadata resolved from the issuer's home domain. Filter by asset code with `?assetCode=`.
+
+```bash
+# All trustlines
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustlines"
+
+# Filter to USDC only
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustlines?assetCode=USDC"
+```
+
 ### `GET /account/:id/summary`
 
 Returns a compact account summary suitable for dashboards and quick views.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/summary"
+```
 
 ### `GET /account/:id/payments`
 
@@ -516,6 +568,179 @@ Lists payments and asset transfers for the account.
 | `order` | string | No | `desc` | Sort order for results: `asc` or `desc`. |
 | `assetCode` | string | No | None | Case-insensitive asset code filter that matches all issuers for that code. |
 | `assetIssuer` | string | No | None | Asset issuer filter used only when `assetCode` is also provided; by itself it has no effect. |
+
+```bash
+# Latest 20 payments
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/payments"
+
+# First 10 payments in ascending order (oldest first)
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/payments?limit=10&order=asc"
+
+# Filter to USDC payments only
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/payments?assetCode=USDC"
+
+# Paginate to the next page using a cursor
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/payments?limit=20&cursor=163305704040034305"
+```
+
+### `GET /account/:id/trades`
+
+Returns trades executed by the account on the Stellar DEX.
+
+| Param | Type | Required | Default | Description |
+| ----- | ---- | -------- | ------- | ----------- |
+| `limit` | integer | No | `20` | Maximum number of trade records to return (max: 200). |
+| `cursor` | string | No | None | Horizon pagination cursor from a previous response. |
+| `order` | string | No | `desc` | Sort direction: `asc` (oldest first) or `desc` (newest first). |
+| `fresh` | boolean | No | `false` | Set to `true` to bypass the server-side cache. |
+
+```bash
+# Latest trades (newest first)
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trades"
+
+# Oldest trades first
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trades?order=asc"
+
+# Paginate through trades
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trades?limit=50&order=desc&cursor=163305704040034305"
+
+# Bypass cache for live data
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trades?fresh=true"
+```
+
+### `GET /account/:id/offers`
+
+Returns open DEX offers for the account.
+
+```bash
+# Open offers (default limit 20)
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/offers"
+
+# Paginate with a larger limit
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/offers?limit=50"
+```
+
+### `GET /account/:id/offer-history`
+
+Returns historical offer operations (create, update, delete) for the account.
+
+```bash
+# Most recent offer history
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/offer-history"
+
+# Oldest first
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/offer-history?order=asc&limit=50"
+```
+
+### `GET /account/:id/risk-score`
+
+Returns a computed risk score and contributing factors for the account.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/risk-score"
+```
+
+### `GET /account/:id/inactivity`
+
+Returns days since the account's last transaction and a status label (`active`, `idle`, or `dormant`).
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/inactivity"
+```
+
+### `GET /account/:id/subentry-health`
+
+Returns subentry usage, remaining capacity, and a warning level when approaching the protocol limit.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/subentry-health"
+```
+
+### `GET /account/:id/sponsorship`
+
+Returns sponsorship relationships — entries on this account sponsored by others, and accounts this account is sponsoring.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorship"
+```
+
+### `GET /account/:id/sponsorships`
+
+Returns a typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays. Each `sponsoredBy` entry includes a `type`, `address`, `sponsor`, and `reserveAmount`.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorships"
+```
+
+### `GET /account/:id/freeze-status/:assetCode/:assetIssuer`
+
+Checks whether a specific asset trustline is frozen or partially frozen on the account.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/freeze-status/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+```
+
+### `GET /account/:id/can-receive/:assetCode/:assetIssuer`
+
+Checks whether the account can currently receive a specific asset (trustline exists, is authorized, and has available capacity).
+
+```bash
+# Check for USDC
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/can-receive/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+
+# Check for native XLM
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/can-receive/XLM/native"
+```
+
+### `GET /account/:id/volume`
+
+Returns transaction volume broken down by asset over the last N days (default: 30, max: 90).
+
+```bash
+# Last 30 days (default)
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/volume"
+
+# Last 7 days
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/volume?days=7"
+```
+
+### `GET /account/:id/pool-positions`
+
+Returns all liquidity pool positions for the account with calculated share values and equivalent reserves.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/pool-positions"
+```
+
+### `GET /account/:id/counterparties`
+
+Returns the most frequent payment counterparties for the account.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/counterparties"
+```
+
+### `GET /account/:id/transactions/search`
+
+Searches transaction history filtered by memo content.
+
+```bash
+# Search by text memo
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=invoice-123"
+
+# Search by numeric ID memo
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/transactions/search?memo=987654321&memo_type=id"
+```
+
+### `POST /account/:id/multisig-plan`
+
+Calculates the minimal signer combinations needed to meet each threshold.
+
+```bash
+curl -X POST "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/multisig-plan" \
+  -H "Content-Type: application/json" \
+  -d '{"availableSigners": ["GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"]}'
+```
 
 ### `GET /transactions/:id`
 
