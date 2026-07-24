@@ -3,12 +3,18 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
+const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 const StellarKitError = require("../utils/StellarKitError");
+const {
+  HORIZON_TIMEOUT_MESSAGE,
+  HORIZON_TIMEOUT_SUGGESTION,
+  isHorizonTimeoutError,
+} = require("../utils/errors");
 
 /**
- * Logs 4xx and 5xx responses to the console.
+ * Logs 4xx and 5xx responses using the structured logger.
  * Suppressed when NODE_ENV=test to keep test output clean.
  *
  * @param {number} status - HTTP status code
@@ -19,9 +25,15 @@ function logError(status, req, message) {
   if (process.env.NODE_ENV === "test") return;
   if (status >= 400) {
     const requestId = req.requestId || "-";
-    const label = status >= 500 ? "ERROR" : "WARN";
-    console.error(
-      `[${label}] [${requestId}] ${req.method} ${req.path} → ${status} | ${message}`
+    const logLevel = status >= 500 ? "error" : "warn";
+    logger[logLevel](
+      {
+        requestId,
+        method: req.method,
+        path: req.path,
+        status,
+      },
+      message
     );
   }
 }
@@ -74,9 +86,10 @@ function buildTransactionSubmissionFailedError(horizonError) {
 }
 
 function errorHandler(err, req, res, next) {
-  // Stellar / Horizon specific errors
-  if (err.response && err.response.data) {
+  // Horizon errors returned from horizon-client / Stellar SDK
+  if (err && err.response && err.response.data) {
     const horizonError = err.response.data;
+    const extras = horizonError.extras !== undefined ? horizonError.extras : null;
 
     const resultCode = pickMostSpecificResultCode(horizonError?.extras?.result_codes);
 
@@ -94,18 +107,42 @@ function errorHandler(err, req, res, next) {
     const humanMessage = code ? translateHorizonError(code) : null;
     logError(status, req, message);
     return res.status(status).json({
+    let resultCode = null;
+    if (extras && extras.result_codes) {
+      if (typeof extras.result_codes.transaction === "string") {
+        resultCode = extras.result_codes.transaction;
+      } else if (
+        Array.isArray(extras.result_codes.operations) &&
+        extras.result_codes.operations.length > 0
+      ) {
+        resultCode = extras.result_codes.operations[0];
+      }
+    }
+
+    const mappedStatus = mapHorizonErrorToStatus(resultCode);
+    const httpStatus = mappedStatus ?? err.response.status ?? 400;
+   
+    const body = {
       success: false,
       error: {
         type: "HorizonError",
         title: horizonError.title || "Horizon Error",
         detail: horizonError.detail || "An error occurred with the Stellar network.",
-        status: horizonError.status || err.response.status,
-        extras: horizonError.extras || null,
-        ...(resultCode && { code: resultCode }),
-        ...(message && { message }),
-
+        status: err.response.status,
+        extras,
       },
-    });
+    };
+
+    if (resultCode) {
+      body.error.code = resultCode;
+      const humanMessage = translateHorizonError(resultCode);
+      if (humanMessage && typeof humanMessage === "string" && humanMessage.length > 0) {
+        body.error.message = humanMessage;
+      }
+    }
+
+    logError(httpStatus, req, horizonError.detail || horizonError.title || "Horizon Error");
+    return res.status(httpStatus).json(body);
   }
 
   // StellarKitError instances — already structured
@@ -116,7 +153,20 @@ function errorHandler(err, req, res, next) {
       error: err.toJSON(),
     });
   }
-
+  // ReferenceError and TypeError — catch runtime exceptions
+  if (err instanceof ReferenceError || err instanceof TypeError) {
+    logError(500, req, err.message);
+    return res.status(500).json({
+      success: false,
+      error: {
+        type: "InternalError",
+        title: "Internal Server Error",
+        detail: process.env.NODE_ENV === "production"
+          ? "An unexpected error occurred."
+          : err.message,
+      },
+    });
+  }
   // Payload too large errors from body parsers
   if (err.type === "entity.too.large" || err.status === 413) {
     const maxBodySize = process.env.MAX_BODY_SIZE || "10kb";
@@ -144,6 +194,74 @@ function errorHandler(err, req, res, next) {
         message: err.message,
         suggestion:
           "Verify the account address is correct and that the account has been funded.",
+      },
+    });
+  }
+
+  // AssetNotFound errors (asset lookup returned no results)
+  if (err.isAssetNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "AssetNotFound",
+        message: err.message,
+        suggestion:
+          "Verify the asset code and issuer address are correct.",
+      },
+    });
+  }
+
+  // InvalidAccountId errors — thrown by validateAccountId(id)
+  if (err.isInvalidAccountId) {
+    logError(400, req, err.message);
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "InvalidAccountId",
+        message: err.message,
+        suggestion:
+          err.suggestion ||
+          "Account addresses start with G and are 56 characters long.",
+      },
+    });
+  }
+
+  // InvalidAsset errors — thrown by validateAsset(code, issuer)
+  if (err.isInvalidAsset) {
+    logError(400, req, err.message);
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "InvalidAsset",
+        message: err.message,
+        suggestion: err.suggestion || null,
+      },
+    });
+  }
+
+  // Horizon timeout errors (Horizon node did not respond in time)
+  if (isHorizonTimeoutError(err)) {
+    logError(504, req, HORIZON_TIMEOUT_MESSAGE);
+    return res.status(504).json({
+      success: false,
+      error: {
+        type: "HorizonTimeout",
+        message: HORIZON_TIMEOUT_MESSAGE,
+        suggestion: HORIZON_TIMEOUT_SUGGESTION,
+      },
+    });
+  }
+
+  // Offer not found errors
+  if (err.isOfferNotFound) {
+    logError(404, req, err.message);
+    return res.status(404).json({
+      success: false,
+      error: {
+        type: "OfferNotFound",
+        message: err.message,
+        suggestion: err.suggestion,
       },
     });
   }

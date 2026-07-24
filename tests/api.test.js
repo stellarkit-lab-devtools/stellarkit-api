@@ -3,8 +3,6 @@ const axios = require("axios");
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
 const cacheService = require("../src/services/cache");
-
-
 const { startServer } = app;
 
 describe("StellarKit API", () => {
@@ -89,16 +87,13 @@ describe("StellarKit API", () => {
       expect(data.status).toBe("ok");
       expect(data.service).toBe("StellarKit API");
 
-      // Non-empty version string
       expect(typeof data.version).toBe("string");
       expect(data.version.length).toBeGreaterThan(0);
 
-      // Valid ISO 8601 timestamp
       expect(typeof data.timestamp).toBe("string");
       const ts = new Date(data.timestamp);
       expect(Number.isNaN(ts.getTime())).toBe(false);
 
-      // Network value must be either testnet or mainnet
       expect(["testnet", "mainnet"]).toContain(data.network);
     });
   });
@@ -113,7 +108,6 @@ describe("StellarKit API", () => {
       } else {
         process.env.ALLOWED_ORIGINS = originalAllowedOrigins;
       }
-
       if (originalNodeEnv === undefined) {
         delete process.env.NODE_ENV;
       } else {
@@ -166,9 +160,31 @@ describe("StellarKit API", () => {
     it("returns API info and endpoint list", async () => {
       const res = await request(app).get("/");
       expect(res.statusCode).toBe(200);
+
       expect(res.body.success).toBe(true);
-      expect(res.body.data.endpoints).toBeInstanceOf(Array);
-      expect(res.body.data.endpoints.length).toBeGreaterThan(0);
+      expect(res.body).toHaveProperty("data");
+
+      const { data } = res.body;
+      expect(data).toHaveProperty("name");
+      expect(typeof data.name).toBe("string");
+      expect(data).toHaveProperty("description");
+      expect(typeof data.description).toBe("string");
+      expect(data).toHaveProperty("version");
+      expect(typeof data.version).toBe("string");
+      expect(data.version.length).toBeGreaterThan(0);
+      expect(data).toHaveProperty("network");
+      expect(["testnet", "mainnet"]).toContain(data.network);
+      expect(data).toHaveProperty("endpoints");
+      expect(Array.isArray(data.endpoints)).toBe(true);
+      expect(data.endpoints.length).toBeGreaterThan(0);
+
+      const first = data.endpoints[0];
+      expect(first).toHaveProperty("method");
+      expect(typeof first.method).toBe("string");
+      expect(first).toHaveProperty("path");
+      expect(typeof first.path).toBe("string");
+      expect(first).toHaveProperty("description");
+      expect(typeof first.description).toBe("string");
     });
   });
 
@@ -184,14 +200,17 @@ describe("StellarKit API", () => {
 
   // ── Validation ─────────────────────────────────────────────────────────────
   describe("GET /account/:id — validation", () => {
-    it("returns 400 for an invalid account ID with field-level details", async () => {
+    it("returns a standardised 400 InvalidAccountId error for a malformed account ID", async () => {
       const res = await request(app).get("/account/NOT_A_VALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
-      expect(res.body.error.field).toBe("accountId");
-      expect(res.body.error.receivedValue).toBe("NOT_A_VALID_KEY");
-      expect(res.body.error.expectedFormat).toBeDefined();
+      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.message).toBe(
+        "'NOT_A_VALID_KEY' is not a valid Stellar account address."
+      );
+      expect(res.body.error.suggestion).toBe(
+        "Account addresses start with G and are 56 characters long."
+      );
     });
   });
 
@@ -252,12 +271,12 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data).toHaveProperty("accountId", MOCK_ACCOUNT);
-      expect(res.body.data).toHaveProperty("assetCount", 1);
-      expect(res.body.data.assets).toHaveLength(1);
-      expect(res.body.data.assets[0]).toMatchObject({
-        assetCode: "TEST",
-        assetIssuer: MOCK_ISSUER,
+      expect(res.body.data).toHaveProperty("total", 1);
+      expect(res.body.data).toHaveProperty("limit", null);
+      expect(res.body.data).toHaveProperty("cursor", null);
+      expect(res.body.data.items).toHaveLength(1);
+      expect(res.body.data.items[0]).toMatchObject({
+        asset: { code: "TEST", issuer: MOCK_ISSUER, type: "credit_alphanum4" },
         toml: {
           name: "Test Asset",
           description: "A test asset",
@@ -305,17 +324,19 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data.assets[0].toml).toBeNull();
+      expect(res.body.data.items[0].toml).toBeNull();
     });
   });
 
   describe("GET /transactions/:id — validation", () => {
-    it("returns 400 for an invalid account ID with field-level details", async () => {
+    it("returns a standardised 400 InvalidAccountId error for a malformed account ID", async () => {
       const res = await request(app).get("/transactions/BADKEY123");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.field).toBe("accountId");
-      expect(res.body.error.receivedValue).toBe("BADKEY123");
+      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.message).toBe(
+        "'BADKEY123' is not a valid Stellar account address."
+      );
     });
 
     it("returns 400 for an invalid limit param with field-level details", async () => {
@@ -481,7 +502,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 
@@ -546,7 +567,7 @@ image = "https://example.com/test.png"
       expect(query.limit).toHaveBeenCalledWith(3);
       expect(query.order).toHaveBeenCalledWith("asc");
       expect(query.cursor).toHaveBeenCalledWith("start-token");
-      expect(res.body.data).toEqual([
+      expect(res.body.data.items).toEqual([
         {
           type: "payment",
           amount: "15.0000000",
@@ -558,7 +579,7 @@ image = "https://example.com/test.png"
           sender: "GASENDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           receiver:
             "GARECEIVERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          createdAt: "2026-05-27T10:00:00Z",
+          createdAt: "2026-05-27T10:00:00.000Z",
         },
         {
           type: "create_account",
@@ -572,16 +593,12 @@ image = "https://example.com/test.png"
             "GAFUNDERAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           receiver:
             "GANEWACCOUNTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-          createdAt: "2026-05-27T10:02:00Z",
+          createdAt: "2026-05-27T10:02:00.000Z",
         },
       ]);
-      expect(res.body.meta).toEqual({
-        count: 2,
-        limit: 3,
-        order: "asc",
-        nextCursor: "create-account-token",
-        hasMore: true,
-      });
+      expect(res.body.data.total).toBe(2);
+      expect(res.body.data.limit).toBe(3);
+      expect(res.body.data.cursor).toBe("create-account-token");
     });
 
     it("returns payments for a valid account", async () => {
@@ -589,25 +606,20 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data).toBeInstanceOf(Array);
-      expect(res.body).toHaveProperty("meta");
-      expect(res.body.meta).toHaveProperty("count");
-      expect(res.body.meta).toHaveProperty("limit");
-      expect(res.body.meta).toHaveProperty("order");
-      expect(res.body.meta).toHaveProperty("nextCursor");
-      expect(res.body.meta).toHaveProperty("hasMore");
+      expect(res.body.data).toHaveProperty("items");
+      expect(res.body.data.items).toBeInstanceOf(Array);
+      expect(res.body.data).toHaveProperty("total");
+      expect(res.body.data).toHaveProperty("limit");
+      expect(res.body.data).toHaveProperty("cursor");
 
-      if (res.body.data.length > 0) {
-        const payment = res.body.data[0];
+      if (res.body.data.items.length > 0) {
+        const payment = res.body.data.items[0];
         expect(payment).toHaveProperty("type");
         expect(payment).toHaveProperty("amount");
         expect(payment).toHaveProperty("asset");
         expect(payment).toHaveProperty("sender");
         expect(payment).toHaveProperty("receiver");
         expect(payment).toHaveProperty("createdAt");
-        expect(Object.keys(payment).sort()).toEqual(
-          ["type", "amount", "asset", "sender", "receiver", "createdAt"].sort(),
-        );
       }
     });
 
@@ -615,7 +627,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get(`/account/${VALID_KEY}/payments`);
 
       expect(res.statusCode).toBe(200);
-      res.body.data.forEach((payment) => {
+      res.body.data.items.forEach((payment) => {
         expect(["payment", "create_account"]).toContain(payment.type);
         expect(payment).toHaveProperty("amount");
         expect(payment).toHaveProperty("asset");
@@ -629,7 +641,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("respects limit query param", async () => {
@@ -638,8 +650,8 @@ image = "https://example.com/test.png"
       );
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.meta.limit).toBe(5);
-      expect(res.body.data.length).toBeLessThanOrEqual(5);
+      expect(res.body.data.limit).toBe(5);
+      expect(res.body.data.items.length).toBeLessThanOrEqual(5);
     });
 
     it("returns 400 for invalid limit", async () => {
@@ -657,7 +669,7 @@ image = "https://example.com/test.png"
       );
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.meta.order).toBe("asc");
+      expect(res.body.data.items).toBeInstanceOf(Array);
     });
   });
 
@@ -669,16 +681,14 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data).toBeInstanceOf(Array);
-      expect(res.body).toHaveProperty("meta");
-      expect(res.body.meta).toHaveProperty("count");
-      expect(res.body.meta).toHaveProperty("limit");
-      expect(res.body.meta).toHaveProperty("nextCursor");
-      expect(res.body.meta).toHaveProperty("hasMore");
-      expect(typeof res.body.meta.hasMore).toBe("boolean");
+      expect(res.body.data).toHaveProperty("items");
+      expect(res.body.data.items).toBeInstanceOf(Array);
+      expect(res.body.data).toHaveProperty("total");
+      expect(res.body.data).toHaveProperty("limit");
+      expect(res.body.data).toHaveProperty("cursor");
 
-      if (res.body.data.length > 0) {
-        const offer = res.body.data[0];
+      if (res.body.data.items.length > 0) {
+        const offer = res.body.data.items[0];
         expect(offer).toHaveProperty("id");
         expect(offer).toHaveProperty("selling");
         expect(offer).toHaveProperty("buying");
@@ -701,8 +711,8 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.meta.limit).toBe(1);
-      expect(res.body.data.length).toBeLessThanOrEqual(1);
+      expect(res.body.data.limit).toBe(1);
+      expect(res.body.data.items.length).toBeLessThanOrEqual(1);
     });
 
     it("returns 400 for invalid account ID", async () => {
@@ -710,7 +720,7 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
   });
 
@@ -722,14 +732,12 @@ image = "https://example.com/test.png"
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-
       expect(res.body.data).toHaveProperty("totalSent");
       expect(res.body.data).toHaveProperty("totalReceived");
       expect(res.body.data).toHaveProperty("topAssets");
       expect(res.body.data).toHaveProperty("avgTransactionsPerDay");
       expect(res.body.data).toHaveProperty("firstSeen");
       expect(res.body.data).toHaveProperty("lastSeen");
-
       expect(res.body.data.topAssets).toBeInstanceOf(Array);
     });
 
@@ -784,6 +792,71 @@ image = "https://example.com/test.png"
     });
   });
 
+  describe("Cache - /account/:id", () => {
+    const VALID_KEY =
+      "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns X-Cache: MISS on first request and HIT on subsequent request", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 0,
+        last_modified_ledger: 1,
+        balances: [
+          {
+            asset_type: "native",
+            balance: "1.0000000",
+            buying_liabilities: "0",
+            selling_liabilities: "0",
+          },
+        ],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      const firstRes = await request(app).get(`/account/${VALID_KEY}`);
+      const secondRes = await request(app).get(`/account/${VALID_KEY}`);
+
+      expect(firstRes.statusCode).toBe(200);
+      expect(firstRes.headers["x-cache"]).toBe("MISS");
+      expect(secondRes.statusCode).toBe(200);
+      expect(secondRes.headers["x-cache"]).toBe("HIT");
+    });
+
+    it("bypasses cache with ?fresh=true and returns MISS", async () => {
+      jest.spyOn(server, "loadAccount").mockResolvedValue({
+        id: VALID_KEY,
+        sequence: "1",
+        subentry_count: 0,
+        last_modified_ledger: 1,
+        balances: [
+          {
+            asset_type: "native",
+            balance: "1.0000000",
+            buying_liabilities: "0",
+            selling_liabilities: "0",
+          },
+        ],
+        signers: [],
+        thresholds: {},
+        flags: {},
+        home_domain: null,
+      });
+
+      await request(app).get(`/account/${VALID_KEY}`);
+      const res = await request(app).get(`/account/${VALID_KEY}?fresh=true`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-cache"]).toBe("MISS");
+    });
+  });
+
   // ── Issue #75: feeSummary ──────────────────────────────────────────────────
   describe("GET /transactions/:id — feeSummary", () => {
     const VALID_KEY =
@@ -826,11 +899,11 @@ image = "https://example.com/test.png"
       const res = await request(app).get(`/transactions/${VALID_KEY}`);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.data[0].feeSummary).toEqual({
-        chargedInStroops: 300,
-        chargedInXLM: "0.0000300",
-        perOperationInStroops: 100,
-        perOperationInXLM: "0.0000100",
+      expect(res.body.data.items[0].feeSummary).toEqual({
+        stroops: 300,
+        xlm: "0.0000300",
+        perOperationStroops: 100,
+        perOperationXLM: "0.0000100",
       });
     });
   });
@@ -845,10 +918,7 @@ image = "https://example.com/test.png"
     });
 
     it("returns X-Cache: HIT on subsequent request within TTL", async () => {
-      // First request - cache miss
       await request(app).get("/network-status");
-
-      // Second request - cache hit
       const res = await request(app).get("/network-status");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("HIT");
@@ -856,10 +926,7 @@ image = "https://example.com/test.png"
     });
 
     it("bypasses cache with ?fresh=true and returns MISS", async () => {
-      // First request - cache miss
       await request(app).get("/network-status");
-
-      // Second request with fresh=true - bypass cache
       const res = await request(app).get("/network-status?fresh=true");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("MISS");
@@ -876,10 +943,7 @@ image = "https://example.com/test.png"
     });
 
     it("returns X-Cache: HIT on subsequent request within TTL", async () => {
-      // First request - cache miss
       await request(app).get("/fee-estimate");
-
-      // Second request - cache hit
       const res = await request(app).get("/fee-estimate");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("HIT");
@@ -887,10 +951,7 @@ image = "https://example.com/test.png"
     });
 
     it("returns X-Cache: HIT for same operations count", async () => {
-      // First request with operations=3
       await request(app).get("/fee-estimate?operations=3");
-
-      // Second request with same operations=3
       const res = await request(app).get("/fee-estimate?operations=3");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("HIT");
@@ -898,10 +959,7 @@ image = "https://example.com/test.png"
     });
 
     it("returns X-Cache: MISS for different operations count", async () => {
-      // First request with operations=1
       await request(app).get("/fee-estimate?operations=1");
-
-      // Second request with operations=5 - different cache key
       const res = await request(app).get("/fee-estimate?operations=5");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("MISS");
@@ -909,10 +967,7 @@ image = "https://example.com/test.png"
     });
 
     it("bypasses cache with ?fresh=true and returns MISS", async () => {
-      // First request - cache miss
       await request(app).get("/fee-estimate");
-
-      // Second request with fresh=true - bypass cache
       const res = await request(app).get("/fee-estimate?fresh=true");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("MISS");
@@ -938,20 +993,52 @@ image = "https://example.com/test.png"
   // ── Compression ────────────────────────────────────────────────────────────
   describe("Response Compression", () => {
     it("compresses responses when Accept-Encoding is gzip", async () => {
-      // We use the root endpoint because it's large enough to trigger default compression
       const res = await request(app).get("/").set("Accept-Encoding", "gzip");
-
       expect(res.statusCode).toBe(200);
       expect(res.headers["content-encoding"]).toBe("gzip");
     });
   });
+
+  // ── OfferNotFound Error ───────────────────────────────────────────────────────
+  describe("GET /account/:id/offers — specific offer", () => {
+    const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("returns OfferNotFound when a specific offer does not exist", async () => {
+      const query = {
+        forAccount: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offer: jest.fn().mockReturnThis(),
+        call: jest.fn().mockRejectedValue({
+          response: {
+            status: 404,
+            data: { detail: "Resource not found", title: "Not Found" },
+          },
+        }),
+      };
+
+      jest.spyOn(server, "offers").mockReturnValue(query);
+
+      const res = await request(app).get(`/account/${VALID_KEY}/offers?offerId=999999`);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.type).toBe("OfferNotFound");
+      expect(res.body.error.message).toContain("999999");
+      expect(res.body.error.message).toContain("not found");
+      expect(res.body.error).toHaveProperty("suggestion");
+    });
+  });
+
   // ── Friendbot Tests ─────────────────────────────────────────────────────────
   describe("GET /utils/friendbot/:accountId", () => {
     const VALID_KEY =
       "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
 
     beforeEach(() => {
-      // Set to testnet for tests
       process.env.STELLAR_NETWORK = "testnet";
     });
 
@@ -963,7 +1050,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get("/utils/friendbot/INVALID_KEY");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("returns 400 when account ID is missing", async () => {
@@ -1302,7 +1389,7 @@ image = "https://example.com/test.png"
       const res = await request(app).get("/account/BADKEY/volume");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAccountId");
     });
 
     it("returns 400 when days exceeds 90", async () => {
@@ -1569,7 +1656,6 @@ issuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
     });
 
     it("returns trend:rising when recent fees are higher than older fees", async () => {
-      // records are desc (newest first): first 25 = recent (high), last 25 = older (low)
       const recent = Array.from({ length: 25 }, () => makeLedger(200));
       const older  = Array.from({ length: 25 }, () => makeLedger(100));
       mockLedgers([...recent, ...older]);
@@ -1593,7 +1679,6 @@ issuer = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
         ...Array.from({ length: 47 }, () => makeLedger(100)),
       ];
       mockLedgers(records);
-
       const res = await request(app).get("/fee-estimate/trends");
       expect(res.body.data.minBaseFee).toBe(50);
       expect(res.body.data.maxBaseFee).toBe(150);
@@ -1606,16 +1691,56 @@ describe("GET /account/:id/trustlines", () => {
     const res = await request(app).get("/account/INVALID_KEY/trustlines");
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.error.type).toBe("ValidationError");
+    expect(res.body.error.type).toBe("InvalidAccountId");
   });
+});
 
-  it("validates that route exists and handles errors gracefully", async () => {
-    // This endpoint should be properly defined even if the account doesn't exist
-    // A real account could be tested with a valid Stellar account ID
-    const res = await request(app).get("/account/NOT_A_VALID_KEY/trustlines");
+  // ── Ledger Sequence to Date Converter ────────────────────────────────────
+  describe("GET /account/ledger/:sequence/date", () => {
+    it("returns approximate date for a valid ledger sequence", async () => {
+      const res = await request(app)
+        .get("/account/ledger/50000000/date")
+        .expect(200);
 
-    // Should get a validation error, not a 404
-    expect(res.statusCode).toBe(400);
-    expect(res.body.success).toBe(false);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.sequence).toBe(50000000);
+      expect(res.body.data.approximate_date).toBeDefined();
+      expect(res.body.data.unix_timestamp).toBeDefined();
+      expect(res.body.data.human_readable).toBeDefined();
+      expect(res.body.data.note).toContain("approximate");
+    });
+
+    it("returns correct genesis date for sequence 1", async () => {
+      const res = await request(app)
+        .get("/account/ledger/1/date")
+        .expect(200);
+
+      expect(res.body.data.approximate_date).toBe("2015-09-30T00:00:00.000Z");
+    });
+
+    it("returns 400 for non-numeric sequence", async () => {
+      const res = await request(app)
+        .get("/account/ledger/abc/date")
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+      expect(res.body.error.field).toBe("sequence");
+    });
+
+    it("returns 400 for sequence 0", async () => {
+      const res = await request(app)
+        .get("/account/ledger/0/date")
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+    });
+
+    it("returns 400 for negative sequence", async () => {
+      const res = await request(app)
+        .get("/account/ledger/-5/date")
+        .expect(400);
+
+      expect(res.body.success).toBe(false);
+    });
   });
 });

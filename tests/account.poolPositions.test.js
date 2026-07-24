@@ -16,11 +16,12 @@ describe("GET /account/:id/pool-positions", () => {
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty("success", true);
         expect(response.body).toHaveProperty("data");
-        expect(Array.isArray(response.body.data)).toBe(true);
+        expect(response.body.data).toHaveProperty("items");
+        expect(Array.isArray(response.body.data.items)).toBe(true);
 
         // If there are positions, validate the structure
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             expect(position).toHaveProperty("poolId");
             expect(position).toHaveProperty("shares");
@@ -52,10 +53,10 @@ describe("GET /account/:id/pool-positions", () => {
         }
 
         // Validate metadata
-        expect(response.body).toHaveProperty("meta");
-        expect(response.body.meta).toHaveProperty("count");
-        expect(response.body.meta).toHaveProperty("accountId");
-        expect(response.body.meta.count).toBe(response.body.data.length);
+        expect(response.body.data).toHaveProperty("total");
+        expect(response.body.data).toHaveProperty("limit");
+        expect(response.body.data).toHaveProperty("cursor");
+        expect(response.body.data.total).toBe(response.body.data.items.length);
     }, 15000);
 
     it("should return 200 with empty array for an account without liquidity pool positions", async () => {
@@ -66,11 +67,12 @@ describe("GET /account/:id/pool-positions", () => {
 
         expect(response.body).toHaveProperty("success", true);
         expect(response.body).toHaveProperty("data");
-        expect(Array.isArray(response.body.data)).toBe(true);
+        expect(response.body.data).toHaveProperty("items");
+        expect(Array.isArray(response.body.data.items)).toBe(true);
 
         // Account might have 0 positions
-        expect(response.body.meta).toHaveProperty("count");
-        expect(response.body.meta.count).toBeGreaterThanOrEqual(0);
+        expect(response.body.data).toHaveProperty("total");
+        expect(response.body.data.total).toBeGreaterThanOrEqual(0);
     }, 15000);
 
     it("should return 400 for invalid account ID format", async () => {
@@ -103,7 +105,7 @@ describe("GET /account/:id/pool-positions", () => {
             // If account exists, it should return valid data structure
             expect(response.body).toHaveProperty("success", true);
             expect(response.body).toHaveProperty("data");
-            expect(Array.isArray(response.body.data)).toBe(true);
+            expect(Array.isArray(response.body.data.items)).toBe(true);
         }
     }, 15000);
 
@@ -112,8 +114,8 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             const accountShares = parseFloat(position.shares);
             const totalShares = parseFloat(position.totalPoolShares);
@@ -128,8 +130,8 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             const accountShares = parseFloat(position.shares);
             const totalShares = parseFloat(position.totalPoolShares);
@@ -148,12 +150,12 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        expect(response.body.data).toBeDefined();
-        expect(Array.isArray(response.body.data)).toBe(true);
+        expect(response.body.data.items).toBeDefined();
+        expect(Array.isArray(response.body.data.items)).toBe(true);
 
         // If multiple positions exist, ensure each has a unique poolId
-        if (response.body.data.length > 1) {
-            const poolIds = response.body.data.map(p => p.poolId);
+        if (response.body.data.items.length > 1) {
+            const poolIds = response.body.data.items.map(p => p.poolId);
             const uniquePoolIds = new Set(poolIds);
             expect(uniquePoolIds.size).toBe(poolIds.length);
         }
@@ -164,8 +166,8 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             // Each reserve should have asset information
             expect(position.reserveA.asset).toBeDefined();
@@ -181,8 +183,8 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             expect(position.feeBp).toBeDefined();
             expect(typeof position.feeBp).toBe("number");
@@ -197,8 +199,8 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             expect(position.totalTrustlines).toBeDefined();
             expect(typeof position.totalTrustlines).toBe("number");
@@ -211,8 +213,8 @@ describe("GET /account/:id/pool-positions", () => {
             .get(`/account/${testAccountWithPools}/pool-positions`)
             .expect(200);
 
-        if (response.body.data.length > 0) {
-            const position = response.body.data[0];
+        if (response.body.data.items.length > 0) {
+            const position = response.body.data.items[0];
 
             expect(position.lastModifiedLedger).toBeDefined();
             expect(typeof position.lastModifiedLedger).toBe("number");

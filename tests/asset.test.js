@@ -55,14 +55,15 @@ describe("Asset Routes", () => {
 
       expect(res.statusCode).toBe(404);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("NotFound");
+      expect(res.body.error.type).toBe("AssetNotFound");
+      expect(res.body.error.suggestion).toBeDefined();
     });
 
     it("returns 400 for invalid asset code or issuer", async () => {
       const res = await request(app).get("/asset/TOOLONGCODE/INVALID_ISSUER/supply");
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error.type).toBe("ValidationError");
+      expect(res.body.error.type).toBe("InvalidAsset");
     });
   });
 });

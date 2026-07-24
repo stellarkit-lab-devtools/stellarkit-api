@@ -4,16 +4,35 @@ Thank you for your interest in contributing! StellarKit API participates in the 
 
 ---
 
-## 🌊 Stellar Wave Program
+## Table of Contents
 
-This repo is part of the Stellar Wave Program. During each monthly Wave (a 7-day sprint), contributors can:
+- [🌊 Stellar Wave Issues](#stellar-wave-issues)
+- [📖 Documentation](#documentation)
+- [🛠️ Development Setup](#development-setup)
+- [📋 How to Contribute](#how-to-contribute)
+- [✅ PR Checklist](#pr-checklist)
+- [🧱 Code Style](#-code-style)
+- [🔍 Linting](#-linting)
+- [💬 Questions?](#-questions)
 
-1. Browse open issues labeled with point values
-2. Apply to work on an issue via the Drips Wave app
-3. Submit a Pull Request
-4. Earn Points → converted to real rewards
+---
+
+## 🌊 Stellar Wave Issues
+
+Issues with the **`Stellar Wave`** label are part of the Stellar Wave Program on Drips.
+
+1. The label means the issue is included in the active Wave and should be handled under Wave rules.
+2. Issues with this label carry **Point rewards** in Drips Wave.
+3. You must **apply via Drips Wave before starting work** on the issue.
+4. Your PR must be **merged before the current Wave ends** for points to be awarded.
 
 **Get started:** [drips.network/wave/stellar](https://www.drips.network/wave/stellar)
+
+---
+
+## 📖 Documentation
+
+- [Testing Guide](docs/testing.md) — how the test suite is structured, how to run tests, mocking patterns, and coverage expectations
 
 ---
 
@@ -31,7 +50,7 @@ npm run dev
 
 ## 📋 How to Contribute
 
-1. **Find an issue** — Check the [Issues tab](../../issues) for open tasks. Wave issues are labeled with their complexity (`trivial`, `medium`, `high`).
+1. **Find an issue** — Check the [Issues tab](../../issues) for open tasks. If the issue has the `Stellar Wave` label, follow the [Stellar Wave Issues](#-stellar-wave-issues) rules before starting.
 2. **Comment or apply** — Leave a comment on the issue or apply via Drips Wave before starting.
 3. **Branch** — Create a branch: `git checkout -b feat/short-description` or `fix/short-description`.
 4. **Code** — Make your changes. Follow the existing patterns.
@@ -53,6 +72,7 @@ npm run dev
 ## 🧱 Code Style
 
 - An `.editorconfig` file is included at the repo root. Make sure your editor supports it (most do natively or via a plugin: [editorconfig.org](https://editorconfig.org)). It enforces: 2-space indentation, LF line endings, UTF-8 charset, and a final newline on all files.
+- **Line endings:** This repo enforces LF (`\n`) line endings via `.gitattributes`. If you're on Windows, configure Git to not convert line endings: `git config core.autocrlf false`. Your editor should also be set to save files with LF endings.
 - Use `async/await` — no raw promise chains
 - All routes must use the `next(err)` pattern for errors
 - Use the `success()` helper from `src/utils/response.js` for consistent responses
