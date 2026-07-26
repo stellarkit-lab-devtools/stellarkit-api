@@ -19,7 +19,7 @@ const { Asset } = require("@stellar/stellar-sdk");
 const { normalizeAsset, normalizeAssetFromString } = require("../utils/asset");
 const { getAssetMetadataFromToml } = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
-const { validateAccountId, validateAssetCode } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
 const { validateEffectType } = require("../utils/effectTypes");
 
 // Cache TTL for account endpoint responses (in seconds)
@@ -490,17 +490,17 @@ router.get("/:id/payments", async (req, res, next) => {
     if (cursor) query = query.cursor(cursor);
 
     const paymentResponse = await query.call();
-    const rawRecords = paymentResponse.records || [];
+    const paymentRecords = paymentResponse.records || [];
     // Use operations endpoint to get payment + create_account ops
     const opQuery = server.operations().forAccount(id).limit(limit).order(order);
     const opResponse = await (cursor ? opQuery.cursor(cursor) : opQuery).call();
-    const rawRecords = opResponse.records || [];
+    const opRecords = opResponse.records || [];
 
     const issuerCache = new Map();
     const tomlCache = new Map();
 
     const paymentOps = [];
-    for (const op of rawRecords) {
+    for (const op of opRecords) {
       if (op.type === "payment" || op.type === "create_account") {
         const isPayment = op.type === "payment";
         const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
@@ -561,7 +561,7 @@ router.get("/:id/payments", async (req, res, next) => {
       }
     }
 
-    const payments = rawRecords.map((op) => {
+    const payments = opRecords.map((op) => {
       const isPayment = op.type === "payment";
       const assetCode = isPayment ? op.asset_code || "XLM" : "XLM";
       const assetIssuer = isPayment ? op.asset_issuer || null : null;
@@ -581,7 +581,7 @@ router.get("/:id/payments", async (req, res, next) => {
       };
     });
 
-    const lastRecord = rawRecords[rawRecords.length - 1];
+    const lastRecord = opRecords[opRecords.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
     return success(res, {
@@ -704,13 +704,19 @@ router.get("/:id/offers", async (req, res, next) => {
       }
     }
 
-    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
-    let query = server.offers().forAccount(id).limit(limit).order(order);
-    if (cursor) query = query.cursor(cursor);
+    let query = server.offers().forAccount(id).limit(limit);
+    if (typeof query.order === "function") {
+      query = query.order(order);
+    }
+    if (cursor && typeof query.cursor === "function") {
+      query = query.cursor(cursor);
+    }
 
     const offerResponse = await query.call();
-    const offers = (offerResponse.records || []).map((offer) => {
+    const records = offerResponse.records || [];
+    const offers = records.map((offer) => {
       // Derive a single decimal price string from price_r (n/d fraction) when
       // available, falling back to the pre-computed price string from Horizon.
       // Always format to 7 decimal places for consistency with other amounts.
@@ -722,6 +728,8 @@ router.get("/:id/offers", async (req, res, next) => {
       } else {
         priceDecimal = parseFloat(offer.price || "0").toFixed(7);
       }
+
+      const amount = parseFloat(offer.amount || "0").toFixed(7);
 
       // Full normalized asset object { code, issuer, type }
       const sellingAsset = normalizeAsset(
@@ -738,44 +746,48 @@ router.get("/:id/offers", async (req, res, next) => {
       if (expandAssets) {
         // ?expandAssets=true — embed full asset objects on both sides
         return {
+          offerId: String(offer.id),
           id: offer.id,
           seller: offer.seller,
           selling: {
             asset: sellingAsset,
-            amount: parseFloat(offer.amount || "0").toFixed(7),
+            amount,
           },
           buying: {
             asset: buyingAsset,
           },
           price: priceDecimal,
+          amount,
           lastModifiedLedger: offer.last_modified_ledger,
         };
       }
 
       // Default (backward-compatible) — asset fields spread directly onto selling/buying
       return {
+        offerId: String(offer.id),
         id: offer.id,
         seller: offer.seller,
         selling: {
           ...sellingAsset,
           // Format to 7 decimal places (Stellar precision standard)
-          amount: parseFloat(offer.amount || "0").toFixed(7),
+          amount,
         },
         buying: buyingAsset,
         // price is a 7-decimal string derived from the price_r fraction
         price: priceDecimal,
+        amount,
         // camelCase rename of last_modified_ledger
         lastModifiedLedger: offer.last_modified_ledger,
       };
     });
 
-    const hasMore = (offerResponse.records || []).length === limit;
+    const hasMore = records.length === limit;
     const nextCursor = hasMore
-      ? (offerResponse.records[offerResponse.records.length - 1] || {})
-          .paging_token
+      ? (records[records.length - 1] || {}).paging_token
       : null;
 
     return success(res, {
+      offers,
       items: offers,
       total: offers.length,
       limit,
