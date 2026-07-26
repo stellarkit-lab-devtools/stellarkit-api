@@ -64,6 +64,16 @@ describe("GET /account/:id/offers — normalised response", () => {
     expect(offer).not.toHaveProperty("last_modified_ledger");
   });
 
+  it("returns a normalized offers array with offerId, amount, and pagination metadata", async () => {
+    const res = await request(app).get(`/account/${accountId}/offers?limit=1`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.offers).toHaveLength(1);
+    expect(res.body.data.offers[0]).toHaveProperty("offerId", "1");
+    expect(res.body.data.offers[0]).toHaveProperty("amount", "100.5000000");
+    expect(res.body.data.offers[0]).toHaveProperty("lastModifiedLedger", 12345);
+    expect(res.body.data.limit).toBe(1);
+  });
+
   it("all asset fields are { code, issuer, type }", async () => {
     const res = await request(app).get(`/account/${accountId}/offers`);
     const offer = res.body.data.items[0];

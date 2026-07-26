@@ -10,13 +10,6 @@ const { StrKey } = require("@stellar/stellar-sdk");
  */
 function qp(param, msg) {
   return `Query param '${param}' ${msg}`;
- * Build a query-parameter error message in the form "Query parameter '<field>': <detail>".
- * @param {string} field
- * @param {string} detail
- * @returns {string}
- */
-function qp(field, detail) {
-  return `Query parameter '${field}': ${detail}`;
 }
 
 /**
