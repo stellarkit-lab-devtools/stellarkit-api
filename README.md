@@ -18,38 +18,39 @@ A lightweight REST API for Stellar that turns Horizon blockchain data into easy-
 
 ## What is StellarKit API?
 
-StellarKit API is a wrapper around the Stellar Horizon API, built with Express.js and the official `@stellar/stellar-sdk` library. It normalizes Horizon responses, provides a clean REST structure, and adds convenience endpoints for the most common Stellar developer workflows.
+StellarKit API is a lightweight, production-ready Express service for exploring Stellar network data through a clean REST interface. It combines Horizon data with Soroban RPC support, normalizes common responses, and exposes practical endpoints for account analysis, fee estimation, asset intelligence, DEX and liquidity-pool data, claimable balances, and live streaming.
 
-This project is ideal for:
+This project is especially useful for teams and developers who need:
 
-- Web and mobile developers building on Stellar
-- Server-side services consuming Stellar account and transaction data
-- Wallet providers that need reliable fee estimation and account summaries
-- Applications requiring typed API responses via bundled TypeScript definitions
+- Web and mobile apps that need Stellar account, transaction, and network data
+- Backend services aggregating balances, reserves, activity, and risk signals
+- Wallets and custodians that need fee estimates, multisig insights, and account health checks
+- Developers building with TypeScript who want typed responses and a predictable API surface
 
----
+### Highlights
 
-## Key Features
-
-- 🌐 **Network status and ledger health**
-- 💰 **Dynamic fee estimation** for optimal transaction pricing
-- 👥 **Account detail aggregation** including balances, signers, and thresholds
-- 📜 **Paginated transaction history** and operation history per account
-- 🪙 **Asset metadata search** and issuer lookup
-- 🚫 **Built-in security middleware** with rate limiting, helmet headers, CORS, and HPP
-- 🧪 **Test coverage** using Jest and Supertest
-- 📦 **Bundled TypeScript types** for safe integration in TypeScript projects
+- 🌐 **Network and ledger health** for testnet and mainnet
+- 💸 **Dynamic fee estimation** with surge and trend analysis
+- 👤 **Comprehensive account summaries** including balances, reserves, signers, and risk signals
+- 📜 **Transaction and operation history** with batch transaction status checks
+- 🪙 **Asset metadata, holder analytics, supply views, and issuer verification**
+- 📊 **DEX, liquidity pool, and arbitrage insights**
+- 🔐 **Built-in security and resilience** with rate limiting, Helmet, CORS, HPP, API key support, and caching
+- ⚡ **Live streaming** through WebSocket and Server-Sent Events for ledgers, transactions, and payments
+- 🧱 **Soroban contract inspection** for deployed contract metadata and storage
+- 🧪 **Jest/Supertest coverage** and bundled TypeScript definitions
 
 ---
 
 ## Documentation
 
-- [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
+- [SDK Migration Guide](docs/sdk-migration.md) — moving from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
-- [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
-- [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
-- [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
-- [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
+- [Getting Started Guide](docs/getting-started.md) — install, configure, and make your first API calls
+- [Error Reference](docs/error-reference.md) — error types, status codes, and troubleshooting
+- [Rate Limiting](docs/rate-limiting.md) — defaults, headers, and retry guidance
+- [Frequently Asked Questions (FAQ)](FAQ.md) — common setup and contribution questions
+- [Soroban guide](docs/soroban.md) — contract inspection endpoints and examples
 
 ---
 
@@ -193,7 +194,7 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 ---
 
-## Documentation
+## Additional Documentation
 
 - [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id` and `/soroban/contract/:id/storage`.
 
