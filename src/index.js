@@ -37,6 +37,7 @@ const claimableBalancesRouter = require("./routes/claimableBalances");
 const cacheStatsRouter = require("./routes/cacheStats");
 const sorobanRouter = require("./routes/soroban");
 const networkRouter = require("./routes/network");
+const accountCanSendRouter = require("./routes/accountCanSend");
 
 const app = express();
 // Disable server identification header for security
@@ -237,6 +238,7 @@ app.use("/claimable-balances", etagMiddleware, claimableBalancesRouter);
 app.use("/cache", cacheStatsRouter);
 app.use("/soroban", sorobanRouter);
 app.use("/network", etagMiddleware, networkRouter);
+app.use("/", accountCanSendRouter);
 const transactionEffectsRouter = require("./routes/transaction.effects");
 app.use("/transaction", etagMiddleware, transactionEffectsRouter);
 
