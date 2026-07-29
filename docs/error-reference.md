@@ -14,6 +14,8 @@ Every error response follows the same envelope:
 
 Some error types include additional fields such as `detail`, `suggestion`, `field`, `receivedValue`, `expectedFormat`, or Horizon-specific `extras`.
 
+For a complete reference of HTTP status codes returned by the API, see [Error Codes](./error-codes.md).
+
 ---
 
 ## ValidationError
@@ -41,6 +43,63 @@ Returned when a request parameter or body value fails validation.
 | ----------------- | ----------- | --------------------------------------------------------------------- |
 | `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
 | `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
+| `InsufficientReserve` | 422     | Account does not have enough XLM to cover the minimum reserve requirement |
+| `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
+| `NotFound`        | 404         | Route or resource not found                                           |
+| `RateLimitError`  | 429         | Too many requests from the same IP                                    |
+| `ServerError`     | 500         | Unexpected internal error                                             |
+
+---
+
+### OfferNotFound
+
+Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID that does not exist, or when any operation references a non-existent offer.
+StellarKit API Error Reference
+
+Every error response follows the same envelope:
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "ErrorType",
+    "message": "Human-readable description."
+  }
+}
+```
+
+Some error types include additional fields such as `detail`, `suggestion`, `field`, `receivedValue`, `expectedFormat`, or Horizon-specific `extras`.
+
+For a complete reference of HTTP status codes returned by the API, see [Error Codes](./error-codes.md).
+
+---
+
+## ValidationError
+
+Returned when a request parameter or body value fails validation.
+
+**Status:** `400`
+
+**Example:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "<ErrorType>",
+    "message": "...",
+    ...
+  }
+}
+```
+
+## Error Types
+
+| Type              | HTTP Status | Description                                                           |
+| ----------------- | ----------- | --------------------------------------------------------------------- |
+| `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
+| `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
+| `InsufficientReserve` | 422     | Account does not have enough XLM to cover the minimum reserve requirement |
 | `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
 | `NotFound`        | 404         | Route or resource not found                                           |
 | `RateLimitError`  | 429         | Too many requests from the same IP                                    |
@@ -71,6 +130,34 @@ Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID 
 - Using a testnet key on mainnet or vice versa
 
 **Suggested fix:** Verify the account address. If on testnet, fund the account using Friendbot (`GET /utils/friendbot/:accountId`).
+
+---
+
+## InsufficientReserve
+
+Returned when an operation fails because the account does not have enough XLM to meet the minimum reserve requirement. This occurs when a Horizon operation returns the `op_low_reserve` error code.
+
+**Status:** `422`
+
+**Example:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "InsufficientReserve",
+    "message": "Account does not have enough XLM to cover the minimum reserve requirement.",
+    "suggestion": "Fund the account with additional XLM. Each account requires a base reserve of 1 XLM plus 0.5 XLM per subentry."
+  }
+}
+```
+
+**Common causes:**
+- The account does not have enough XLM to cover the base reserve (1 XLM) plus 0.5 XLM for each subentry (trustlines, offers, signers, data entries)
+- The operation would create a subentry that would push the account below the minimum reserve
+- The account is trying to send XLM that would leave it below the reserve
+
+**Suggested fix:** Fund the account with additional XLM. Calculate the required reserve as: `1 XLM + (0.5 XLM × number of subentries)`. Each trustline, offer, signer, and data entry counts as one subentry.
 
 ---
 

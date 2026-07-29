@@ -402,6 +402,50 @@ describe("ErrorHandler Middleware", () => {
     });
   });
 
+  describe("Connection and offer-specific errors", () => {
+    it("should return a HorizonUnavailable response for connection errors", () => {
+      const err = new Error("connect ECONNREFUSED");
+      err.code = "ECONNREFUSED";
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(503);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          type: "HorizonUnavailable",
+          message: "Unable to connect to the Stellar Horizon node.",
+          suggestion: "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status.",
+        },
+      });
+    });
+
+    it("should return an OfferNotFound response for offer-not-found Horizon errors", () => {
+      const err = {
+        response: {
+          status: 404,
+          config: { url: "https://horizon-testnet.stellar.org/offers/123" },
+          data: {
+            title: "Not Found",
+            detail: "Offer 123 was not found.",
+          },
+        },
+      };
+
+      errorHandler(err, req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: {
+          type: "OfferNotFound",
+          message: "Offer '123' was not found on the Stellar testnet network.",
+          suggestion: "The offer may have already been filled, cancelled, or the offer ID may be incorrect.",
+        },
+      });
+    });
+  });
+
   describe("Validation Errors", () => {
     it("should handle custom validation errors with a 400 status code", () => {
       const err = {

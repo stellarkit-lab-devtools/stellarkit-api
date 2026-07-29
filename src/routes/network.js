@@ -134,4 +134,42 @@ router.get("/base-fee", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /network/fee-percentiles
+ * Returns fee distribution percentiles from recent network activity.
+ */
+router.get("/fee-percentiles", async (req, res, next) => {
+  try {
+    const cacheKey = "network-fee-percentiles";
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const feeStats = await server.feeStats();
+
+    const data = {
+      p10: parseInt(feeStats.fee_charged.p10 || feeStats.fee_charged.min, 10),
+      p50: parseInt(feeStats.fee_charged.p50 || feeStats.fee_charged.mode, 10),
+      p90: parseInt(feeStats.fee_charged.p90 || feeStats.fee_charged.p95, 10),
+      p95: parseInt(feeStats.fee_charged.p95, 10),
+      p99: parseInt(feeStats.fee_charged.p99 || feeStats.fee_charged.max, 10),
+      lastLedgerBaseFee: parseInt(feeStats.last_ledger_base_fee, 10),
+      ledgerCapacityUsage: parseFloat(feeStats.ledger_capacity_usage),
+    };
+
+    cacheService.set(cacheKey, data, BASE_FEE_CACHE_TTL);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

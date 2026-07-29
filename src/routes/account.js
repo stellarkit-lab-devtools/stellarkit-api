@@ -271,6 +271,13 @@ router.get("/:id/trustlines", async (req, res, next) => {
 
 /**
  * GET /account/:id/balances
+ *
+ * Returns XLM and asset balances for an account.
+ *
+ * Query params:
+ *   - assets (string, optional) — comma-separated asset identifiers to filter by.
+ *     Format: "XLM" for native, "CODE:ISSUER" for issued assets.
+ *     Invalid identifiers are ignored. Example: ?assets=XLM,USDC:GA...
  */
 router.get("/:id/balances", async (req, res, next) => {
   try {
@@ -279,6 +286,42 @@ router.get("/:id/balances", async (req, res, next) => {
 
     const account = await server.loadAccount(id);
     const formatted = formatAccountBalances(account);
+
+    const assetsFilter = req.query.assets;
+    if (assetsFilter) {
+      const requested = assetsFilter.split(",").map((s) => s.trim()).filter(Boolean);
+      const matches = [];
+
+      for (const identifier of requested) {
+        if (identifier.toUpperCase() === "XLM") {
+          matches.push("__xlm__");
+          continue;
+        }
+        const colonIdx = identifier.indexOf(":");
+        if (colonIdx === -1) continue; // invalid, ignore
+        const code = identifier.slice(0, colonIdx).toUpperCase();
+        const issuer = identifier.slice(colonIdx + 1);
+        if (!code || !issuer) continue;
+        matches.push(`${code}:${issuer}`);
+      }
+
+      const matchSet = new Set(matches);
+
+      // Filter xlm
+      if (!matchSet.has("__xlm__")) {
+        formatted.xlm = {
+          balance: "0.0000000",
+          buyingLiabilities: "0.0000000",
+          sellingLiabilities: "0.0000000",
+        };
+      }
+
+      // Filter assets
+      formatted.assets = formatted.assets.filter((a) => {
+        const key = `${a.asset.code}:${a.asset.issuer}`;
+        return matchSet.has(key);
+      });
+    }
 
     return success(res, formatted);
   } catch (err) {
@@ -311,6 +354,61 @@ router.get("/:id/native-balance", async (req, res, next) => {
       balance: formatBalance(xlmBalance.balance),
       buyingLiabilities: formatBalance(xlmBalance.buying_liabilities),
       sellingLiabilities: formatBalance(xlmBalance.selling_liabilities),
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/asset-balance/:assetCode/:assetIssuer
+ * 
+ * Returns the balance for a specific asset trustline without fetching all balances.
+ * 
+ * Path params:
+ *   - id (string, required) — Stellar account public key (G...)
+ *   - assetCode (string, required) — Asset code (e.g., USDC)
+ *   - assetIssuer (string, required) — Issuer public key (G...)
+ * 
+ * Returns:
+ *   - 200: { success: true, data: { asset, balance, limit, buyingLiabilities, sellingLiabilities, isAuthorized } }
+ *   - 404: Asset trustline not found on the account
+ */
+router.get("/:id/asset-balance/:assetCode/:assetIssuer", async (req, res, next) => {
+  try {
+    const { id, assetCode, assetIssuer } = req.params;
+    validateAccountId(id);
+    validateAccountId(assetIssuer);
+    validateAssetCode(assetCode);
+
+    const account = await server.loadAccount(id);
+    const trustline = (account.balances || []).find(
+      (b) => 
+        b.asset_type !== "native" &&
+        b.asset_code === assetCode &&
+        b.asset_issuer === assetIssuer
+    );
+
+    if (!trustline) {
+      const err = new Error(`Account ${id} does not hold asset ${assetCode}:${assetIssuer}`);
+      err.status = 404;
+      err.type = "AssetNotFound";
+      return next(err);
+    }
+
+    const assetType = assetCode.length > 4 ? "credit_alphanum12" : "credit_alphanum4";
+
+    return success(res, {
+      asset: {
+        code: assetCode,
+        issuer: assetIssuer,
+        type: assetType,
+      },
+      balance: trustline.balance,
+      limit: trustline.limit,
+      buyingLiabilities: trustline.buying_liabilities,
+      sellingLiabilities: trustline.selling_liabilities,
+      isAuthorized: trustline.is_authorized,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -537,7 +635,8 @@ router.get("/:id/payments", async (req, res, next) => {
       "trustlines", "analytics", "balances", "summary", "sponsorship",
       "subentry-health", "merge-eligibility", "offers", "payments",
       "operation-breakdown", "offer-history", "timeline", "data",
-      "pool-positions", "risk-score", "trustline-health", "age", "volume"
+      "pool-positions", "risk-score", "trustline-health", "age", "volume",
+      "payment-summary"
     ];
     if (reservedWords.includes(id)) {
       return next();
@@ -835,7 +934,7 @@ router.get("/:id/offers", async (req, res, next) => {
     const hasMore = (offerResponse.records || []).length === limit;
     const nextCursor = hasMore
       ? (offerResponse.records[offerResponse.records.length - 1] || {})
-          .paging_token
+        .paging_token
       : null;
 
     return success(res, {
@@ -1123,19 +1222,19 @@ router.get("/:id/analytics", async (req, res, next) => {
       : null;
     const lastSeen = successfulTransactions[successfulTransactions.length - 1]
       ? toISOTimestamp(
-          successfulTransactions[successfulTransactions.length - 1].created_at,
-        )
+        successfulTransactions[successfulTransactions.length - 1].created_at,
+      )
       : null;
 
     const activeDays =
       firstSeen && lastSeen
         ? Math.max(
-            1,
-            Math.ceil(
-              (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) /
-                86400000,
-            ),
-          )
+          1,
+          Math.ceil(
+            (new Date(lastSeen).getTime() - new Date(firstSeen).getTime()) /
+            86400000,
+          ),
+        )
         : 0;
 
     return success(res, {
@@ -1625,11 +1724,11 @@ router.get(
         normalizedAssetCode === "XLM"
           ? (account.balances || []).find((b) => b.asset_type === "native")
           : (account.balances || []).find(
-              (b) =>
-                b.asset_type !== "native" &&
-                b.asset_code === normalizedAssetCode &&
-                b.asset_issuer === assetIssuer,
-            );
+            (b) =>
+              b.asset_type !== "native" &&
+              b.asset_code === normalizedAssetCode &&
+              b.asset_issuer === assetIssuer,
+          );
 
       if (!trustline) {
         const notFoundErr = new Error(
@@ -1990,6 +2089,133 @@ router.get("/:id/volume", async (req, res, next) => {
       period: { days, from: since.toISOString(), to: new Date().toISOString() },
       totalTransactions,
       volumeByAsset,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/payment-summary
+ *
+ * Returns a summary of an account's payment activity, including:
+ *   - totalSent:       Number of payments sent
+ *   - totalReceived:   Number of payments received
+ *   - volumeSent:      Total volume sent (7-decimal string)
+ *   - volumeReceived:  Total volume received (7-decimal string)
+ *   - topCounterparty: Most frequent counterparty (public key or null)
+ *   - topAsset:        Most used asset object { code, issuer, type } or null
+ *
+ * Paginates through the entire payment history via the Horizon payments
+ * endpoint. Returns zeroed values for accounts with no payment history
+ * rather than a 404.
+ *
+ * @example
+ *   GET /account/GABC.../payment-summary
+ */
+router.get("/:id/payment-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Ensure account exists (404 for non-existent accounts)
+    await server.loadAccount(id);
+
+    let totalSent = 0;
+    let totalReceived = 0;
+    let volumeSent = 0;
+    let volumeReceived = 0;
+    const counterpartyCounts = {};
+    const assetCounts = {};
+
+    let cursor;
+    let done = false;
+
+    while (!done) {
+      let query = server.payments().forAccount(id).limit(200).order("asc");
+      if (cursor) query = query.cursor(cursor);
+
+      const page = await query.call();
+      const records = page.records || [];
+
+      if (records.length === 0) break;
+
+      for (const op of records) {
+        if (op.type !== "payment" && op.type !== "create_account") continue;
+
+        const isSent =
+          (op.type === "payment" && op.from === id) ||
+          (op.type === "create_account" && op.funder === id);
+
+        const counterparty = isSent
+          ? op.type === "payment"
+            ? op.to
+            : op.account
+          : op.type === "payment"
+            ? op.from
+            : op.funder;
+
+        const amount = parseFloat(op.amount || op.starting_balance || "0");
+
+        if (isSent) {
+          totalSent++;
+          volumeSent += amount;
+        } else {
+          totalReceived++;
+          volumeReceived += amount;
+        }
+
+        // Track counterparty frequency
+        if (counterparty) {
+          counterpartyCounts[counterparty] = (counterpartyCounts[counterparty] || 0) + 1;
+        }
+
+        // Track asset frequency
+        const assetCode = op.asset_code || "XLM";
+        const assetIssuer = op.asset_issuer || null;
+        const assetType = op.asset_type || (assetCode === "XLM" ? "native" : null);
+        const assetKey = assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode;
+        if (!assetCounts[assetKey]) {
+          assetCounts[assetKey] = {
+            count: 0,
+            asset: normalizeAsset(assetCode, assetIssuer, assetType),
+          };
+        }
+        assetCounts[assetKey].count++;
+
+        cursor = op.paging_token;
+      }
+
+      if (records.length < 200) done = true;
+    }
+
+    // Find top counterparty
+    let topCounterparty = null;
+    let maxCounterpartyCount = 0;
+    for (const [key, count] of Object.entries(counterpartyCounts)) {
+      if (count > maxCounterpartyCount) {
+        maxCounterpartyCount = count;
+        topCounterparty = key;
+      }
+    }
+
+    // Find top asset
+    let topAsset = null;
+    let maxAssetCount = 0;
+    for (const entry of Object.values(assetCounts)) {
+      if (entry.count > maxAssetCount) {
+        maxAssetCount = entry.count;
+        topAsset = entry.asset;
+      }
+    }
+
+    return success(res, {
+      totalSent,
+      totalReceived,
+      volumeSent: volumeSent.toFixed(7),
+      volumeReceived: volumeReceived.toFixed(7),
+      topCounterparty,
+      topAsset,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -2581,9 +2807,9 @@ router.get("/:id/signing-keys", async (req, res, next) => {
         const data =
           minWeight !== null
             ? {
-                ...cached,
-                signers: cached.signers.filter((s) => s.weight >= minWeight),
-              }
+              ...cached,
+              signers: cached.signers.filter((s) => s.weight >= minWeight),
+            }
             : cached;
         return success(res, data);
       }
@@ -3142,6 +3368,9 @@ router.get("/:id/trustline-health", async (req, res, next) => {
     handleAccountNotFound(err, next);
   }
 });
+
+
+
 
 
 module.exports = router;

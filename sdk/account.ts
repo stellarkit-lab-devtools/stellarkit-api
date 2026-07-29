@@ -26,6 +26,24 @@ export interface PaginatedResponse<T> {
   cursor: string | null;
 }
 
+/** Effect from the Stellar ledger. */
+export interface Effect {
+  /** Unique identifier for this effect. */
+  effectId: string;
+  /** Effect type (e.g., "account_credited", "account_debited"). */
+  type: string;
+  /** ISO 8601 timestamp when the effect was created. */
+  createdAt: string;
+  /** Asset involved in the effect (if applicable). */
+  asset?: {
+    code: string;
+    issuer: string | null;
+    type: string;
+  };
+  /** Amount involved in the effect (if applicable). */
+  amount?: string;
+}
+
 /** Typed error thrown by AccountModule on non-2xx API responses. */
 export class StellarKitError extends Error {
   /** HTTP status code returned by the API. */
@@ -400,5 +418,48 @@ export class AccountModule {
       price: string;
       lastModifiedLedger: number;
     }>>(path);
+  }
+
+  /**
+   * Get effects for an account.
+   *
+   * Effects are historical ledger events that impacted this account. This method calls
+   * `GET /account/:id/effects` and returns a paginated list of effects with full type information.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @param options - Optional pagination and filtering options.
+   * @param options.limit - Maximum number of effects to return (default: 10, max: 200).
+   * @param options.cursor - Pagination cursor from a previous response.
+   * @param options.type - Optional effect type filter (e.g., "account_credited", "account_debited").
+   * @returns Resolves to a paginated response containing effect records.
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404 when account not found).
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const effects = await account.getEffects("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * console.log(effects.items[0].type); // "account_credited"
+   *
+   * @example
+   * // Filter by effect type
+   * const creditEffects = await account.getEffects("GAAZI4...", { type: "account_credited" });
+   *
+   * @example
+   * // Paginate through effects
+   * const page1 = await account.getEffects("GAAZI4...", { limit: 50 });
+   * const page2 = await account.getEffects("GAAZI4...", { limit: 50, cursor: page1.cursor });
+   */
+  async getEffects(
+    id: string,
+    options?: { limit?: number; cursor?: string; type?: string },
+  ): Promise<PaginatedResponse<Effect>> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    const params: Record<string, string | number | undefined> = {
+      limit: options?.limit,
+      cursor: options?.cursor,
+      type: options?.type,
+    };
+    return this._get<PaginatedResponse<Effect>>(`/account/${id}/effects`, params);
   }
 }

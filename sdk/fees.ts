@@ -50,6 +50,17 @@ export interface FeeTrendsData {
   };
 }
 
+/** Fee percentiles response data. */
+export interface FeePercentiles {
+  p10: number;
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+  lastLedgerBaseFee: number;
+  ledgerCapacityUsage: number;
+}
+
 /**
  * FeesModule wraps all `/fee-estimate/*` routes of the StellarKit API
  * into fully-typed async methods.
@@ -135,5 +146,32 @@ export class FeesModule {
    */
   async getFeeTrends(): Promise<FeeTrendsData> {
     return this._get<FeeTrendsData>("/fee-estimate/trends");
+  }
+
+  /**
+   * Get fee percentiles from recent network activity.
+   *
+   * Returns fee distribution percentiles (p10, p50, p90, p95, p99) for the last ledger,
+   * along with base fee and capacity usage metrics. Use the `fresh` parameter to bypass cache.
+   *
+   * @param options.fresh - When `true`, bypasses the server-side cache and fetches live data.
+   * @returns Resolves to the fee percentiles data payload.
+   * @throws {StellarKitError} On non-2xx response.
+   * @example
+   * ```ts
+   * const fees = new FeesModule({ baseUrl: "http://localhost:3000" });
+   * const percentiles = await fees.getFeePercentiles();
+   * console.log(`Median fee: ${percentiles.p50} stroops`);
+   *
+   * // Bypass cache for real-time data
+   * const fresh = await fees.getFeePercentiles({ fresh: true });
+   * ```
+   */
+  async getFeePercentiles(options?: { fresh?: boolean }): Promise<FeePercentiles> {
+    const fresh = options?.fresh ?? false;
+    const params = new URLSearchParams();
+    if (fresh) params.set("fresh", "true");
+    const query = params.toString();
+    return this._get<FeePercentiles>(`/network/fee-percentiles${query ? `?${query}` : ""}`);
   }
 }

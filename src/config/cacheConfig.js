@@ -106,6 +106,12 @@ const cacheTTL = {
     process.env.CACHE_TTL_SEQUENCE_MS,
     20000
   ),
+
+  /** /soroban/contract/:id/storage — instance storage changes only on contract invocation */
+  contractStorage: msToSeconds(
+    process.env.CACHE_TTL_CONTRACT_STORAGE_MS,
+    15000
+  ),
 };
 
 module.exports = cacheTTL;

@@ -2,6 +2,8 @@
 
 This document explains the standard design guidelines and API response conventions used across StellarKit API. Following these conventions ensures consistency for contributors when implementing new endpoints, and predictability for consumers of the API.
 
+**See also**: [Response Format Guide](response-format.md) — A consumer-focused guide covering the same conventions with simpler examples.
+
 ---
 
 ## Table of Contents
@@ -421,3 +423,12 @@ data: {
 event: heartbeat
 data: {"timestamp":"2026-06-28T11:15:55.000Z"}
 ```
+
+---
+
+## Related Documentation
+
+- [Response Format Guide](response-format.md) — Consumer-focused guide to response conventions
+- [Caching Strategy](caching-strategy.md) — Per-endpoint cache TTLs and configuration
+- [Error Reference](error-reference.md) — All error types and resolution guidance
+- [Getting Started Guide](getting-started.md) — Setup and first API calls

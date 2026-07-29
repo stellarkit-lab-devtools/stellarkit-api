@@ -135,8 +135,9 @@ export class StellarKitClient {
    *
    * @returns Network status data
    */
-  async getNetworkStatus(): Promise<NetworkStatusResponse["data"]> {
-    return this._request("/network-status");
+  async getNetworkStatus(options?: { fresh?: boolean }): Promise<NetworkStatusResponse["data"]> {
+    const params = options?.fresh ? { fresh: true } : null;
+    return this._request("/network-status", { params });
   }
 
   /**

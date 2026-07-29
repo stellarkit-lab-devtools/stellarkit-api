@@ -129,6 +129,17 @@ export interface FeeTier {
   description?: string
 }
 
+/** Fee percentiles response data */
+export interface FeePercentiles {
+  p10: number
+  p50: number
+  p90: number
+  p95: number
+  p99: number
+  lastLedgerBaseFee: number
+  ledgerCapacityUsage: number
+}
+
 /** Ledger information */
 export interface LedgerInfo {
   sequence: number

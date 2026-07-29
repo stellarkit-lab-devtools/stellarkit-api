@@ -29,6 +29,19 @@
 - [ ] Add minimal query handling (if any).
 - [ ] Add tests (or extend existing test coverage) to validate response shape and error handling.
 
+## Issue #585: New Endpoint GET /account/:id/payment-summary
+- [x] Add GET /:id/payment-summary route handler to `src/routes/account.js`
+- [x] Add "payment-summary" to reserved words list to prevent routing conflicts
+- [x] Returns { success: true, data: { totalSent, totalReceived, volumeSent, volumeReceived, topCounterparty, topAsset } }
+- [x] All volume values are seven-decimal strings
+- [x] Returns zeroed values for accounts with no payment history rather than a 404
+
+## Issue #579: Add ?assets= filter to GET /account/:id/balances
+- [x] Add optional ?assets= query param parsing to /balances route
+- [x] "XLM" returns only native balance, "CODE:ISSUER" filters asset balances
+- [x] Invalid identifiers are ignored
+- [x] Returns empty array when no assets match
+
 ## Repo integrity
 - [ ] Resolve merge conflict markers in `src/index.js` (currently present as `<<<<<<< HEAD` / `=======` / `>>>>>>>`).
 - [ ] Ensure `npm test` passes.

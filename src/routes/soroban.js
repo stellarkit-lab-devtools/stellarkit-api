@@ -7,6 +7,7 @@ const { validateContractId, validateLimit } = require("../utils/validators");
 const { success } = require("../utils/response");
 const StellarKitError = require("../utils/StellarKitError");
 const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
 
 const EXECUTABLE_TYPES = {
   contractExecutableWasm: "wasm",
@@ -101,18 +102,57 @@ router.get("/contract/:id", async (req, res, next) => {
 
 /**
  * GET /soroban/contract/:id/storage
- * Returns the contract's instance-storage entries (key/value map embedded in
- * the ContractInstance ledger entry) — the one form of contract storage that
- * is enumerable without a full ledger indexer. See docs/soroban.md.
+ *
+ * Returns the contract's persistent instance-storage entries — the key/value
+ * map embedded inside the ContractInstance ledger entry. This is the only
+ * form of contract storage that is directly enumerable without a full ledger
+ * indexer. See docs/soroban.md for background on storage types.
+ *
+ * Path param:
+ *   - id: Soroban contract address (C... address, 56 chars)
+ *
+ * Query params:
+ *   - limit  (number, 1–50, default: 50) — Maximum number of entries to return.
+ *   - fresh  ("true") — Bypass the cache and force a live RPC fetch.
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       entries: [
+ *         {
+ *           key:               <decoded ScVal or raw base64 XDR>,
+ *           value:             <decoded ScVal or raw base64 XDR>,
+ *           lastModifiedLedger: <number>,
+ *           expiryLedger:      <number | null>
+ *         }
+ *       ],
+ *       total: <number>   // total entries in instance storage (before limit)
+ *     }
+ *   }
+ *
+ * Errors:
+ *   400 — invalid contract ID or invalid limit value
+ *   404 — contract not found on the network
+ *   500 — Soroban RPC not configured (SOROBAN_RPC_URL missing)
+ *
+ * @example
+ * GET /soroban/contract/CCJZ5DGASBWQXR5MPFCJXMBI333XE5U3FSJTNQU7RIKE3P5GN2K2WYD2/storage?limit=10
  */
 router.get("/contract/:id/storage", async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    // ── 1. Validate inputs ──────────────────────────────────────────────────
     validateContractId(id);
-    const limit = validateLimit(req.query.limit || 50, 200);
+
+    // limit: 1–50, default 50. validateLimit throws a structured 400 on failure.
+    const rawLimit = req.query.limit !== undefined ? req.query.limit : 50;
+    const limit = validateLimit(rawLimit, 50);
+
     const fresh = req.query.fresh === "true";
 
-    const CACHE_TTL = parseInt(process.env.CACHE_TTL_CONTRACT_STORAGE_MS, 10) / 1000 || 15;
+    // ── 2. Cache check ──────────────────────────────────────────────────────
     const cacheKey = `contract-storage:${id}:${limit}`;
 
     if (!fresh) {
@@ -123,28 +163,32 @@ router.get("/contract/:id/storage", async (req, res, next) => {
       }
     }
 
+    // ── 3. Fetch from Soroban RPC ───────────────────────────────────────────
+    // loadContractInstanceEntry throws a structured 404 (StellarKitError) when
+    // the contract does not exist, and a 500 when the RPC server is not configured.
     const entry = await loadContractInstanceEntry(id);
     const instance = entry.val.contractData().val().instance();
     const storageMap = instance.storage() || [];
 
+    // total reflects the full number of instance-storage entries before slicing
+    const total = storageMap.length;
+
+    // ── 4. Normalise entries ────────────────────────────────────────────────
     const entries = storageMap.slice(0, limit).map((mapEntry) => {
-      const key = decodeScVal(mapEntry.key());
-      const value = decodeScVal(mapEntry.val());
+      const { value: key } = decodeScVal(mapEntry.key());
+      const { value, type } = decodeScVal(mapEntry.val());
       return {
-        key: key.value,
-        value: value.value,
-        type: value.type,
+        key,
+        value,
+        lastModifiedLedger: entry.lastModifiedLedgerSeq,
+        expiryLedger: entry.liveUntilLedgerSeq ?? null,
       };
     });
 
-    const data = {
-      contractId: id,
-      entries,
-      lastModifiedLedger: entry.lastModifiedLedgerSeq,
-      expiryLedger: entry.liveUntilLedgerSeq ?? null,
-    };
+    // ── 5. Cache and respond ────────────────────────────────────────────────
+    const data = { entries, total };
 
-    cacheService.set(cacheKey, data, CACHE_TTL);
+    cacheService.set(cacheKey, data, cacheTTL.contractStorage);
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {

@@ -94,6 +94,12 @@ describe("StellarKitClient", () => {
       expect(result.network).toBe("testnet");
       expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/network-status`, expect.any(Object));
     });
+
+    it("adds fresh=true when requested", async () => {
+      mockFetch(200, { success: true, data: { network: "testnet" } });
+      await client.getNetworkStatus({ fresh: true });
+      expect(global.fetch).toHaveBeenCalledWith(`${BASE_URL}/network-status?fresh=true`, expect.any(Object));
+    });
   });
 
   describe("getFeeEstimate", () => {

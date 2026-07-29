@@ -15,7 +15,7 @@ const HORIZON_ERROR_MESSAGES = {
   op_no_trust: "The destination account does not have a trustline for this asset. The destination must create a trustline before receiving the asset.",
   op_line_full: "The destination trustline is full. The destination account must raise its trustline limit or reduce the payment amount.",
   op_underfunded: "The source account does not have enough funds. Add funds or reduce the operation amount.",
-  op_low_reserve: "The operation would leave the account below the minimum XLM reserve. Keep more XLM in the account or remove unused subentries.",
+  op_low_reserve: "Account does not have enough XLM to cover the minimum reserve requirement.",
   op_bad_auth: "The operation is missing a required authorization or has an invalid signature.",
   op_no_account: "The account does not exist on the network.",
   op_not_authorized: "The source account is not authorized to perform this operation on the given asset.",

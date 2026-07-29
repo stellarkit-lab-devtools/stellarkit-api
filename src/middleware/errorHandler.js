@@ -110,12 +110,59 @@ function buildTransactionSubmissionFailedError(horizonError) {
 }
 
 function errorHandler(err, req, res, next) {
+  if (isConnectionError(err)) {
+    const ske = new StellarKitError(
+      "Unable to connect to the Stellar Horizon node.",
+      503,
+      "HorizonUnavailable",
+      null,
+      "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status."
+    );
+    logError(503, req, ske.message);
+    return res.status(503).json({
+      success: false,
+      error: ske.toJSON(),
+    });
+  }
+
+  if (err?.isOfferNotFound || isOfferNotFoundError(err)) {
+    const offerId = err?.offerId || "unknown";
+    const message = `Offer '${offerId}' was not found on the Stellar ${NETWORK} network.`;
+    const ske = new StellarKitError(
+      message,
+      404,
+      "OfferNotFound",
+      null,
+      "The offer may have already been filled, cancelled, or the offer ID may be incorrect."
+    );
+    logError(404, req, ske.message);
+    return res.status(404).json({
+      success: false,
+      error: ske.toJSON(),
+    });
+  }
+
   // Horizon errors returned from horizon-client / Stellar SDK
   if (err && err.response && err.response.data) {
     const horizonError = err.response.data;
     const extras = horizonError.extras !== undefined ? horizonError.extras : null;
 
     const resultCode = pickMostSpecificResultCode(horizonError?.extras?.result_codes);
+
+    // Handle op_low_reserve as a specific InsufficientReserve error
+    if (resultCode === "op_low_reserve") {
+      const status = mapHorizonErrorToStatus(resultCode) ?? 422;
+      const body = {
+        success: false,
+        error: {
+          type: "InsufficientReserve",
+          message: "Account does not have enough XLM to cover the minimum reserve requirement.",
+          suggestion: "Fund the account with additional XLM. Each account requires a base reserve of 1 XLM plus 0.5 XLM per subentry.",
+        },
+      };
+      logError(status, req, body.error.message);
+      return res.status(status).json(body);
+    }
 
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const status = mappedStatus ?? err.response.status ?? 400;
