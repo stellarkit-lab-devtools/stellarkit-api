@@ -2084,6 +2084,88 @@ router.get(
 );
 
 /**
+ * GET /account/:id/can-send/:assetCode/:assetIssuer
+ */
+router.get(
+  "/:id/can-send/:assetCode/:assetIssuer",
+  async (req, res, next) => {
+    try {
+      const { id, assetCode, assetIssuer } = req.params;
+      validateAccountId(id);
+      validateAssetCode(assetCode);
+
+      const normalizedAssetCode = assetCode.toUpperCase();
+      const normalizedAssetIssuer =
+        normalizedAssetCode === "XLM" ? assetIssuer.toLowerCase() : assetIssuer;
+
+      if (normalizedAssetCode === "XLM") {
+        if (normalizedAssetIssuer !== "native") {
+          const err = new Error(
+            'Invalid asset issuer for XLM. Use "native" as the issuer.',
+          );
+          err.isValidation = true;
+          err.status = 400;
+          throw err;
+        }
+      } else {
+        validateAccountId(assetIssuer);
+      }
+
+      const account = await server.loadAccount(id);
+
+      if (normalizedAssetCode === "XLM") {
+        return success(res, {
+          canSend: true,
+          reason: null,
+        });
+      }
+
+      const trustline = (account.balances || []).find(
+        (b) =>
+          isNonNativeAsset(b) &&
+          b.asset_code === normalizedAssetCode &&
+          b.asset_issuer === assetIssuer,
+      );
+
+      if (!trustline) {
+        return success(res, {
+          canSend: false,
+          reason: "no_trustline",
+        });
+      }
+
+      const isAuthorized = trustline.is_authorized === true;
+      const isAuthorizedToMaintainLiabilities =
+        trustline.is_authorized_to_maintain_liabilities === true;
+
+      if (!isAuthorized && !isAuthorizedToMaintainLiabilities) {
+        return success(res, {
+          canSend: false,
+          reason: "not_authorized",
+        });
+      }
+
+      const balance = parseFloat(trustline.balance || "0");
+      const sellingLiabilities = parseFloat(trustline.selling_liabilities || "0");
+
+      if (balance - sellingLiabilities <= 0) {
+        return success(res, {
+          canSend: false,
+          reason: "insufficient_balance",
+        });
+      }
+
+      return success(res, {
+        canSend: true,
+        reason: null,
+      });
+    } catch (err) {
+      handleAccountNotFound(err, next, req.params.id);
+    }
+  },
+);
+
+/**
  * GET /account/:id/volume?days=30
  */
 router.get("/:id/volume", async (req, res, next) => {

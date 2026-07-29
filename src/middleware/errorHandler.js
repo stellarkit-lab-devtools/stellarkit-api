@@ -133,34 +133,6 @@ function buildTransactionSubmissionFailedError(horizonError) {
   };
 }
 
-/**
- * Returns true when an error indicates a network connectivity failure
- * (the Horizon node could not be reached at all).
- *
- * @param {Error} err
- * @returns {boolean}
- */
-function isConnectionError(err) {
-  if (!err) return false;
-  const code = err.code || (err.cause && err.cause.code);
-  if (code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ECONNRESET") return true;
-  const msg = (err.message || "").toLowerCase();
-  return msg.includes("econnrefused") || msg.includes("enotfound");
-}
-
-/**
- * Returns true when a Horizon error response indicates an offer was not found.
- *
- * @param {Error} err
- * @returns {boolean}
- */
-function isOfferNotFoundError(err) {
-  if (!err || !err.response || !err.response.data) return false;
-  const data = err.response.data;
-  const title = (data.title || "").toLowerCase();
-  return title.includes("offer not found") || (err.response.status === 404 && title.includes("offer"));
-}
-
 function errorHandler(err, req, res, next) {
   if (isConnectionError(err)) {
     const ske = new StellarKitError(
@@ -410,32 +382,6 @@ function errorHandler(err, req, res, next) {
         type: "HorizonTimeout",
         message: HORIZON_TIMEOUT_MESSAGE,
         suggestion: HORIZON_TIMEOUT_SUGGESTION,
-      },
-    });
-  }
-
-  // Transaction not found errors
-  if (err.isTransactionNotFound) {
-    logError(404, req, err.message);
-    return res.status(404).json({
-      success: false,
-      error: {
-        type: "NotFound",
-        message: err.message,
-        suggestion: "Verify the transaction hash is correct.",
-      },
-    });
-  }
-
-  // Offer not found errors
-  if (err.isOfferNotFound) {
-    logError(404, req, err.message);
-    return res.status(404).json({
-      success: false,
-      error: {
-        type: "OfferNotFound",
-        message: err.message,
-        suggestion: err.suggestion,
       },
     });
   }
