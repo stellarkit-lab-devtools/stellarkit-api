@@ -12,6 +12,7 @@ const {
   HORIZON_TIMEOUT_SUGGESTION,
   isHorizonTimeoutError,
 } = require("../utils/errors");
+const { NETWORK } = require("../config/stellar");
 
 /**
  * Logs 4xx and 5xx responses using the structured logger.
@@ -107,6 +108,20 @@ function buildTransactionSubmissionFailedError(horizonError) {
     resultCodes,
     ...(resultCode ? { code: resultCode } : {}),
   };
+}
+
+function isConnectionError(err) {
+  if (!err) return false;
+  const code = err.code || (err.cause && err.cause.code);
+  if (["ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "ERR_NETWORK"].includes(code)) return true;
+  const msg = (err.message || "").toLowerCase();
+  return msg.includes("econnrefused") || msg.includes("econnreset") || msg.includes("enotfound");
+}
+
+function isOfferNotFoundError(err) {
+  if (!err || !err.response) return false;
+  const isOfferEndpoint = /\/offers?\b/i.test(err.response.config?.url || "");
+  return err.response.status === 404 && isOfferEndpoint;
 }
 
 function errorHandler(err, req, res, next) {

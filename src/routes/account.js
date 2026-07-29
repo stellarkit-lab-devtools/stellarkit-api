@@ -13,9 +13,8 @@ const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 
 const { buildAccountAgeResponse } = require("../utils/accountAge");
-const { validateAccountId, validateLimit } = require("../utils/validators");
+const { validateLimit } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
-const { validateEffectType } = require("../utils/effectTypes");
 
 const axios = require("axios");
 const { Asset } = require("@stellar/stellar-sdk");
@@ -2002,6 +2001,103 @@ router.get(
         availableCapacity,
         currentBalance,
         limit,
+      });
+    } catch (err) {
+      handleAccountNotFound(err, next, req.params.id);
+    }
+  },
+);
+
+/**
+ * GET /account/:id/can-send/:assetCode/:assetIssuer
+ *
+ * Checks whether an account can send a specific asset by evaluating:
+ *  1. Trustline existence
+ *  2. Authorization status
+ *  3. Sufficient balance above selling liabilities
+ *
+ * Returns:
+ *   { success: true, data: { canSend: boolean, reason: string|null } }
+ *
+ * reason is null when canSend is true.
+ * Possible reasons: "no_trustline", "insufficient_balance", "not_authorized"
+ */
+router.get(
+  "/:id/can-send/:assetCode/:assetIssuer",
+  async (req, res, next) => {
+    try {
+      const { id, assetCode, assetIssuer } = req.params;
+      validateAccountId(id);
+      validateAssetCode(assetCode);
+
+      const normalizedAssetCode = assetCode.toUpperCase();
+
+      if (normalizedAssetCode === "XLM") {
+        if (assetIssuer.toLowerCase() !== "native") {
+          const err = new Error(
+            'Invalid asset issuer for XLM. Use "native" as the issuer.',
+          );
+          err.isValidation = true;
+          err.status = 400;
+          throw err;
+        }
+
+        const account = await server.loadAccount(id);
+        const xlmBalance = (account.balances || []).find(
+          (b) => b.asset_type === "native",
+        );
+        const balance = parseFloat(xlmBalance?.balance || "0");
+        const sellingLiabilities = parseFloat(
+          xlmBalance?.selling_liabilities || "0",
+        );
+        const canSend = balance > sellingLiabilities;
+
+        return success(res, {
+          canSend,
+          reason: canSend
+            ? null
+            : "insufficient_balance",
+        });
+      }
+
+      validateAccountId(assetIssuer);
+
+      const account = await server.loadAccount(id);
+
+      const trustline = (account.balances || []).find(
+        (b) =>
+          b.asset_type !== "native" &&
+          b.asset_code === normalizedAssetCode &&
+          b.asset_issuer === assetIssuer,
+      );
+
+      if (!trustline) {
+        return success(res, {
+          canSend: false,
+          reason: "no_trustline",
+        });
+      }
+
+      const isAuthorized =
+        trustline.is_authorized === true ||
+        trustline.is_authorized_to_maintain_liabilities === true;
+
+      if (!isAuthorized) {
+        return success(res, {
+          canSend: false,
+          reason: "not_authorized",
+        });
+      }
+
+      const balance = parseFloat(trustline.balance || "0");
+      const sellingLiabilities = parseFloat(
+        trustline.selling_liabilities || "0",
+      );
+      const canSend = balance > sellingLiabilities;
+
+      return success(res, {
+        canSend,
+        reason: canSend ? null : "insufficient_balance",
       });
     } catch (err) {
       handleAccountNotFound(err, next, req.params.id);
