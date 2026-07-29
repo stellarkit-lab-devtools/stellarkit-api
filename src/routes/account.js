@@ -3373,4 +3373,271 @@ router.get("/:id/trustline-health", async (req, res, next) => {
 
 
 
+
+/**
+ * GET /account/:id/operations
+ *
+ * Returns a normalised paginated list of operations for an account.
+ * Each entry includes operationId, type, createdAt, transactionHash, and
+ * type-specific fields (amount, asset, sender, receiver, etc.).
+ *
+ * Query params:
+ *   - limit  (int, default: 10, max: 200) — number of records per page
+ *   - cursor (string, optional) — paging token for pagination
+ *   - type   (string, optional) — filter by operation type
+ *     (e.g. payment, create_account, manage_offer, set_options, etc.)
+ *
+ * Returns { success: true, data: { operations: [...], total, limit, cursor } }.
+ * Returns 404 if the account does not exist.
+ */
+router.get("/:id/operations", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // First verify the account exists (404 if not)
+    await server.loadAccount(id);
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const opType = req.query.type || null;
+
+    let query = server.operations().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const rawRecords = response.records || [];
+
+    const operations = rawRecords
+      .filter((op) => {
+        // Apply type filter if specified (case-insensitive)
+        if (opType) {
+          return op.type && op.type.toLowerCase() === opType.toLowerCase();
+        }
+        return true;
+      })
+      .map((op) => {
+        const base = {
+          operationId: op.id,
+          type: op.type,
+          createdAt: toISOTimestamp(op.created_at),
+          transactionHash: op.transaction_hash,
+        };
+
+        // Add type-specific fields
+        switch (op.type) {
+          case "payment":
+            return {
+              ...base,
+              amount: op.amount,
+              asset: normalizeAsset(
+                op.asset_code || "XLM",
+                op.asset_issuer || null,
+                op.asset_type || "native",
+              ),
+              sender: op.from,
+              receiver: op.to,
+            };
+          case "create_account":
+            return {
+              ...base,
+              startingBalance: op.starting_balance,
+              funder: op.funder,
+              account: op.account,
+            };
+          case "manage_sell_offer":
+          case "manage_buy_offer":
+            return {
+              ...base,
+              offerId: op.offer_id,
+              amount: op.amount,
+              price: op.price,
+              buying: normalizeAsset(
+                op.buying_asset_code || "XLM",
+                op.buying_asset_issuer || null,
+                op.buying_asset_type || "native",
+              ),
+              selling: normalizeAsset(
+                op.selling_asset_code || "XLM",
+                op.selling_asset_issuer || null,
+                op.selling_asset_type || "native",
+              ),
+            };
+          case "create_passive_sell_offer":
+            return {
+              ...base,
+              offerId: op.offer_id,
+              amount: op.amount,
+              price: op.price,
+              buying: normalizeAsset(
+                op.buying_asset_code || "XLM",
+                op.buying_asset_issuer || null,
+                op.buying_asset_type || "native",
+              ),
+              selling: normalizeAsset(
+                op.selling_asset_code || "XLM",
+                op.selling_asset_issuer || null,
+                op.selling_asset_type || "native",
+              ),
+            };
+          case "set_options":
+            return {
+              ...base,
+              homeDomain: op.home_domain || null,
+              signerKey: op.signer_key || null,
+              signerWeight: op.signer_weight ?? null,
+              masterKeyWeight: op.master_key_weight ?? null,
+              lowThreshold: op.low_threshold ?? null,
+              medThreshold: op.med_threshold ?? null,
+              highThreshold: op.high_threshold ?? null,
+              setFlags: op.set_flags || [],
+              clearFlags: op.clear_flags || [],
+            };
+          case "change_trust":
+            return {
+              ...base,
+              asset: normalizeAsset(
+                op.asset_code || "XLM",
+                op.asset_issuer || null,
+                op.asset_type || "native",
+              ),
+              limit: op.limit,
+              trustee: op.trustee || op.source_account,
+              trustor: op.trustor || id,
+            };
+          case "allow_trust":
+            return {
+              ...base,
+              assetCode: op.asset_code,
+              assetIssuer: op.asset_issuer || op.trustor,
+              trustor: op.trustor,
+              authorize: op.authorize,
+            };
+          case "account_merge":
+            return {
+              ...base,
+              destination: op.into,
+              source: op.account || id,
+            };
+          case "inflation":
+            return { ...base };
+          case "manage_data":
+            return {
+              ...base,
+              name: op.name,
+              value: op.value || null,
+            };
+          case "bump_sequence":
+            return {
+              ...base,
+              bumpTo: op.bump_to,
+            };
+          case "create_claimable_balance":
+            return {
+              ...base,
+              balanceId: op.balance_id,
+              asset: normalizeAsset(
+                op.asset.split(":")[0] || op.asset || "XLM",
+                op.asset.includes(":") ? op.asset.split(":")[1] : null,
+                op.asset === "native" ? "native" : "credit_alphanum4",
+              ),
+              amount: op.amount,
+              claimants: op.claimants || [],
+            };
+          case "claim_claimable_balance":
+            return {
+              ...base,
+              balanceId: op.balance_id,
+              claimant: op.claimant || null,
+            };
+          case "begin_sponsoring_future_reserves":
+            return {
+              ...base,
+              sponsoredId: op.sponsored_id,
+            };
+          case "end_sponsoring_future_reserves":
+            return {
+              ...base,
+              source: op.begin_sponsor || null,
+            };
+          case "revoke_sponsorship":
+            return {
+              ...base,
+              accountId: op.account_id || null,
+              claimableBalanceId: op.claimable_balance_id || null,
+              dataName: op.data_name || null,
+              offerId: op.offer_id || null,
+              trustlineAsset: op.trustline_asset || null,
+              signerKey: op.signer_key || null,
+            };
+          case "clawback":
+            return {
+              ...base,
+              asset: normalizeAsset(
+                op.asset_code || "XLM",
+                op.asset_issuer || null,
+                op.asset_type || "native",
+              ),
+              amount: op.amount,
+              from: op.from,
+            };
+          case "clawback_claimable_balance":
+            return {
+              ...base,
+              balanceId: op.balance_id,
+            };
+          case "set_trust_line_flags":
+            return {
+              ...base,
+              asset: normalizeAsset(
+                op.asset_code || "XLM",
+                op.asset_issuer || null,
+                op.asset_type || "native",
+              ),
+              trustor: op.trustor,
+              setFlags: op.set_flags || [],
+              clearFlags: op.clear_flags || [],
+            };
+          case "liquidity_pool_deposit":
+          case "liquidity_pool_withdraw":
+            return {
+              ...base,
+              liquidityPoolId: op.liquidity_pool_id,
+              reservesReceived: op.reserves_received || null,
+              sharesReceived: op.shares_received || null,
+              reservesMin: op.reserves_min || null,
+              shares: op.shares || null,
+            };
+          case "invoke_host_function":
+            return {
+              ...base,
+              function: op.function || "unknown",
+              contractId: op.contract_id || null,
+              parameters: op.parameters || [],
+            };
+          case "extend_footprint_ttl":
+          case "restore_footprint":
+            return {
+              ...base,
+              contractId: op.contract_id || null,
+            };
+          default:
+            return base;
+        }
+      });
+
+    const lastRecord = rawRecords[rawRecords.length - 1];
+    const nextCursor = lastRecord ? lastRecord.paging_token : null;
+
+    return success(res, {
+      operations,
+      total: operations.length,
+      limit,
+      cursor: operations.length ? nextCursor : null,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+
 module.exports = router;
