@@ -1,47 +1,50 @@
 # StellarKit API 🚀
 
+A lightweight REST API for Stellar that turns Horizon blockchain data into easy-to-use developer endpoints. It helps applications fetch account balances, transaction history, fee estimates, and network status without needing deep Stellar protocol knowledge.
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen" alt="Node.js"></a>
+  <a href="https://stellar.org"><img src="https://img.shields.io/badge/Stellar-SDK-blue" alt="Stellar Network"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
+</p>
+
 <p align="center">
   <b>English 🇺🇸</b> | <a href="README.fr.md">Français 🇫🇷</a> | <a href="README.es.md">Español 🇪🇸</a>
 </p>
 
-> StellarKit API is a developer utility service that exposes the Stellar Horizon blockchain through a simple REST interface. It is designed for application developers who need fast, typed access to account details, fee estimates, transaction history, network health, and asset metadata.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
-[![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ---
 
 ## What is StellarKit API?
 
-StellarKit API is a wrapper around the Stellar Horizon API, built with Express.js and the official `@stellar/stellar-sdk` library. It normalizes Horizon responses, provides a clean REST structure, and adds convenience endpoints for the most common Stellar developer workflows.
+StellarKit API is a lightweight, production-ready Express service for exploring Stellar network data through a clean REST interface. It combines Horizon data with Soroban RPC support, normalizes common responses, and exposes practical endpoints for account analysis, fee estimation, asset intelligence, DEX and liquidity-pool data, claimable balances, and live streaming.
 
-This project is ideal for:
+This project is especially useful for teams and developers who need:
 
-- Web and mobile developers building on Stellar
-- Server-side services consuming Stellar account and transaction data
-- Wallet providers that need reliable fee estimation and account summaries
-- Applications requiring typed API responses via bundled TypeScript definitions
+- Web and mobile apps that need Stellar account, transaction, and network data
+- Backend services aggregating balances, reserves, activity, and risk signals
+- Wallets and custodians that need fee estimates, multisig insights, and account health checks
+- Developers building with TypeScript who want typed responses and a predictable API surface
 
----
+### Highlights
 
-## Key Features
-
-- 🌐 **Network status and ledger health**
-- 💰 **Dynamic fee estimation** for optimal transaction pricing
-- 👥 **Account detail aggregation** including balances, signers, and thresholds
-- 📜 **Paginated transaction history** and operation history per account
-- 🪙 **Asset metadata search** and issuer lookup
-- 🚫 **Built-in security middleware** with rate limiting, helmet headers, CORS, and HPP
-- 🧪 **Test coverage** using Jest and Supertest
-- 📦 **Bundled TypeScript types** for safe integration in TypeScript projects
+- 🌐 **Network and ledger health** for testnet and mainnet
+- 💸 **Dynamic fee estimation** with surge and trend analysis
+- 👤 **Comprehensive account summaries** including balances, reserves, signers, and risk signals
+- 📜 **Transaction and operation history** with batch transaction status checks
+- 🪙 **Asset metadata, holder analytics, supply views, and issuer verification**
+- 📊 **DEX, liquidity pool, and arbitrage insights**
+- 🔐 **Built-in security and resilience** with rate limiting, Helmet, CORS, HPP, API key support, and caching
+- ⚡ **Live streaming** through WebSocket and Server-Sent Events for ledgers, transactions, and payments
+- 🧱 **Soroban contract inspection** for deployed contract metadata and storage
+- 🧪 **Jest/Supertest coverage** and bundled TypeScript definitions
 
 ---
 
 ## Documentation
 
-- [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
+- [SDK Migration Guide](docs/sdk-migration.md) — moving from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
@@ -197,7 +200,7 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 ---
 
-## Documentation
+## Additional Documentation
 
 - [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id` and `/soroban/contract/:id/storage`.
 
