@@ -47,11 +47,11 @@ function resolveLimit() {
   return { kb: DEFAULT_MAX_KB, expressLimit: `${DEFAULT_MAX_KB}kb` };
 }
 
-const requestBodySizeLimit = normalizeMaxBodySize(MAX_BODY_SIZE);
+const { kb: MAX_KB, expressLimit: EXPRESS_LIMIT } = resolveLimit();
 
 // Capture raw body for webhook signature verification
 const bodySizeLimit = express.json({
-  limit: requestBodySizeLimit,
+  limit: EXPRESS_LIMIT,
   verify: (req, res, buf, encoding) => {
     req.rawBody = buf.toString(encoding || 'utf8');
   },
