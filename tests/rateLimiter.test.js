@@ -160,7 +160,8 @@ describe("Endpoint rate limiting", () => {
   }, 30000);
 
   it("keeps non-expensive endpoints on the existing global limit", async () => {
-    const { app } = loadFreshApp();
+    const { app, server } = loadFreshApp();
+    jest.spyOn(server, "serverInfo").mockResolvedValue({ horizon_version: "2.33.0" });
 
     for (let i = 0; i < 21; i += 1) {
       const res = await request(app).get("/health");

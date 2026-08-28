@@ -7,6 +7,9 @@ const { server } = require("../config/stellar");
 const { StrKey } = require("@stellar/stellar-sdk");
 const { formatTransaction } = require("../utils/formatTransaction");
 const { normalizeAsset } = require("../utils/asset");
+const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
+const webhookRegistry = require("../services/webhookRegistry");
+const webhookDelivery = require("../services/webhookDelivery");
 
 /**
  * Error codes for SSE stream errors
@@ -286,6 +289,24 @@ router.get("/payments/:id", async (req, res, next) => {
 
           res.write(`event: payment\n`);
           res.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+          // Trigger webhook delivery for payment.received events
+          const webhooks = webhookRegistry.getWebhooks(id, "payment.received");
+          if (webhooks.length > 0) {
+            const webhookPayload = {
+              event: "payment.received",
+              accountId: id,
+              payment: payload,
+              timestamp: new Date().toISOString(),
+            };
+
+            webhookDelivery.triggerWebhooks(webhooks, webhookPayload).catch((err) => {
+              logger.error(
+                { accountId: id, error: err.message },
+                "Error triggering webhook delivery"
+              );
+            });
+          }
         },
         onerror: () => {
           if (!res.writableEnded && !res.destroyed) res.end();
@@ -341,7 +362,7 @@ router.get("/ledgers", async (req, res, next) => {
       onmessage: (ledger) => {
         if (res.writableEnded || res.destroyed) return;
         res.write(`data: ${JSON.stringify({
-          sequence: ledger.sequence,
+          sequence: formatLedgerSequence(ledger.sequence),
           closedAt: ledger.closed_at,
           baseFee: ledger.base_fee_in_stroops || ledger.base_fee,
           transactionCount: ledger.successful_transaction_count,

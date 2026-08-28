@@ -30,9 +30,9 @@ describe("cacheConfig — default values", () => {
     delete process.env.CACHE_TTL_POOL_TRADES_MS;
   });
 
-  it("networkStatus defaults to 5 seconds", () => {
+  it("networkStatus defaults to 10 seconds", () => {
     const cfg = loadCacheConfig();
-    expect(cfg.networkStatus).toBe(5);
+    expect(cfg.networkStatus).toBe(10);
   });
 
   it("feeEstimate defaults to 5 seconds", () => {
@@ -180,19 +180,19 @@ describe("cacheConfig — invalid / edge-case values", () => {
   it("falls back to default when env var is NaN", () => {
     process.env.CACHE_TTL_NETWORK_STATUS_MS = "not-a-number";
     const cfg = loadCacheConfig();
-    expect(cfg.networkStatus).toBe(5);
+    expect(cfg.networkStatus).toBe(10);
   });
 
   it("falls back to default when env var is zero", () => {
     process.env.CACHE_TTL_NETWORK_STATUS_MS = "0";
     const cfg = loadCacheConfig();
-    expect(cfg.networkStatus).toBe(5);
+    expect(cfg.networkStatus).toBe(10);
   });
 
   it("falls back to default when env var is negative", () => {
     process.env.CACHE_TTL_NETWORK_STATUS_MS = "-1000";
     const cfg = loadCacheConfig();
-    expect(cfg.networkStatus).toBe(5);
+    expect(cfg.networkStatus).toBe(10);
   });
 
   it("returns correct seconds for a large valid value", () => {

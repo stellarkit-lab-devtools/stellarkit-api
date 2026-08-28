@@ -2,11 +2,113 @@ const express = require("express");
 const router = express.Router();
 const { server, horizonUrl } = require("../config/stellar");
 const { success } = require("../utils/response");
+const StellarKitError = require("../utils/StellarKitError");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
+const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
+const { startHorizonTimer, stopHorizonTimer } = require("../middleware/requestLogger");
+
+/**
+ * Wraps a Horizon-backed async call with timing so the request logger can
+ * include horizonResponseTimeMs in the structured log entry.
+ *
+ * @template T
+ * @param {import('express').Request} req
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+async function withHorizonTiming(req, fn) {
+  startHorizonTimer(req);
+  try {
+    return await fn();
+  } finally {
+    stopHorizonTimer(req);
+  }
+}
 
 function isFreshRequest(query) {
   return query.fresh === true || query.fresh === "true";
+}
+
+const { parseStellarAmount } = require("../utils/parseStellarAmount");
+
+const FEE_PERCENTILES_CACHE_TTL = 5;
+const PERCENTILE_LEVELS = [10, 20, 30, 50, 70, 90, 95, 99];
+const TX_FETCH_LIMIT = 100;
+const PROTOCOL_VERSION_CACHE_TTL = 60;
+
+/**
+ * GET /network/protocol-version
+ * Returns protocol and Horizon metadata for the configured network.
+ */
+router.get("/protocol-version", async (req, res, next) => {
+  try {
+    const cacheKey = "network-protocol-version";
+    const cached = cacheService.get(cacheKey);
+
+    if (cached !== undefined) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    const response = await withHorizonTiming(req, () => fetch(horizonUrl));
+    if (!response.ok) {
+      throw new StellarKitError(
+        "Unable to fetch network metadata from Stellar Horizon.",
+        503,
+        "HorizonUnavailable",
+        null,
+        "Verify the configured Horizon node is reachable and try again.",
+      );
+    }
+
+    const metadata = await response.json();
+    const data = {
+      protocolVersion: metadata.current_protocol_version,
+      networkPassphrase: metadata.network_passphrase,
+      horizonVersion: metadata.horizon_version,
+    };
+
+    if (Object.values(data).some((value) => value === undefined || value === null)) {
+      throw new StellarKitError(
+        "Stellar Horizon returned incomplete network metadata.",
+        502,
+        "InvalidHorizonResponse",
+      );
+    }
+
+    cacheService.set(cacheKey, data, PROTOCOL_VERSION_CACHE_TTL);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+function computePercentile(sortedValues, percentile) {
+  if (sortedValues.length === 0) return 0;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const index = (percentile / 100) * (sortedValues.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedValues[lower];
+  const weight = index - lower;
+  return Math.round(
+    sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight,
+  );
+}
+
+function buildFeeObject(stroops) {
+  return {
+    stroops,
+    xlm: parseStellarAmount(stroops),
+  };
+}
+
+function parseStroops(value) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 
@@ -28,7 +130,7 @@ router.get("/validators", async (req, res, next) => {
     }
 
     const url = `${horizonUrl}/accounts?order=desc&limit=200`;
-    const response = await fetch(url);
+    const response = await withHorizonTiming(req, () => fetch(url));
 
     if (!response.ok) {
       const horizonErr = new Error("Unable to fetch validator data from Horizon. Please try again.");
@@ -106,12 +208,12 @@ router.get("/base-fee", async (req, res, next) => {
       }
     }
 
-    const feeStats = await server.feeStats();
-    const ledgerResponse = await server.ledgers().order("desc").limit(1).call();
+    const feeStats = await withHorizonTiming(req, () => server.feeStats());
+    const ledgerResponse = await withHorizonTiming(req, () => server.ledgers().order("desc").limit(1).call());
     const latestLedger = (ledgerResponse.records || [])[0] || {};
 
     const baseFeeStroops = parseInt(feeStats.last_ledger_base_fee, 10);
-    const baseFeeXLM = (baseFeeStroops / 1e7).toFixed(7);
+    const baseFeeXLM = parseStellarAmount(baseFeeStroops);
     const isSurge =
       parseFloat(feeStats.ledger_capacity_usage) > 0.5 ||
       baseFeeStroops > parseInt(feeStats.fee_charged.min, 10);
@@ -120,7 +222,7 @@ router.get("/base-fee", async (req, res, next) => {
       baseFeeStroops,
       baseFeeXLM,
       isSurge,
-      ledgerSequence: latestLedger.sequence ? parseInt(latestLedger.sequence, 10) : null,
+      ledgerSequence: formatLedgerSequence(latestLedger.sequence),
       ledgerClosedAt: latestLedger.closed_at || null,
       note: "Base fee is reported in stroops and normalized XLM units.",
     };
@@ -136,7 +238,15 @@ router.get("/base-fee", async (req, res, next) => {
 
 /**
  * GET /network/fee-percentiles
- * Returns fee distribution percentiles from recent network activity.
+ * Returns fee distribution percentiles at multiple levels, the current
+ * ledger's accepted fee range, and the latest ledger sequence.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
+ * @example
+ * GET /network/fee-percentiles
+ * GET /network/fee-percentiles?fresh=true
  */
 router.get("/fee-percentiles", async (req, res, next) => {
   try {
@@ -151,19 +261,46 @@ router.get("/fee-percentiles", async (req, res, next) => {
       }
     }
 
-    const feeStats = await server.feeStats();
+    const feeStats = await withHorizonTiming(req, () => server.feeStats());
+    const ledgerResponse = await withHorizonTiming(req, () => server.ledgers().order("desc").limit(1).call());
+    const latestLedger = (ledgerResponse.records || [])[0] || {};
+
+    const feeCharged = feeStats.fee_charged || {};
+    const feeAccepted = feeStats.fee_accepted || feeCharged;
+
+    const minFeeStroops = parseStroops(feeAccepted.min || feeCharged.min);
+    const maxFeeStroops = parseStroops(feeAccepted.max || feeCharged.max);
+    const baseFeeStroops = parseStroops(feeStats.last_ledger_base_fee);
+
+    const txResponse = await withHorizonTiming(req, () =>
+      server.transactions().order("desc").limit(TX_FETCH_LIMIT).call()
+    );
+    const txRecords = txResponse.records || [];
+    const fees = txRecords
+      .map((tx) => parseInt(tx.max_fee, 10))
+      .filter((f) => f > 0);
+    fees.sort((a, b) => a - b);
+
+    const percentiles = {};
+    for (const p of PERCENTILE_LEVELS) {
+      const sourceValue = feeCharged[`p${p}`];
+      if (sourceValue !== undefined && sourceValue !== null) {
+        percentiles[`p${p}`] = buildFeeObject(parseStroops(sourceValue));
+      } else {
+        percentiles[`p${p}`] = buildFeeObject(computePercentile(fees, p));
+      }
+    }
 
     const data = {
-      p10: parseInt(feeStats.fee_charged.p10 || feeStats.fee_charged.min, 10),
-      p50: parseInt(feeStats.fee_charged.p50 || feeStats.fee_charged.mode, 10),
-      p90: parseInt(feeStats.fee_charged.p90 || feeStats.fee_charged.p95, 10),
-      p95: parseInt(feeStats.fee_charged.p95, 10),
-      p99: parseInt(feeStats.fee_charged.p99 || feeStats.fee_charged.max, 10),
-      lastLedgerBaseFee: parseInt(feeStats.last_ledger_base_fee, 10),
-      ledgerCapacityUsage: parseFloat(feeStats.ledger_capacity_usage),
+      percentiles,
+      baseFee: buildFeeObject(baseFeeStroops),
+      minFee: buildFeeObject(minFeeStroops),
+      maxFee: buildFeeObject(maxFeeStroops),
+      ledgerSequence: formatLedgerSequence(latestLedger.sequence),
+      timestamp: new Date().toISOTimestamp(),
     };
 
-    cacheService.set(cacheKey, data, BASE_FEE_CACHE_TTL);
+    cacheService.set(cacheKey, data, FEE_PERCENTILES_CACHE_TTL);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

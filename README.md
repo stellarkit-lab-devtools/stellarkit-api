@@ -44,10 +44,14 @@ This project is ideal for:
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [Production Deployment Guide](docs/deployment.md) - Deploy to production with Node.js, Docker, Railway, Render, or Fly.io
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
 - [Response Format Guide](docs/response-format.md) - Standard response envelopes, pagination, and data formats
 - [Streaming Guide](docs/streaming.md) - SSE and WebSocket streaming endpoints, event payloads, reconnection, and clean close handling
+- [Webhooks Guide](docs/webhooks.md) - Register webhooks, available events, payload shapes, signature verification, retries, and unregistration
+- [Batch Endpoints Guide](docs/batch-endpoints.md) - Batch trust-status, freeze-status, and transaction status APIs, limits, and when to use batch vs individual
 - [Caching Strategy](docs/caching-strategy.md) - Per-endpoint cache TTLs and configuration
+- [Logging Guide](docs/logging.md) - Log levels, configuration, structured log entry fields, JSON parsing, and production monitoring
 - [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
 - [Error Codes](docs/error-codes.md) - HTTP status code reference with descriptions, scenarios, and sample responses
 - [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
@@ -84,11 +88,11 @@ This project is ideal for:
 | ------ | ---- | ----------- | ------------ |
 | GET | `/account/:id` | Account details, balances, reserve breakdown | — |
 | GET | `/account/:id/age` | Account age and longevity metrics | — |
-| GET | `/account/:id/balances` | XLM and asset balances | — |
+| GET | `/account/:id/balances` | XLM and asset balances | `native`, `assets` |
 | GET | `/account/:id/native-balance` | Native XLM balance only | — |
 | GET | `/account/:id/asset-balance/:assetCode/:assetIssuer` | Balance for a specific asset trustline | — |
 | GET | `/account/:id/sequence` | Current sequence number | — |
-| GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode` |
+| GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode`, `sponsored` |
 | GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor`, `assetCode`, `assetIssuer` |
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
 | GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
@@ -114,7 +118,7 @@ This project is ideal for:
 | ------ | ---- | ----------- | ------------ |
 | GET | `/transactions/:id` | Paginated transaction history for an account | `limit`, `order`, `cursor` |
 | GET | `/transactions/:id/operations` | Paginated operation history for an account | `limit`, `order`, `cursor` |
-| POST | `/transactions/batch-status` | Check confirmation status of multiple tx hashes | Body: `hashes` |
+| POST | `/transactions/batch-status` | Check confirmation status of multiple tx hashes | Body: `hashes` (max 20) |
 
 ### Asset
 
@@ -142,6 +146,7 @@ This project is ideal for:
 
 | Method | Path | Description | Query Params |
 | ------ | ---- | ----------- | ------------ |
+| GET | `/liquidity-pools/:id` | Live pool details from Horizon (reserves, fee, shares) | — |
 | GET | `/liquidity-pools/:id/profitability` | Estimated annualized fee income | — |
 | GET | `/liquidity-pools/:id/reserve-ratio` | Reserve ratio and drift from equal | — |
 
@@ -193,7 +198,7 @@ Soroban is Stellar’s smart contract platform for running WebAssembly (WASM) co
 
 A Soroban contract is referenced by a **contract ID**, which is the address used to invoke the contract after it has been deployed. The contract’s **WASM hash** is the digest of the compiled contract binary and uniquely identifies the contract code that is stored and executed on the network.
 
-StellarKit API supports Soroban contract inspection through two endpoints: `GET /soroban/contract/:id` looks up contract details by contract ID, including the associated WASM hash and ledger metadata, and `GET /soroban/contract/:id/storage` returns the contract's instance-storage entries. Together they make it easier to combine traditional Stellar account workflows with Soroban contract interactions.
+StellarKit API supports Soroban contract inspection through three endpoints: `GET /soroban/contract/:id` looks up contract details by contract ID, including the associated WASM hash and ledger metadata, `GET /soroban/contract/:id/storage` returns the contract's instance-storage entries, and `GET /soroban/contract/:id/functions` returns exported function names, parameter types, and return types parsed from the contract ABI. Together they make it easier to combine traditional Stellar account workflows with Soroban contract interactions.
 
 See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples and sample responses.
 
@@ -201,7 +206,9 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 ## Documentation
 
-- [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id` and `/soroban/contract/:id/storage`.
+- [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`.
+- [docs/webhooks.md](docs/webhooks.md) — Webhook registration, events, payloads, signature verification, retries, and unregistration.
+- [docs/batch-endpoints.md](docs/batch-endpoints.md) — Batch API endpoints, address/hash limits, per-entry errors, and when to use batch vs individual.
 
 ---
 
@@ -564,7 +571,12 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 ### `GET /account/:id/trustlines`
 
-Returns all trustlines for the account with TOML metadata resolved from the issuer's home domain. Filter by asset code with `?assetCode=`.
+Returns all trustlines for the account with TOML metadata resolved from the issuer's home domain. Filter by asset code with `?assetCode=`, or by sponsorship status with `?sponsored=`.
+
+| Param | Type | Required | Default | Description |
+| ----- | ---- | -------- | ------- | ----------- |
+| `assetCode` | string | No | None | Case-insensitive asset code filter. |
+| `sponsored` | boolean | No | None | `true` returns only trustlines sponsored by another account; `false` returns only unsponsored trustlines. Omitted returns all. |
 
 ```bash
 # All trustlines
@@ -572,6 +584,9 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 # Filter to USDC only
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustlines?assetCode=USDC"
+
+# Only sponsored trustlines
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/trustlines?sponsored=true"
 ```
 
 ### `GET /account/:id/summary`

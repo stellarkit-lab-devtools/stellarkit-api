@@ -106,6 +106,64 @@ STELLAR_NETWORK=mainnet
 
 ---
 
+## LOG_LEVEL
+
+**Variable:** `LOG_LEVEL`  
+**Default:** `info`  
+**Accepted values:** `fatal`, `error`, `warn`, `info`, `debug`, `trace`  
+**Required:** No
+
+### What Does It Do?
+
+This variable controls the verbosity of application logs. StellarKit uses Pino for structured logging and emits logs at different severity levels.
+
+### Log Levels (in order of severity)
+
+| Level | Use Case | Examples |
+|-------|----------|----------|
+| `fatal` | Critical failures, process will likely exit | Database connection lost |
+| `error` | Runtime errors that need attention | Request failed, validation error |
+| `warn` | Unexpected but recoverable situations | Cache miss on expected hit |
+| `info` | Important state changes and events | Request completed, service started |
+| `debug` | Developer diagnostic info | Cache hit/miss details, env config |
+| `trace` | Extremely detailed execution flow | Function entry/exit, data values |
+
+### Configuration Examples
+
+```bash
+# Production: catch errors and important events only
+LOG_LEVEL=info
+
+# Development: include debug diagnostics
+LOG_LEVEL=debug
+
+# Troubleshooting: maximum detail
+LOG_LEVEL=trace
+```
+
+Or in your `.env` file:
+
+```env
+LOG_LEVEL=debug
+```
+
+### Log Output Formats
+
+The logging format depends on the `NODE_ENV` setting:
+
+- **Development** (`NODE_ENV != production`): Pretty-printed logs with colors and timestamps
+- **Production** (`NODE_ENV=production`): JSON (newline-delimited), machine-parseable for log aggregation
+
+See [Logging Guide](./logging.md) for full details on structured logging, log parsing, and production monitoring.
+
+### Performance Considerations
+
+- `LOG_LEVEL=debug` or `trace` generates more logs and increases I/O usage
+- In production, `LOG_LEVEL=info` is recommended for normal operation
+- High verbosity (debug/trace) should be used temporarily for troubleshooting
+
+---
+
 ## HORIZON_URL
 
 **Variable:** `HORIZON_URL`  
@@ -168,6 +226,37 @@ Horizon is Stellar's official REST API. StellarKit uses it to:
 - Retrieve order book data and trading information
 
 Every API endpoint in StellarKit ultimately queries Horizon for blockchain data.
+
+---
+
+## NODE_ENV
+
+**Variable:** `NODE_ENV`  
+**Default:** `development`  
+**Accepted values:** `development`, `production`, `test`  
+**Required:** No
+
+### Development vs Production
+
+Setting `NODE_ENV=production` enables:
+
+- JSON log output (instead of pretty-print)
+- Optimized error messages (sensitive details suppressed)
+- Production-ready performance tuning
+
+Example:
+
+```env
+# Development
+NODE_ENV=development
+LOG_LEVEL=debug
+
+# Production
+NODE_ENV=production
+LOG_LEVEL=info
+```
+
+See [Logging Guide](./logging.md) for more on how `NODE_ENV` affects logging behavior.
 
 ---
 
@@ -389,8 +478,9 @@ Error: Account GBXX... does not exist on the network
 
 ---
 
-## References
+## Related Documentation
 
+- [Logging Guide](./logging.md) - Configure log levels, understand structured logging, and parse production JSON logs
 - [Stellar Networks Documentation](https://developers.stellar.org/docs/learn/networks)
 - [Horizon API Reference](https://developers.stellar.org/docs/data/apis/horizon)
 - [Stellar Status Page](https://stellar.statuspage.io)

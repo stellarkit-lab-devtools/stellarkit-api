@@ -17,14 +17,15 @@ jest.mock("../src/config/stellar", () => {
 
 function mockClaimableBalances(records) {
   server.claimableBalances.mockReturnValue({
-    forClaimant: jest.fn().mockReturnThis(),
+    claimant: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
     cursor: jest.fn().mockReturnThis(),
     call: jest.fn().mockResolvedValue({ records }),
   });
 }
 
-describe("Account Claimable Balances Eligibility API", () => {
+describe("Account Claimable Balances API", () => {
   const accountId = Keypair.random().publicKey();
 
   beforeEach(() => {
@@ -33,125 +34,140 @@ describe("Account Claimable Balances Eligibility API", () => {
   });
 
   describe("GET /account/:id/claimable-balances", () => {
-    it("categorizes claimable balances correctly", async () => {
-      const now = Math.floor(Date.now() / 1000);
-      
+    it("returns paginated claimable balances with normalized shape", async () => {
       const mockRecords = [
         {
           id: "000000001",
-          asset: "XLM",
+          asset: "native",
           amount: "100.0000000",
+          sponsor: "GSPONSOR1",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "paging-token-1",
           claimants: [
             { destination: accountId, predicate: { unconditional: true } }
-          ]
-        },
-        {
-          id: "000000002",
-          asset: "XLM",
-          amount: "200.0000000",
-          claimants: [
-            { destination: accountId, predicate: { abs_after: (now + 3600).toString() } }
-          ]
-        },
-        {
-          id: "000000003",
-          asset: "XLM",
-          amount: "300.0000000",
-          claimants: [
-            { destination: accountId, predicate: { abs_before: (now - 3600).toString() } }
           ]
         }
       ];
 
-      server.claimableBalances.mockReturnValue({
-        forClaimant: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        call: jest.fn().mockResolvedValue({ records: mockRecords })
-      });
+      mockClaimableBalances(mockRecords);
 
       const res = await request(app).get(`/account/${accountId}/claimable-balances`);
 
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.data.eligible).toHaveLength(1);
-      expect(res.body.data.eligible[0].id).toBe("000000001");
-      expect(res.body.data.eligible[0].isExpired).toBe(false);
-      expect(res.body.data.notYetClaimable).toHaveLength(1);
-      expect(res.body.data.notYetClaimable[0].id).toBe("000000002");
-      expect(res.body.data.notYetClaimable[0].isExpired).toBe(false);
-      // Expired balances are excluded by default — see ?includeExpired=true tests below.
-      expect(res.body.data.expired).toHaveLength(0);
-    });
-
-    it("includes expired balances tagged with isExpired when ?includeExpired=true", async () => {
-      const now = Math.floor(Date.now() / 1000);
-
-      const mockRecords = [
-        {
-          id: "000000001",
-          asset: "XLM",
-          amount: "100.0000000",
-          claimants: [
-            { destination: accountId, predicate: { unconditional: true } }
-          ]
-        },
-        {
-          id: "000000003",
-          asset: "XLM",
-          amount: "300.0000000",
-          claimants: [
-            { destination: accountId, predicate: { abs_before: (now - 3600).toString() } }
-          ]
-        }
-      ];
-
-      server.claimableBalances.mockReturnValue({
-        forClaimant: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        call: jest.fn().mockResolvedValue({ records: mockRecords })
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0]).toMatchObject({
+        balanceId: "000000001",
+        amount: "100.0000000",
+        sponsor: "GSPONSOR1",
+        createdAt: "2024-01-01T00:00:00Z",
       });
-
-      const res = await request(app).get(
-        `/account/${accountId}/claimable-balances?includeExpired=true`
-      );
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body.data.eligible).toHaveLength(1);
-      expect(res.body.data.eligible[0].isExpired).toBe(false);
-      expect(res.body.data.expired).toHaveLength(1);
-      expect(res.body.data.expired[0].id).toBe("000000003");
-      expect(res.body.data.expired[0].isExpired).toBe(true);
+      expect(res.body.meta).toMatchObject({
+        count: 1,
+        limit: 20,
+        hasMore: false,
+      });
     });
 
-    it("handles complex predicates (AND)", async () => {
-      const now = Math.floor(Date.now() / 1000);
-      const mockRecords = [
+    it("normalizes native XLM asset correctly", async () => {
+      mockClaimableBalances([
         {
-          id: "000000004",
-          asset: "USDC",
+          id: "balance-1",
+          asset: "native",
           amount: "50.0000000",
-          claimants: [
-            { 
-              destination: accountId, 
-              predicate: { 
-                and: [
-                  { abs_after: new Date((now - 1000) * 1000).toISOString() },
-                  { abs_before: new Date((now + 1000) * 1000).toISOString() }
-                ] 
-              } 
-            }
-          ]
-        }
-      ];
-
-      server.claimableBalances.mockReturnValue({
-        forClaimant: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        call: jest.fn().mockResolvedValue({ records: mockRecords })
-      });
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-1",
+          claimants: [{ destination: accountId, predicate: { unconditional: true } }],
+        },
+      ]);
 
       const res = await request(app).get(`/account/${accountId}/claimable-balances`);
-      expect(res.body.data.eligible).toHaveLength(1);
+
+      const asset = res.body.data[0].asset;
+      expect(asset.code).toBe("XLM");
+      expect(asset.issuer).toBeNull();
+      expect(asset.type).toBe("native");
+    });
+
+    it("normalizes credit asset correctly", async () => {
+      mockClaimableBalances([
+        {
+          id: "balance-2",
+          asset: `USDC:GBBD47UZQ5XKLQN4V5CSTBKLWV6N3ZRWMVVQGQ3YRRY2AAAA64BVH4I`,
+          amount: "123.4560000",
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-2",
+          claimants: [{ destination: accountId, predicate: { unconditional: true } }],
+        },
+      ]);
+
+      const res = await request(app).get(`/account/${accountId}/claimable-balances`);
+
+      const asset = res.body.data[0].asset;
+      expect(asset.code).toBe("USDC");
+      expect(asset.issuer).toBe("GBBD47UZQ5XKLQN4V5CSTBKLWV6N3ZRWMVVQGQ3YRRY2AAAA64BVH4I");
+      expect(asset.type).toBe("credit_alphanum4");
+    });
+
+    it("formats amount as seven-decimal string", async () => {
+      mockClaimableBalances([
+        {
+          id: "balance-3",
+          asset: "native",
+          amount: "42.5",
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-3",
+          claimants: [{ destination: accountId, predicate: { unconditional: true } }],
+        },
+      ]);
+
+      const res = await request(app).get(`/account/${accountId}/claimable-balances`);
+
+      expect(res.body.data[0].amount).toBe("42.5000000");
+    });
+
+    it("supports limit parameter", async () => {
+      const records = Array.from({ length: 50 }, (_, i) => ({
+        id: `balance-${i}`,
+        asset: "native",
+        amount: "100.0000000",
+        sponsor: "GSPONSOR",
+        created_at: "2024-01-01T00:00:00Z",
+        paging_token: `pt-${i}`,
+        claimants: [{ destination: accountId, predicate: { unconditional: true } }],
+      }));
+
+      mockClaimableBalances(records);
+
+      const res = await request(app).get(`/account/${accountId}/claimable-balances?limit=50`);
+
+      expect(res.body.data).toHaveLength(50);
+      expect(res.body.meta.limit).toBe(50);
+      expect(res.body.meta.hasMore).toBe(false);
+    });
+
+    it("supports cursor parameter", async () => {
+      mockClaimableBalances([
+        {
+          id: "balance-10",
+          asset: "native",
+          amount: "100.0000000",
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-10",
+          claimants: [{ destination: accountId, predicate: { unconditional: true } }],
+        },
+      ]);
+
+      const res = await request(app).get(`/account/${accountId}/claimable-balances?cursor=cursor-token`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data).toHaveLength(1);
+      expect(server.claimableBalances).toHaveBeenCalled();
     });
 
     it("validates account ID", async () => {
@@ -164,9 +180,12 @@ describe("Account Claimable Balances Eligibility API", () => {
     it("returns X-Cache: MISS on first request", async () => {
       mockClaimableBalances([
         {
-          id: "000000001",
-          asset: "XLM",
+          id: "balance-1",
+          asset: "native",
           amount: "100.0000000",
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-1",
           claimants: [{ destination: accountId, predicate: { unconditional: true } }],
         },
       ]);
@@ -175,15 +194,18 @@ describe("Account Claimable Balances Eligibility API", () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("MISS");
-      expect(res.body.data.eligible).toHaveLength(1);
+      expect(res.body.data).toHaveLength(1);
     });
 
     it("returns X-Cache: HIT on second request within TTL", async () => {
       mockClaimableBalances([
         {
-          id: "000000001",
-          asset: "XLM",
+          id: "balance-1",
+          asset: "native",
           amount: "100.0000000",
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-1",
           claimants: [{ destination: accountId, predicate: { unconditional: true } }],
         },
       ]);
@@ -191,28 +213,26 @@ describe("Account Claimable Balances Eligibility API", () => {
       await request(app).get(`/account/${accountId}/claimable-balances`);
       const res = await request(app).get(`/account/${accountId}/claimable-balances`);
 
-      expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("HIT");
-      expect(res.body.data.eligible).toHaveLength(1);
       expect(server.claimableBalances).toHaveBeenCalledTimes(1);
     });
 
     it("bypasses cache with ?fresh=true and returns MISS", async () => {
       mockClaimableBalances([
         {
-          id: "000000001",
-          asset: "XLM",
+          id: "balance-1",
+          asset: "native",
           amount: "100.0000000",
+          sponsor: "GSPONSOR",
+          created_at: "2024-01-01T00:00:00Z",
+          paging_token: "pt-1",
           claimants: [{ destination: accountId, predicate: { unconditional: true } }],
         },
       ]);
 
       await request(app).get(`/account/${accountId}/claimable-balances`);
-      const res = await request(app).get(
-        `/account/${accountId}/claimable-balances?fresh=true`
-      );
+      const res = await request(app).get(`/account/${accountId}/claimable-balances?fresh=true`);
 
-      expect(res.statusCode).toBe(200);
       expect(res.headers["x-cache"]).toBe("MISS");
       expect(server.claimableBalances).toHaveBeenCalledTimes(2);
     });
@@ -220,30 +240,50 @@ describe("Account Claimable Balances Eligibility API", () => {
     it("caches responses separately per account ID", async () => {
       const otherAccountId = Keypair.random().publicKey();
 
-      mockClaimableBalances([
-        {
-          id: "000000001",
-          asset: "XLM",
-          amount: "100.0000000",
-          claimants: [{ destination: accountId, predicate: { unconditional: true } }],
-        },
-      ]);
+      server.claimableBalances.mockReturnValue({
+        claimant: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        order: jest.fn().mockReturnThis(),
+        cursor: jest.fn().mockReturnThis(),
+        call: jest.fn().mockImplementation(() => {
+          // Return different data for different accounts
+          if (server.claimableBalances().claimant.mock.calls[0][0] === accountId) {
+            return Promise.resolve({
+              records: [
+                {
+                  id: "balance-for-account1",
+                  asset: "native",
+                  amount: "100.0000000",
+                  sponsor: "GSPONSOR",
+                  created_at: "2024-01-01T00:00:00Z",
+                  paging_token: "pt-1",
+                  claimants: [{ destination: accountId, predicate: { unconditional: true } }],
+                },
+              ],
+            });
+          } else {
+            return Promise.resolve({
+              records: [
+                {
+                  id: "balance-for-account2",
+                  asset: "native",
+                  amount: "200.0000000",
+                  sponsor: "GSPONSOR",
+                  created_at: "2024-01-02T00:00:00Z",
+                  paging_token: "pt-2",
+                  claimants: [{ destination: otherAccountId, predicate: { unconditional: true } }],
+                },
+              ],
+            });
+          }
+        }),
+      });
 
       await request(app).get(`/account/${accountId}/claimable-balances`);
-
-      mockClaimableBalances([
-        {
-          id: "000000002",
-          asset: "USDC",
-          amount: "50.0000000",
-          claimants: [{ destination: otherAccountId, predicate: { unconditional: true } }],
-        },
-      ]);
-
       const res = await request(app).get(`/account/${otherAccountId}/claimable-balances`);
 
       expect(res.headers["x-cache"]).toBe("MISS");
-      expect(res.body.data.eligible[0].id).toBe("000000002");
+      expect(res.body.data[0].balanceId).toBe("balance-for-account2");
     });
   });
 });

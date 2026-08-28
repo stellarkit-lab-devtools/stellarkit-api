@@ -72,6 +72,86 @@ export interface NativeBalance {
 }
 
 /**
+ * Standard StellarKit asset identifier: `{ code, issuer, type }`.
+ */
+export interface AssetRef {
+  /** Asset code (e.g. "USDC") or "XLM" for native. */
+  code: string;
+  /** Issuer public key, or `null` for native XLM. */
+  issuer: string | null;
+  /** Asset type: "native" | "credit_alphanum4" | "credit_alphanum12". */
+  type: string;
+}
+
+/**
+ * A single balance entry returned by `AccountModule.getBalances`.
+ *
+ * Each entry represents one asset the account holds (native XLM or a
+ * non-native token), using the standard `AssetRef` shape for the asset
+ * identifier fields.
+ */
+export interface Balance {
+  /** Normalised asset identifier following the standard Asset interface. */
+  asset: AssetRef;
+  /** Current balance as a seven-decimal string (e.g. "9.9999800"). */
+  balance: string;
+  /** Amount reserved for buying liabilities. */
+  buyingLiabilities: string;
+  /** Amount reserved for selling liabilities. */
+  sellingLiabilities: string;
+  /**
+   * Trustline limit as a seven-decimal string.
+   * `null` for native XLM (no trustline limit applies).
+   */
+  limit: string | null;
+  /**
+   * Whether the trustline is authorized by the issuer.
+   * `null` for native XLM (authorization does not apply).
+   */
+  isAuthorized: boolean | null;
+}
+
+/**
+ * Balance for a specific asset trustline returned by
+ * GET /account/:id/asset-balance/:assetCode/:assetIssuer.
+ */
+export interface AssetBalance {
+  /** Normalised asset identifier. */
+  asset: AssetRef;
+  /** Current balance as a seven-decimal string. */
+  balance: string;
+  /** Trustline limit as a seven-decimal string. */
+  limit: string;
+  /** Amount reserved for buying liabilities. */
+  buyingLiabilities: string;
+  /** Amount reserved for selling liabilities. */
+  sellingLiabilities: string;
+  /** Whether the trustline is authorized by the issuer. */
+  isAuthorized: boolean;
+}
+
+/**
+ * Signing key configuration returned by GET /account/:id/signing-keys.
+ */
+export interface SigningKeys {
+  /** Account signers with weights and types. */
+  signers: Array<{
+    key: string;
+    weight: number;
+    type: string;
+    sponsoredBy: string | null;
+  }>;
+  /** Master key weight for the account. */
+  masterWeight: number;
+  /** Operation thresholds (camelCase). */
+  thresholds: {
+    lowThreshold: number;
+    medThreshold: number;
+    highThreshold: number;
+  };
+}
+
+/**
  * A single sponsored entry for an account.
  */
 export interface SponsoredEntry {
@@ -187,24 +267,127 @@ export class AccountModule {
   }
 
   /**
-   * Get only the XLM and asset balances for an account.
+   * Get the balance for a specific asset trustline on an account.
    *
-   * @param id - Stellar account public key.
-   * @returns Resolves to the balances payload.
-   * @throws {StellarKitError} On non-2xx response.
+   * Calls `GET /account/:id/asset-balance/:assetCode/:assetIssuer`.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @param assetCode - Asset code (e.g. "USDC").
+   * @param assetIssuer - Issuer public key (G...).
+   * @returns Resolves to an {@link AssetBalance} with normalised asset shape and seven-decimal amounts.
+   * @throws {StellarKitError} If `id`, `assetCode`, or `assetIssuer` is missing/empty.
+   * @throws {StellarKitError} With `type: "TrustlineNotFound"` when the account does not hold the asset.
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const usdc = await account.getAssetBalance(
+   *   "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+   *   "USDC",
+   *   "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+   * );
+   * console.log(usdc.asset.code); // "USDC"
+   * console.log(usdc.balance);    // "100.0000000"
    */
-  async getBalances(id: string): Promise<AccountBalancesResponse["data"]> {
-    return this._get<AccountBalancesResponse["data"]>(`/account/${id}/balances`);
+  async getAssetBalance(id: string, assetCode: string, assetIssuer: string): Promise<AssetBalance> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    if (!assetCode || typeof assetCode !== "string" || assetCode.trim() === "") {
+      throw new StellarKitError("assetCode is required and must be a non-empty string", 400, "ValidationError");
+    }
+    if (!assetIssuer || typeof assetIssuer !== "string" || assetIssuer.trim() === "") {
+      throw new StellarKitError("assetIssuer is required and must be a non-empty string", 400, "ValidationError");
+    }
+    return this._get<AssetBalance>(
+      `/account/${id}/asset-balance/${encodeURIComponent(assetCode)}/${encodeURIComponent(assetIssuer)}`,
+    );
+  }
+
+  /**
+   * Get all balances for an account as a typed `Balance[]` array.
+   *
+   * Calls `GET /account/:id/balances` and normalises the response into a flat
+   * array where each entry — native XLM or a non-native asset — follows the
+   * standard `AssetRef` shape for asset identifier fields.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @returns Resolves to a `Balance[]` array with one entry per held asset.
+   * @throws {StellarKitError} If `id` is missing/empty.
+   * @throws {StellarKitError} With `type: "AccountNotFound"` when the account does not exist (404).
+   * @throws {StellarKitError} On any other non-2xx API response.
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const balances = await account.getBalances("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * const xlm = balances.find(b => b.asset.type === "native");
+   * console.log(xlm?.balance); // "9.9999800"
+   */
+  async getBalances(id: string): Promise<Balance[]> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+
+    const url = `${this.baseUrl}/account/${id}/balances`;
+    const res = await fetch(url, { headers: this.headers });
+    const body = await res.json();
+
+    if (!res.ok) {
+      // Map 404 to AccountNotFound per the acceptance criteria
+      const type = res.status === 404
+        ? "AccountNotFound"
+        : (body?.error?.type ?? "ApiError");
+      throw new StellarKitError(
+        body?.error?.message ?? res.statusText,
+        res.status,
+        type,
+      );
+    }
+
+    const data = (body as { data: AccountBalancesResponse["data"] }).data;
+
+    // Normalise the { xlm, assets } response shape into a flat Balance[] array
+    const balances: Balance[] = [];
+
+    // Native XLM entry
+    balances.push({
+      asset: { code: "XLM", issuer: null, type: "native" },
+      balance: data.xlm.balance,
+      buyingLiabilities: data.xlm.buyingLiabilities,
+      sellingLiabilities: data.xlm.sellingLiabilities,
+      limit: null,
+      isAuthorized: null,
+    });
+
+    // Non-native asset entries
+    for (const asset of data.assets) {
+      balances.push({
+        asset: {
+          code: asset.assetCode,
+          issuer: asset.assetIssuer,
+          type: asset.assetType,
+        },
+        balance: asset.balance,
+        buyingLiabilities: asset.buyingLiabilities,
+        sellingLiabilities: asset.sellingLiabilities,
+        limit: asset.limit,
+        isAuthorized: asset.isAuthorized,
+      });
+    }
+
+    return balances;
   }
 
   /**
    * Get all trustlines for an account with TOML metadata resolved from issuer home domains.
    *
-   * @param id - Stellar account public key.
+   * Calls `GET /account/:id/trustlines` with an optional `asset_code` query param.
+   *
+   * @param id - Stellar account public key (non-empty string).
    * @param options - Optional filtering options.
    * @param options.assetCode - Filter trustlines by asset code (e.g. "USDC").
-   * @returns Resolves to an array of trustline entries.
-   * @throws {StellarKitError} On non-2xx response.
+   * @returns Resolves to a typed `TrustlineEntry[]` array.
+   * @throws {StellarKitError} With `type: "AccountNotFound"` when the account does not exist (404).
+   * @throws {StellarKitError} On any other non-2xx API response.
    *
    * @example
    * const trustlines = await account.getTrustlines("GAAZI4...");
@@ -214,11 +397,24 @@ export class AccountModule {
     id: string,
     options?: { assetCode?: string },
   ): Promise<TrustlineEntry[]> {
-    const params = new URLSearchParams();
-    if (options?.assetCode) params.set("asset_code", options.assetCode);
-    const query = params.toString();
-    const path = `/account/${id}/trustlines${query ? `?${query}` : ""}`;
-    return this._get<TrustlineEntry[]>(path);
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    const params: Record<string, string | number | undefined> = {
+      asset_code: options?.assetCode,
+    };
+    try {
+      return await this._get<TrustlineEntry[]>(`/account/${id}/trustlines`, params);
+    } catch (err) {
+      if (err instanceof StellarKitError && err.status === 404) {
+        throw new StellarKitError(
+          err.message || `Account ${id} was not found.`,
+          404,
+          "AccountNotFound",
+        );
+      }
+      throw err;
+    }
   }
 
   /**
@@ -455,11 +651,67 @@ export class AccountModule {
     if (!id || typeof id !== "string" || id.trim() === "") {
       throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
     }
+    const params: Record<string, string | number | undefined> = {};
+    if (options?.limit !== undefined) params.limit = options.limit;
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.type) params.type = options.type;
+    return this._get<PaginatedResponse<Effect>>(`/account/${id}/effects`, params);
+  }
+
+  /**
+   * A single trade record returned by `AccountModule.getTrades`.
+   */
+
+  /**
+   * Get trades executed by an account.
+   *
+   * Calls `GET /account/:id/trades` and returns a paginated list of trades.
+   * All optional filters (limit, cursor, startDate, endDate) are forwarded as
+   * query parameters when provided.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @param options - Optional pagination and filter options.
+   * @param options.limit - Maximum number of trades to return (default: 20, max: 100).
+   * @param options.cursor - Pagination cursor from a previous response.
+   * @param options.startDate - ISO 8601 start date to filter trades on or after this date.
+   * @param options.endDate - ISO 8601 end date to filter trades on or before this date.
+   * @returns Resolves to a `PaginatedResponse` containing trade records.
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response.
+   *
+   * @example
+   * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
+   * const trades = await account.getTrades("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   *
+   * @example
+   * // With filters
+   * const filtered = await account.getTrades("GAAZI4...", {
+   *   limit: 50,
+   *   cursor: "12345",
+   *   startDate: "2024-01-01",
+   *   endDate: "2024-12-31",
+   * });
+   */
+  async getTrades(
+    id: string,
+    options?: {
+      limit?: number;
+      cursor?: string;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
     const params: Record<string, string | number | undefined> = {
       limit: options?.limit,
       cursor: options?.cursor,
-      type: options?.type,
+      startDate: options?.startDate,
+      endDate: options?.endDate,
     };
-    return this._get<PaginatedResponse<Effect>>(`/account/${id}/effects`, params);
+    return this._get<PaginatedResponse<Record<string, unknown>>>(
+      `/account/${id}/trades`,
+      params,
+    );
   }
 }

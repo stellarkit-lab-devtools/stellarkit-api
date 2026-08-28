@@ -18,6 +18,14 @@ const horizonUrl =
 
 const server = new Horizon.Server(horizonUrl);
 
+// Horizon JS SDK exposes GET / as Server#root. StellarKit calls this
+// serverInfo() so routes and tests can mock a single, named method.
+if (typeof server.serverInfo !== "function") {
+  server.serverInfo = function serverInfo() {
+    return server.root();
+  };
+}
+
 // Soroban RPC has no free SDF-hosted mainnet endpoint, so there is no mainnet
 // default — SOROBAN_RPC_URL must be set to use the /soroban/* routes on mainnet.
 const SOROBAN_RPC_URLS = {

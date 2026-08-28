@@ -1,11 +1,18 @@
 const request = require("supertest");
 const app = require("../src/index");
+const { server } = require("../src/config/stellar");
 
 describe("Sanitize Middleware", () => {
+  beforeEach(() => {
+    jest.spyOn(server, "serverInfo").mockResolvedValue({ horizon_version: "2.33.0" });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
   describe("Whitespace trimming", () => {
     it("trims leading and trailing whitespace from query params", async () => {
       const res = await request(app).get("/utils/validate-account?id=%20GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN%20");
-      // The trimmed value should be passed to the route - not a whitespace error
       expect(res.statusCode).not.toBe(400);
     });
   });
@@ -17,9 +24,7 @@ describe("Sanitize Middleware", () => {
     });
 
     it("strips null bytes from path params", async () => {
-      // A null byte in a path param would result in a bad key, not a crash
       const res = await request(app).get("/account/GAAZI%004TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
-      // Should not return 500
       expect(res.statusCode).not.toBe(500);
     });
   });
@@ -34,20 +39,38 @@ describe("Sanitize Middleware", () => {
       expect(res.body.error.message).toContain("500");
     });
 
-    it("returns 400 when a path param exceeds 500 characters", async () => {
-      const longValue = "A".repeat(501);
+    it("returns 400 when a path param exceeds 100 characters", async () => {
+      const longValue = "G".repeat(101);
       const res = await request(app).get(`/account/${longValue}`);
       expect(res.statusCode).toBe(400);
       expect(res.body.success).toBe(false);
-      // An over-long account path param is rejected as an invalid account address.
-      expect(res.body.error.type).toBe("InvalidAccountId");
+      expect(res.body.error.type).toBe("InvalidParameter");
     });
 
-    it("allows params exactly at the 500 character limit", async () => {
+    it("allows query params exactly at the 500 character limit", async () => {
       const exactValue = "A".repeat(500);
       const res = await request(app).get(`/health?foo=${exactValue}`);
-      // Should not return 400 for length
       expect(res.statusCode).not.toBe(400);
+    });
+  });
+
+  describe("Route parameter injection patterns", () => {
+    it("rejects account IDs containing SQL-like injection patterns", async () => {
+      const res = await request(app).get("/account/GAAZI'; DROP TABLE--");
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error.type).toBe("InvalidParameter");
+    });
+
+    it("rejects asset codes containing angle brackets", async () => {
+      const res = await request(app).get("/asset/<script>/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error.type).toBe("InvalidParameter");
+    });
+
+    it("rejects contract IDs containing double quotes", async () => {
+      const res = await request(app).get('/soroban/contract/C"INJECTED');
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error.type).toBe("InvalidParameter");
     });
   });
 
@@ -90,14 +113,35 @@ describe("Sanitize Middleware", () => {
       });
     });
 
-    it("returns 400 JSON for param exceeding 500 chars", (done) => {
-      const req = { params: { id: "A".repeat(501) }, query: {} };
+    it("returns InvalidParameter for route params over 100 characters", (done) => {
+      const req = { params: { id: "G".repeat(101) }, query: {} };
       const res = {
-        status(code) { this._code = code; return this; },
+        status(code) {
+          this._code = code;
+          return this;
+        },
         json(body) {
           expect(this._code).toBe(400);
           expect(body.success).toBe(false);
-          expect(body.error.type).toBe("ValidationError");
+          expect(body.error.type).toBe("InvalidParameter");
+          done();
+        },
+      };
+      sanitize(req, res, () => {
+        done(new Error("next() should not have been called"));
+      });
+    });
+
+    it("returns InvalidParameter for route params with injection characters", (done) => {
+      const req = { params: { id: "abc<script>" }, query: {} };
+      const res = {
+        status(code) {
+          this._code = code;
+          return this;
+        },
+        json(body) {
+          expect(this._code).toBe(400);
+          expect(body.error.type).toBe("InvalidParameter");
           done();
         },
       };
@@ -109,7 +153,10 @@ describe("Sanitize Middleware", () => {
     it("returns 400 JSON for query value exceeding 500 chars", (done) => {
       const req = { params: {}, query: { foo: "B".repeat(501) } };
       const res = {
-        status(code) { this._code = code; return this; },
+        status(code) {
+          this._code = code;
+          return this;
+        },
         json(body) {
           expect(this._code).toBe(400);
           expect(body.success).toBe(false);
@@ -121,7 +168,6 @@ describe("Sanitize Middleware", () => {
       });
     });
 
-    // req.body sanitization tests (issue #258)
     it("trims leading/trailing whitespace from body string values", (done) => {
       const req = { params: {}, query: {}, body: { name: "  Alice  ", note: "  hello  " } };
       const res = {};
@@ -145,7 +191,10 @@ describe("Sanitize Middleware", () => {
     it("returns 400 when a body string value exceeds 500 characters", (done) => {
       const req = { params: {}, query: {}, body: { data: "X".repeat(501) } };
       const res = {
-        status(code) { this._code = code; return this; },
+        status(code) {
+          this._code = code;
+          return this;
+        },
         json(body) {
           expect(this._code).toBe(400);
           expect(body.success).toBe(false);

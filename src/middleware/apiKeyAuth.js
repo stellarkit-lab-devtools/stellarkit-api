@@ -5,6 +5,8 @@
 // Returns 401 for missing/invalid key when enabled
 // /health and / endpoints are always public
 
+const crypto = require('crypto');
+
 const apiKeyMiddleware = (req, res, next) => {
   const requireApiKey = process.env.REQUIRE_API_KEY === 'true';
 
@@ -49,8 +51,27 @@ const apiKeyMiddleware = (req, res, next) => {
     });
   }
 
-  // Validate the provided key
-  if (!validKeys.includes(apiKey)) {
+  // Validate the provided key using constant-time comparison to prevent timing attacks
+  let keyIsValid = false;
+  for (const validKey of validKeys) {
+    try {
+      if (
+        validKey.length === apiKey.length &&
+        crypto.timingSafeEqual(
+          Buffer.from(validKey),
+          Buffer.from(apiKey),
+        )
+      ) {
+        keyIsValid = true;
+        break;
+      }
+    } catch (err) {
+      // timingSafeEqual throws if buffers are different lengths
+      // Continue checking other keys
+    }
+  }
+
+  if (!keyIsValid) {
     return res.status(401).json({
       success: false,
       error: {

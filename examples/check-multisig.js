@@ -7,7 +7,7 @@
  * It prints a human-readable summary that includes:
  *   - Whether the account is multisig-enabled
  *   - The master key weight
- *   - The three threshold levels (low, med, high) and what each protects
+ *   - The three threshold levels (low, medium, high) and what each protects
  *   - Every registered signer with their key, weight, and type
  *
  * Usage:
@@ -108,7 +108,7 @@ function friendlySignerType(type) {
 function thresholdLabel(level) {
   const labels = {
     low:  "Low   (allow-trust, bump-sequence)",
-    med:  "Med   (payments, offers, trustlines, …)",
+    medium: "Med   (payments, offers, trustlines, ...)",
     high: "High  (set-options, account-merge)",
   };
   return labels[level] || level;
@@ -184,7 +184,7 @@ async function checkMultisig(address) {
   console.log(`  Signature Thresholds`);
   console.log(`${divider()}`);
 
-  for (const level of ["low", "med", "high"]) {
+  for (const level of ["low", "medium", "high"]) {
     const value = thresholds[level];
     // Indicate when the master key alone can meet the threshold
     const met = value <= masterWeight ? " ← master key alone is sufficient" : "";
@@ -228,7 +228,7 @@ async function checkMultisig(address) {
     // Flag any threshold that cannot be met even with all signers combined
     const unreachable = [];
     if (totalWeight < thresholds.low)  unreachable.push("low");
-    if (totalWeight < thresholds.med)  unreachable.push("med");
+    if (totalWeight < thresholds.medium) unreachable.push("medium");
     if (totalWeight < thresholds.high) unreachable.push("high");
 
     if (unreachable.length > 0) {

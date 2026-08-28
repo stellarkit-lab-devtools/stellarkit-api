@@ -7,11 +7,17 @@ jest.mock("../src/config/stellar", () => {
     ...originalModule,
     sorobanServer: {
       getLedgerEntries: jest.fn(),
+      getLatestLedger: jest.fn(),
     },
   };
 });
 
+jest.mock("../src/utils/contractDeployment", () => ({
+  fetchContractDeployment: jest.fn(),
+}));
+
 const { sorobanServer } = require("../src/config/stellar");
+const { fetchContractDeployment } = require("../src/utils/contractDeployment");
 const app = require("../src/index");
 
 function buildInstanceEntry({ contractId, executableType = "wasm", wasmHash, storageEntries = [] }) {
@@ -43,12 +49,21 @@ function buildInstanceEntry({ contractId, executableType = "wasm", wasmHash, sto
 
 describe("GET /soroban/contract/:id", () => {
   const contractId = StrKey.encodeContract(Buffer.alloc(32, 2));
+  const deployer = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+  const deployedAt = "2024-06-01T12:00:00.000Z";
+  const deployedLedger = 42;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    sorobanServer.getLatestLedger.mockResolvedValue({ sequence: 150 });
+    fetchContractDeployment.mockResolvedValue({
+      deployer,
+      deployedAt,
+      deployedLedger,
+    });
   });
 
-  it("returns normalized wasm contract details", async () => {
+  it("returns enriched wasm contract details with deployment metadata", async () => {
     const wasmHash = Buffer.alloc(32, 7);
     sorobanServer.getLedgerEntries.mockResolvedValue({
       entries: [buildInstanceEntry({ contractId, executableType: "wasm", wasmHash })],
@@ -59,10 +74,32 @@ describe("GET /soroban/contract/:id", () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data).toEqual({
       contractId,
+      wasmHash: wasmHash.toString("hex"),
+      deployer,
+      deployedAt,
+      deployedLedger,
+      isExpired: false,
       executable: { type: "wasm", wasmHash: wasmHash.toString("hex") },
       lastModifiedLedger: 100,
       expiryLedger: 200,
     });
+    expect(res.body.data.wasmHash).toHaveLength(64);
+    expect(typeof res.body.data.deployedAt).toBe("string");
+    expect(res.body.data.deployedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(typeof res.body.data.isExpired).toBe("boolean");
+    expect(typeof res.body.data.deployedLedger).toBe("number");
+  });
+
+  it("marks the contract as expired when the current ledger is past expiry", async () => {
+    sorobanServer.getLatestLedger.mockResolvedValue({ sequence: 250 });
+    sorobanServer.getLedgerEntries.mockResolvedValue({
+      entries: [buildInstanceEntry({ contractId, executableType: "wasm" })],
+    });
+
+    const res = await request(app).get(`/soroban/contract/${contractId}`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.isExpired).toBe(true);
   });
 
   it("returns normalized stellar_asset contract details", async () => {
@@ -73,7 +110,14 @@ describe("GET /soroban/contract/:id", () => {
     const res = await request(app).get(`/soroban/contract/${contractId}`);
 
     expect(res.statusCode).toBe(200);
+    expect(res.body.data.wasmHash).toBeNull();
     expect(res.body.data.executable).toEqual({ type: "stellar_asset", wasmHash: null });
+    expect(res.body.data).toMatchObject({
+      deployer,
+      deployedAt,
+      deployedLedger,
+      isExpired: false,
+    });
   });
 
   it("returns 404 when the contract is not found", async () => {

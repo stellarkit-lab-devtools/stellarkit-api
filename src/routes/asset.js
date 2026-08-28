@@ -10,12 +10,23 @@ const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
 const { validateAccountId, validateAssetCode, validateAsset, validateLimit } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
-const { makeAssetNotFoundError } = require("../utils/errors");
+const { makeAssetNotFoundError, makeAccountNotFoundError, makeTomlFetchFailedError } = require("../utils/errors");
 const cacheTTL = require("../config/cacheConfig");
 const { normalizeAsset } = require("../utils/asset");
+const { fetchNormalisedToml } = require("../utils/tomlResolver");
+const { isNativeAsset } = require("../utils/assetHelpers");
 router.use(normalizeAssetCode);
 
 const DEFAULT_ASSET_HOLDERS_CACHE_TTL_MS = 30000;
+
+function toSevenDecimalString(value) {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed)) return "0.0000000";
+  const truncated = Math.floor(parsed * 1e7) / 1e7;
+  return truncated.toFixed(7);
+}
+
+const BASE_RESERVE = 0.5;
 
 function isFreshRequest(query) {
   return query.fresh === true || query.fresh === "true";
@@ -41,6 +52,11 @@ function formatAssetHolder(account, assetCode, issuer) {
     address: account.id || account.account_id,
     balance: toSevenDecimalString(balance ? balance.balance : "0.0000000"),
   };
+}
+
+function getNativeBalance(account) {
+  const native = (account.balances || []).find((b) => isNativeAsset(b));
+  return native ? parseFloat(native.balance) : 0;
 }
 
 function isValidNonNegativeDecimal(value) {
@@ -91,9 +107,12 @@ function parseNonNegativeDecimalQueryParam(rawValue, fieldName) {
  * @param {string} [order=desc] - Sort direction for holders.
  * @param {string} [minBalance] - Optional minimum holder balance filter.
  * @param {string} [maxBalance] - Optional maximum holder balance filter.
+ * @param {string} [verified] - If "true", filters to holders with XLM balance above base reserve.
  * @returns {Object[]} List of holders and pagination metadata.
  * @example
  * curl "http://localhost:3000/asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/holders?minBalance=10&maxBalance=100"
+ * @example
+ * curl "http://localhost:3000/asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/holders?verified=true"
  */
 router.get(
   "/:code/:issuer/holders",
@@ -116,6 +135,21 @@ router.get(
         "maxBalance",
       );
 
+      const verified = req.query.verified;
+      const isVerifiedFilter = verified === "true";
+
+      if (verified !== undefined && verified !== "true" && verified !== "false") {
+        const err = new Error(
+          "Query parameter 'verified': must be 'true' or 'false'.",
+        );
+        err.isValidation = true;
+        err.status = 400;
+        err.field = "verified";
+        err.receivedValue = String(verified);
+        err.expectedFormat = "'true' or 'false'";
+        throw err;
+      }
+
       if (minBalance !== null && maxBalance !== null && minBalance > maxBalance) {
         const err = new Error(
           "Query parameter 'minBalance' must not be greater than 'maxBalance'.",
@@ -127,10 +161,10 @@ router.get(
         throw err;
       }
 
-      const hasBalanceFilter = minBalance !== null || maxBalance !== null;
+      const skipCache = minBalance !== null || maxBalance !== null || isVerifiedFilter;
       const cacheKey = `asset-holders:${assetCode}:${issuer}:${limit}:${order}:${cursor || ""}`;
 
-      if (!fresh && !hasBalanceFilter) {
+      if (!fresh && !skipCache) {
         const cached = cacheService.get(cacheKey);
         if (cached) {
           res.set("X-Cache", "HIT");
@@ -152,10 +186,14 @@ router.get(
         formatAssetHolder(account, assetCode, issuer),
       );
 
-      const filteredHolders = holders.filter((holder) => {
+      const filteredHolders = holders.filter((holder, index) => {
         const balanceValue = Number(holder.balance);
         if (minBalance !== null && balanceValue < minBalance) return false;
         if (maxBalance !== null && balanceValue > maxBalance) return false;
+        if (isVerifiedFilter) {
+          const nativeBalance = getNativeBalance(records[index]);
+          if (nativeBalance <= BASE_RESERVE) return false;
+        }
         return true;
       });
 
@@ -170,7 +208,7 @@ router.get(
         hasMore: filteredHolders.length === limit,
       };
 
-      if (!hasBalanceFilter) {
+      if (!skipCache) {
         cacheService.set(cacheKey, { holders: filteredHolders, meta }, getAssetHoldersCacheTtlSeconds());
       }
 
@@ -553,6 +591,86 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
   }
 });
 
+
+/**
+ * GET /asset/:code/:issuer/toml
+ * Fetches the issuer's stellar.toml file, parses it, and returns the
+ * relevant asset metadata in clean JSON format.
+ *
+ * Returns { code, issuer, name, description, image, anchorAssetType, conditions }
+ * Missing optional fields are returned as null.
+ * Response is cached with a 5 minute TTL.
+ *
+ * @param {string} code   - Asset code (e.g. USDC)
+ * @param {string} issuer - Issuer account public key (G...)
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/toml
+ */
+router.get("/:code/:issuer/toml", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const cacheKey = `asset-toml:${assetCode}:${issuer}`;
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let issuerAccount;
+    try {
+      issuerAccount = await server.loadAccount(issuer);
+    } catch (err) {
+      throw makeAccountNotFoundError(issuer, NETWORK);
+    }
+
+    const homeDomain = issuerAccount.home_domain;
+    if (!homeDomain) {
+      throw makeTomlFetchFailedError(issuer);
+    }
+
+    let toml;
+    try {
+      ({ toml } = await fetchNormalisedToml(homeDomain));
+    } catch (err) {
+      throw makeTomlFetchFailedError(issuer);
+    }
+
+    if (!toml) {
+      throw makeTomlFetchFailedError(issuer);
+    }
+
+    // Find the currency entry for this specific asset
+    const currencies = toml.currencies || [];
+    const assetEntry = currencies.find(
+      (curr) => curr.code === assetCode && curr.issuer === issuer
+    );
+
+    // Build the response with asset-specific metadata
+    const data = {
+      code: assetCode,
+      issuer: issuer,
+      name: assetEntry?.name || null,
+      description: assetEntry?.desc || assetEntry?.description || null,
+      image: assetEntry?.image || null,
+      anchorAssetType: assetEntry?.asset?.type || null,
+      conditions: assetEntry?.conditions || null,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.toml);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /asset/:code/:issuer/price

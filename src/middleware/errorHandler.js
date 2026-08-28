@@ -1,17 +1,19 @@
 /**
  * Centralised error handler middleware.
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
- * All non-Horizon errors are wrapped in StellarKitError for consistency.
+ * All non-Horizon errors are wrapped in StellaKitError for consistency.
  */
 const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
-const StellarKitError = require("../utils/StellarKitError");
+const StellaKitError = require("../utils/StellaKitError");
 const {
   HORIZON_TIMEOUT_MESSAGE,
   HORIZON_TIMEOUT_SUGGESTION,
   isHorizonTimeoutError,
 } = require("../utils/errors");
+const { NETWORK } = require("../config/stellar");
+const metrics = require("../services/metrics");
 
 /**
  * Logs 4xx and 5xx responses using the structured logger.
@@ -38,6 +40,18 @@ function logError(status, req, message) {
   }
 }
 
+/**
+ * Send an error response AND record the status code in the metrics service.
+ *
+ * @param {import('express').Response} res
+ * @param {number} status
+ * @param {object} body
+ */
+function errorResponse(res, status, body) {
+  metrics.incrementError(status);
+  return res.status(status).json(body);
+}
+
 const ACCOUNT_MERGE_FAILURES = {
   op_does_not_exist: {
     message: "Account merge failed because the destination account does not exist.",
@@ -55,11 +69,6 @@ const ACCOUNT_MERGE_FAILURES = {
       "Free capacity on the destination account (remove subentries or use a different destination) and try again.",
   },
 };
-
-function isMergePath(pathname) {
-  if (!pathname || typeof pathname !== "string") return false;
-  return pathname.toLowerCase().includes("merge");
-}
 
 /**
  * Picks the most specific result code from Horizon's extras.result_codes.
@@ -81,12 +90,34 @@ function pickMostSpecificResultCode(result_codes) {
  * (i.e. the network accepted the request but the transaction itself failed).
  */
 function isTransactionSubmissionFailure(horizonError) {
-  return (
-    horizonError &&
+  return (horizonError &&
     horizonError.type &&
     typeof horizonError.type === "string" &&
     horizonError.type.includes("transaction_failed")
   );
+}
+
+/**
+ * Returns true when err is a network-level connection failure to Horizon.
+ */
+function isConnectionError(err) {
+  if (!err) return false;
+  const code = err.code || (err.cause && err.cause.code);
+  if (code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ECONNRESET") return true;
+  const msg = (err.message || "").toLowerCase();
+  return msg.includes("econnrefused") || msg.includes("enotfound");
+}
+
+/**
+ * Returns true when a Horizon 404 is for an offer endpoint
+ * (e.g. GET /offers/123 returned Not Found).
+ */
+function isOfferNotFoundError(err) {
+  if (!err || !err.response) return false;
+  const { status, config } = err.response;
+  if (status !== 404) return false;
+  const url = (config && config.url) || "";
+  return url.includes("/offers/");
 }
 
 /**
@@ -109,9 +140,16 @@ function buildTransactionSubmissionFailedError(horizonError) {
   };
 }
 
+/**
+ * Injects requestId from the request into the response body.
+ */
+function withRequestId(body, req) {
+  return { ...body, requestId: req.requestId || null };
+}
+
 function errorHandler(err, req, res, next) {
   if (isConnectionError(err)) {
-    const ske = new StellarKitError(
+    const ske = new StellaKitError(
       "Unable to connect to the Stellar Horizon node.",
       503,
       "HorizonUnavailable",
@@ -119,16 +157,16 @@ function errorHandler(err, req, res, next) {
       "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status."
     );
     logError(503, req, ske.message);
-    return res.status(503).json({
+    return errorResponse(res, 503, withRequestId({
       success: false,
       error: ske.toJSON(),
-    });
+    }, req));
   }
 
   if (err?.isOfferNotFound || isOfferNotFoundError(err)) {
     const offerId = err?.offerId || "unknown";
     const message = `Offer '${offerId}' was not found on the Stellar ${NETWORK} network.`;
-    const ske = new StellarKitError(
+    const ske = new StellaKitError(
       message,
       404,
       "OfferNotFound",
@@ -136,10 +174,10 @@ function errorHandler(err, req, res, next) {
       "The offer may have already been filled, cancelled, or the offer ID may be incorrect."
     );
     logError(404, req, ske.message);
-    return res.status(404).json({
+    return errorResponse(res, 404, withRequestId({
       success: false,
       error: ske.toJSON(),
-    });
+    }, req));
   }
 
   // Horizon errors returned from horizon-client / Stellar SDK
@@ -161,16 +199,16 @@ function errorHandler(err, req, res, next) {
         },
       };
       logError(status, req, body.error.message);
-      return res.status(status).json(body);
+      return errorResponse(res, status, withRequestId(body, req));
     }
 
     const mappedStatus = mapHorizonErrorToStatus(resultCode);
     const status = mappedStatus ?? err.response.status ?? 400;
 
     if (isTransactionSubmissionFailure(horizonError)) {
-      const body = buildTransactionSubmissionFailedError(horizonError);
+      const body = buildTransactionSubmissionFailedError horizonError);
       logError(status, req, body.message);
-      return res.status(status).json({ success: false, error: body });
+      return errorResponse(res, status, withRequestId({ success: false, error: body }, req));
     }
 
     const message = horizonError.detail || horizonError.title || "Horizon Error";
@@ -196,21 +234,21 @@ function errorHandler(err, req, res, next) {
       }
     }
 
-    return res.status(status).json(body);
+    return errorResponse(res, status, withRequestId(body, req));
   }
 
-  // StellarKitError instances — already structured
-  if (err instanceof StellarKitError) {
+  // StellaKitError instances — already structured
+  if (err instanceof StellaKitError) {
     logError(err.statusCode, req, err.message);
-    return res.status(err.statusCode).json({
+    return errorResponse(res, err.statusCode, withRequestId({
       success: false,
       error: err.toJSON(),
-    });
+    }, req));
   }
   // ReferenceError and TypeError — catch runtime exceptions
   if (err instanceof ReferenceError || err instanceof TypeError) {
     logError(500, req, err.message);
-    return res.status(500).json({
+    return errorResponse(res, 500, withRequestId({
       success: false,
       error: {
         type: "InternalError",
@@ -219,12 +257,12 @@ function errorHandler(err, req, res, next) {
           ? "An unexpected error occurred."
           : err.message,
       },
-    });
+    }, req));
   }
   // Payload too large errors from body parsers
   if (err.type === "entity.too.large" || err.status === 413) {
     const maxBodySize = process.env.MAX_BODY_SIZE || "10kb";
-    const ske = new StellarKitError(
+    const ske = new StellaKitError(
       `Payload too large. Maximum request body size is ${maxBodySize}.`,
       413,
       "PayloadTooLargeError",
@@ -232,30 +270,30 @@ function errorHandler(err, req, res, next) {
       `Reduce your request body size to under ${maxBodySize}.`
     );
     logError(413, req, ske.message);
-    return res.status(413).json({
+    return errorResponse(res, 413, withRequestId({
       success: false,
       error: ske.toJSON(),
-    });
+    }, req));
   }
 
 // AccountNotFound errors (Horizon 404 on account lookup)
   // TransactionNotFound errors (Horizon 404 on transaction lookup)
   if (err.isTransactionNotFound) {
     logError(404, req, err.message);
-    return res.status(404).json({
+    return errorResponse(res, 404, withRequestId({
       success: false,
       error: {
         type: "NotFound",
         message: err.message,
         suggestion: "Verify the transaction hash is correct and exists on the network.",
       },
-    });
+    }, req));
   }
 
   // AccountNotFound errors (Horizon 404 on account lookup)
   if (err.isAccountNotFound) {
     logError(404, req, err.message);
-    return res.status(404).json({
+    return errorResponse(res, 404, withRequestId({
       success: false,
       error: {
         type: "AccountNotFound",
@@ -263,13 +301,13 @@ function errorHandler(err, req, res, next) {
         suggestion:
           "Verify the account address is correct and that the account has been funded.",
       },
-    });
+    }, req));
   }
 
   // AssetNotFound errors (asset lookup returned no results)
   if (err.isAssetNotFound) {
     logError(404, req, err.message);
-    return res.status(404).json({
+    return errorResponse(res, 404, withRequestId({
       success: false,
       error: {
         type: "AssetNotFound",
@@ -277,136 +315,76 @@ function errorHandler(err, req, res, next) {
         suggestion:
           "Verify the asset code and issuer address are correct.",
       },
-    });
+    }, req));
+  }
+
+  // TrustlineNotFound errors — specific asset trustline missing on an account
+  if (err.isTrustlineNotFound) {
+    logError(404, req, err.message);
+    return errorResponse(res, 404, withRequestId({
+      success: false,
+      error: {
+        type: "TrustlineNotFound",
+        message: err.message,
+        suggestion:
+          "The account must establish a trustline before holding this asset.",
+      },
+    }, req));
+  }
+
+  // TomlFetchFailed errors — issuer's stellar.toml could not be fetched
+  // (network error, missing file, or invalid format)
+  if (err.isTomlFetchFailed) {
+    logError(502, req, err.message);
+    return errorResponse(res, 502, withRequestId({
+      success: false,
+      error: {
+        type: "TomlFetchFailed",
+        message: err.message,
+        suggestion:
+          "Verify the issuer has a valid stellar.toml at their home domain. See https://developers.stellar.org/docs/issuing-assets/publishing-asset-info for requirements.",
+      },
+    }, req));
   }
 
   // InvalidAccountId errors — thrown by validateAccountId(id)
   if (err.isInvalidAccountId) {
     logError(400, req, err.message);
-    return res.status(400).json({
+    return errorResponse(res, 400, withRequestId({
       success: false,
       error: {
         type: "InvalidAccountId",
         message: err.message,
-        suggestion:
-          err.suggestion ||
-          "Account addresses start with G and are 56 characters long.",
+        suggestion: err.suggestion,
       },
-    });
+    }, req));
   }
 
-  // InvalidAsset errors — thrown by validateAsset(code, issuer)
-  if (err.isInvalidAsset) {
+  // InvalidTransactionHash errors — thrown by validateTransactionHash(hash)
+  if (err.isInvalidTransactionHash) {
     logError(400, req, err.message);
-    return res.status(400).json({
+    return errorResponse(res, 400, withRequestId({
       success: false,
       error: {
-        type: "InvalidAsset",
-        message: err.message,
-        suggestion: err.suggestion || null,
-      },
-    });
-  }
-
-  // InvalidCursor errors — thrown by validateCursor()
-  if (err.isInvalidCursor) {
-    logError(400, req, err.message);
-    return res.status(400).json({
-      success: false,
-      error: {
-        type: "InvalidCursor",
-        message: err.message,
-        suggestion: err.suggestion ||
-          "Use the cursor value returned in the previous response's data.cursor field.",
-      },
-    });
-  }
-
-  // InvalidLimit errors — thrown by validateLimit()
-  if (err.isInvalidLimit) {
-    logError(400, req, err.message);
-    return res.status(400).json({
-      success: false,
-      error: {
-        type: "InvalidLimit",
-        message: "limit must be a number between 1 and 100.",
-        suggestion: "Provide a valid integer for the limit parameter, e.g. ?limit=20",
-      },
-    });
-  }
-
-  // Horizon timeout errors (Horizon node did not respond in time)
-  if (isHorizonTimeoutError(err)) {
-    logError(504, req, HORIZON_TIMEOUT_MESSAGE);
-    return res.status(504).json({
-      success: false,
-      error: {
-        type: "HorizonTimeout",
-        message: HORIZON_TIMEOUT_MESSAGE,
-        suggestion: HORIZON_TIMEOUT_SUGGESTION,
-      },
-    });
-  }
-
-  // Transaction not found errors
-  if (err.isTransactionNotFound) {
-    logError(404, req, err.message);
-    return res.status(404).json({
-      success: false,
-      error: {
-        type: "NotFound",
-        message: err.message,
-        suggestion: "Verify the transaction hash is correct.",
-      },
-    });
-  }
-
-  // Offer not found errors
-  if (err.isOfferNotFound) {
-    logError(404, req, err.message);
-    return res.status(404).json({
-      success: false,
-      error: {
-        type: "OfferNotFound",
+        type: "InvalidTransactionHash",
         message: err.message,
         suggestion: err.suggestion,
       },
-    });
+    }, req));
   }
 
-  // Validation errors (thrown manually)
-  if (err.isValidation) {
-    const ske = new StellarKitError(
-      err.message,
-      400,
-      "ValidationError",
-      null,
-      err.expectedFormat ? `Expected format: ${err.expectedFormat}` : null
-    );
-    logError(400, req, err.message);
-    return res.status(400).json({
-      success: false,
-      error: {
-        ...ske.toJSON(),
-        field: err.field,
-        receivedValue: err.receivedValue,
-        expectedFormat: err.expectedFormat,
-      },
-    });
-  }
-
-  // Generic errors
+  // Fallback for any other error
   const status = err.status || err.statusCode || 500;
-  const message =
-    process.env.NODE_ENV === "production"
-      ? "An unexpected error occurred."
-      : err.message;
-  const skeGeneric = new StellarKitError(message, status, "ServerError");
-  logError(status, req, err.message);
-  return res.status(status).json({
+  const message = err.message || "Internal Server Error";
+  logError(status, req, message);
+  return errorResponse(res, status, withRequestId({
     success: false,
-    error: skeGeneric.toJSON(),
-  });
+    error: {
+      type: err.type || "InternalError",
+      message,
+    },
+  }, req));
 }
 
+// Export the middleware
 module.exports = errorHandler;

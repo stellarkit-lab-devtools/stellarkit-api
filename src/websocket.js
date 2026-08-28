@@ -1,6 +1,7 @@
 const { WebSocketServer } = require("ws");
 const logger = require("./utils/logger");
 const { server: stellarServer } = require("./config/stellar");
+const { formatLedgerSequence } = require("./utils/formatLedgerSequence");
 
 /**
  * Sets up the WebSocket server attached to the existing HTTP server.
@@ -50,7 +51,7 @@ function setupWebSocket(server) {
           try {
             // Transform raw Horizon ledger structure into desired JSON schema
             const payload = JSON.stringify({
-              sequence: ledger.sequence,
+              sequence: formatLedgerSequence(ledger.sequence),
               closedAt: ledger.closed_at,
               baseFee: ledger.base_fee_in_stroops,
               transactionCount: ledger.successful_transaction_count,

@@ -3,8 +3,12 @@ const router = express.Router();
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 const { server } = require("../config/stellar");
-const { success } = require("../utils/response");
+const { success, toISOTimestamp } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
+const { parsePaginationParams } = require("../utils/pagination");
+const cacheService = require("../services/cache");
+const cacheTTL = require("../config/cacheConfig");
+const { isNativeAsset } = require("../utils/assetHelpers");
 
 /**
  * Evaluates a claimable balance predicate recursively.
@@ -144,6 +148,120 @@ router.get("/:id/evaluate/:accountId", async (req, res, next) => {
       claimableUntil,
       predicate: claimant.predicate,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Normalises a single claimable balance record from Horizon into the
+ * consistent API shape used by the by-sponsor endpoint.
+ *
+ * @param {object} balance - Raw Horizon claimable balance record
+ * @returns {object} Normalised balance object
+ */
+function normalizeSponsorBalance(balance) {
+  // Parse asset string — Horizon returns "native" or "CODE:ISSUER"
+  let asset;
+  if (!balance.asset || isNativeAsset(balance.asset)) {
+    asset = { code: "XLM", issuer: null, type: "native" };
+  } else {
+    const colonIdx = balance.asset.indexOf(":");
+    if (colonIdx !== -1) {
+      const code = balance.asset.slice(0, colonIdx);
+      const issuer = balance.asset.slice(colonIdx + 1);
+      asset = {
+        code,
+        issuer,
+        type: code.length > 4 ? "credit_alphanum12" : "credit_alphanum4",
+      };
+    } else {
+      asset = { code: balance.asset, issuer: null, type: "credit_alphanum4" };
+    }
+  }
+
+  const amount = (parseFloat(balance.amount || 0)).toFixed(7);
+
+  return {
+    balanceId: balance.id,
+    asset,
+    amount,
+    claimants: Array.isArray(balance.claimants) ? balance.claimants : [],
+    createdAt: toISOTimestamp(balance.last_modified_time || balance.created_at || null),
+  };
+}
+
+/**
+ * GET /claimable-balances/by-sponsor/:address
+ *
+ * Returns a paginated list of claimable balances whose reserve was paid by
+ * the specified sponsor address. Each balance is normalised to a consistent
+ * shape: { balanceId, asset, amount, claimants, createdAt }.
+ *
+ * Responses are cached per sponsor address and pagination parameters.
+ * Sponsored claimable balances change infrequently, so even a short TTL
+ * eliminates most redundant Horizon calls.
+ *
+ * Cache TTL is configurable via CACHE_TTL_BALANCES_BY_SPONSOR_MS (default: 30 000 ms).
+ *
+ * Query params:
+ *   - limit  (number, default: 20, max: 200)  — page size
+ *   - cursor (string, optional)               — pagination cursor
+ *   - fresh  (boolean, default: false)         — bypass cache when "true"
+ *
+ * Response headers:
+ *   - X-Cache: HIT  — served from cache
+ *   - X-Cache: MISS — fetched live from Horizon and stored in cache
+ *
+ * @example
+ *   GET /claimable-balances/by-sponsor/GABC...?limit=10
+ *   GET /claimable-balances/by-sponsor/GABC...?cursor=<cursor>&fresh=true
+ */
+router.get("/by-sponsor/:address", async (req, res, next) => {
+  try {
+    const { address } = req.params;
+
+    // Validate that the sponsor address is a real Stellar Ed25519 public key
+    validateAccountId(address);
+
+    const { limit, cursor } = parsePaginationParams(req.query, 200);
+    const fresh = req.query.fresh === "true";
+    const cacheKey = `claimable-balances:by-sponsor:${address}:${limit}:${cursor || ""}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached !== undefined) {
+        res.set("X-Cache", "HIT");
+        return res.json({ success: true, data: cached });
+      }
+    }
+
+    let query = server
+      .claimableBalances()
+      .sponsor(address)
+      .limit(limit);
+
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    const balances = records.map(normalizeSponsorBalance);
+
+    const nextCursor = records.length > 0
+      ? records[records.length - 1].paging_token || null
+      : null;
+
+    const data = {
+      balances,
+      total: balances.length,
+      limit,
+      cursor: nextCursor,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.balancesBySponsor);
+    res.set("X-Cache", "MISS");
+    return res.json({ success: true, data });
   } catch (err) {
     next(err);
   }

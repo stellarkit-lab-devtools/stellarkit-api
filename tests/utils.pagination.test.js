@@ -105,3 +105,88 @@ describe("parsePaginationParams", () => {
     expect(parsePaginationParams({ limit: 100 }).limit).toBe(100);
   });
 });
+
+// ── Page-based pagination ────────────────────────────────────────────────
+
+describe("parsePaginationParams — ?page= support", () => {
+  it("page=1 returns no cursor and no page field (same as no param)", () => {
+    const result = parsePaginationParams({ page: "1" });
+    expect(result.cursor).toBeUndefined();
+    expect(result.page).toBeUndefined();
+    expect(result.limit).toBe(20);
+    expect(result.order).toBe("desc");
+  });
+
+  it("page=2 returns page:2 with cursor:undefined", () => {
+    const result = parsePaginationParams({ page: "2" });
+    expect(result.page).toBe(2);
+    expect(result.cursor).toBeUndefined();
+  });
+
+  it("page=2 with limit=20 returns limit:20 and page:2", () => {
+    const result = parsePaginationParams({ page: "2", limit: "20" });
+    expect(result.limit).toBe(20);
+    expect(result.page).toBe(2);
+    expect(result.cursor).toBeUndefined();
+  });
+
+  it("page=5 with limit=10 returns limit:10 and page:5", () => {
+    const result = parsePaginationParams({ page: "5", limit: "10" });
+    expect(result.limit).toBe(10);
+    expect(result.page).toBe(5);
+  });
+
+  it("cursor takes precedence over page when both are supplied", () => {
+    const result = parsePaginationParams({ page: "3", cursor: "token-abc" });
+    expect(result.cursor).toBe("token-abc");
+    expect(result.page).toBeUndefined();
+  });
+
+  it("page=0 throws a 400 validation error", () => {
+    expect(() => parsePaginationParams({ page: "0" })).toThrow();
+    try {
+      parsePaginationParams({ page: "0" });
+    } catch (err) {
+      expect(err.isValidation).toBe(true);
+      expect(err.field).toBe("page");
+      expect(err.status).toBe(400);
+    }
+  });
+
+  it("page=-1 throws a 400 validation error", () => {
+    try {
+      parsePaginationParams({ page: "-1" });
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err.isValidation).toBe(true);
+      expect(err.field).toBe("page");
+    }
+  });
+
+  it("page=abc throws a 400 validation error", () => {
+    try {
+      parsePaginationParams({ page: "abc" });
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err.isValidation).toBe(true);
+      expect(err.field).toBe("page");
+    }
+  });
+
+  it("page=1.5 (non-integer) throws a 400 validation error", () => {
+    try {
+      parsePaginationParams({ page: "1.5" });
+      throw new Error("Should have thrown");
+    } catch (err) {
+      expect(err.isValidation).toBe(true);
+      expect(err.field).toBe("page");
+    }
+  });
+
+  it("page=1.0 (parses as integer 1) is treated as page 1 — no pagination", () => {
+    // Number("1.0") === 1 which is an integer, so this is valid
+    const result = parsePaginationParams({ page: "1.0" });
+    expect(result.cursor).toBeUndefined();
+    expect(result.page).toBeUndefined();
+  });
+});

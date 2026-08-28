@@ -17,12 +17,24 @@ export class StellarKitError extends Error {
 export interface ContractData {
   /** Soroban contract ID (C... address). */
   contractId: string;
-  /** Hex-encoded hash of the deployed WASM code. */
-  wasmHash: string;
+  /** Hex-encoded hash of the deployed WASM code (64 chars), or null for stellar_asset. */
+  wasmHash: string | null;
+  /** Stellar account that deployed the contract, when known. */
+  deployer: string | null;
+  /** ISO 8601 deployment timestamp, when known. */
+  deployedAt: string | null;
+  /** Ledger sequence the contract was deployed in, when known. */
+  deployedLedger: number | null;
+  /** Whether the contract instance has expired based on the current ledger. */
+  isExpired: boolean;
   /** Ledger sequence the contract was last modified in. */
   lastModifiedLedger: number;
-  /** Stellar account that owns/deployed the contract, when known. */
-  deployer: string | null;
+  /** Ledger sequence until which the instance entry stays live, or null. */
+  expiryLedger: number | null;
+  executable: {
+    type: string;
+    wasmHash: string | null;
+  };
 }
 
 /** A single key/value entry from contract instance or persistent storage. */

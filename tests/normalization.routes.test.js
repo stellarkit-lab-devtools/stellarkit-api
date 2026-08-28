@@ -22,35 +22,200 @@ describe("response normalization endpoints", () => {
     jest.clearAllMocks();
   });
 
-  it("returns normalized asset holder responses with the requested envelope", async () => {
+  function mockAccounts(records) {
     server.accounts.mockReturnValue({
       forAsset: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
       order: jest.fn().mockReturnThis(),
       cursor: jest.fn().mockReturnThis(),
-      call: jest.fn().mockResolvedValue({
-        records: [
-          {
-            id: "GABC",
-            balances: [{ asset_code: "USDC", asset_issuer: "GISSUER", balance: "10.5000000", asset_type: "credit_alphanum4" }],
-            paging_token: "tok1",
-          },
-        ],
-      }),
+      call: jest.fn().mockResolvedValue({ records }),
     });
+  }
+
+  const ASSET_PATH = "/asset/USDC/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7/holders";
+
+  it("returns normalized asset holder responses with the requested envelope", async () => {
+    mockAccounts([
+      {
+        id: "GABC",
+        balances: [{ asset_code: "USDC", asset_issuer: "GISSUER", balance: "10.5000000", asset_type: "credit_alphanum4" }],
+        paging_token: "tok1",
+      },
+    ]);
+
+    const res = await request(app).get(ASSET_PATH).expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.meta.count).toBe(1);
+    expect(res.body.meta.limit).toBe(10);
+    expect(res.body.meta.hasMore).toBe(false);
+    expect(res.body.data).toEqual([{ address: "GABC", balance: "10.5000000" }]);
+    expect(res.body.data[0]).not.toHaveProperty("paging_token");
+    expect(res.get("X-Cache")).toBe("MISS");
+  });
+
+  it("filters to only accounts above base reserve when ?verified=true", async () => {
+    mockAccounts([
+      {
+        id: "GAHIGH",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "100.0000000", asset_type: "credit_alphanum4" },
+          { balance: "10.0000000", asset_type: "native" },
+        ],
+        paging_token: "tok1",
+      },
+      {
+        id: "GALOW",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "50.0000000", asset_type: "credit_alphanum4" },
+          { balance: "0.1000000", asset_type: "native" },
+        ],
+        paging_token: "tok2",
+      },
+      {
+        id: "GAZERO",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "25.0000000", asset_type: "credit_alphanum4" },
+        ],
+        paging_token: "tok3",
+      },
+    ]);
 
     const res = await request(app)
-      .get("/asset/USDC/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7/holders")
+      .get(`${ASSET_PATH}?verified=true`)
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data).toEqual({
-      holders: [{ address: "GABC", balance: "10.5000000" }],
-      total: 1,
-      limit: 10,
-      cursor: null,
-    });
-    expect(res.body.data.holders[0]).not.toHaveProperty("paging_token");
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].address).toBe("GAHIGH");
+    expect(res.body.meta.count).toBe(1);
+    expect(res.get("X-Cache")).toBe("MISS");
+  });
+
+  it("returns all holders when ?verified=false", async () => {
+    mockAccounts([
+      {
+        id: "GAHIGH",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "100.0000000", asset_type: "credit_alphanum4" },
+          { balance: "10.0000000", asset_type: "native" },
+        ],
+        paging_token: "tok1",
+      },
+      {
+        id: "GALOW",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "50.0000000", asset_type: "credit_alphanum4" },
+          { balance: "0.1000000", asset_type: "native" },
+        ],
+        paging_token: "tok2",
+      },
+    ]);
+
+    const res = await request(app)
+      .get(`${ASSET_PATH}?verified=false`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.meta.count).toBe(2);
+  });
+
+  it("returns all holders when verified param omitted", async () => {
+    mockAccounts([
+      {
+        id: "GAHIGH",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "100.0000000", asset_type: "credit_alphanum4" },
+          { balance: "10.0000000", asset_type: "native" },
+        ],
+        paging_token: "tok1",
+      },
+      {
+        id: "GALOW",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "50.0000000", asset_type: "credit_alphanum4" },
+          { balance: "0.1000000", asset_type: "native" },
+        ],
+        paging_token: "tok2",
+      },
+    ]);
+
+    const res = await request(app).get(ASSET_PATH).expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.meta.count).toBe(2);
+  });
+
+  it("returns 400 for invalid ?verified value", async () => {
+    mockAccounts([]);
+
+    const res = await request(app)
+      .get(`${ASSET_PATH}?verified=banana`)
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+  });
+
+  it("combines ?verified=true with minBalance filter", async () => {
+    mockAccounts([
+      {
+        id: "GAHIGH",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "200.0000000", asset_type: "credit_alphanum4" },
+          { balance: "10.0000000", asset_type: "native" },
+        ],
+        paging_token: "tok1",
+      },
+      {
+        id: "GALOW",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "50.0000000", asset_type: "credit_alphanum4" },
+          { balance: "10.0000000", asset_type: "native" },
+        ],
+        paging_token: "tok2",
+      },
+      {
+        id: "GARICH_NO_XLM",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "150.0000000", asset_type: "credit_alphanum4" },
+          { balance: "0.1000000", asset_type: "native" },
+        ],
+        paging_token: "tok3",
+      },
+    ]);
+
+    const res = await request(app)
+      .get(`${ASSET_PATH}?verified=true&minBalance=100`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].address).toBe("GAHIGH");
+    expect(res.body.meta.count).toBe(1);
+    expect(res.get("X-Cache")).toBe("MISS");
+  });
+
+  it("returns empty when ?verified=true and no holder qualifies", async () => {
+    mockAccounts([
+      {
+        id: "GALOW",
+        balances: [
+          { asset_code: "USDC", asset_issuer: "GISSUER", balance: "50.0000000", asset_type: "credit_alphanum4" },
+          { balance: "0.1000000", asset_type: "native" },
+        ],
+        paging_token: "tok1",
+      },
+    ]);
+
+    const res = await request(app)
+      .get(`${ASSET_PATH}?verified=true`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(0);
+    expect(res.body.meta.count).toBe(0);
   });
 
   it("normalizes pool positions asset fields and decimal strings", async () => {

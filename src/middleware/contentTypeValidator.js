@@ -1,17 +1,18 @@
+/**
+ * Content-Type validation middleware.
+ *
+ * All state-changing requests (POST and PATCH) must declare
+ * `Content-Type: application/json`. Requests that omit the header or supply
+ * a different media type are rejected with HTTP 415 Unsupported Media Type
+ * before the body is parsed or any route handler runs.
+ *
+ * GET, DELETE, and other non-mutating methods are unaffected.
+ */
+
 const BODY_METHODS = new Set(["POST", "PATCH"]);
 
-function hasRequestBody(req) {
-  const contentLength = req.headers["content-length"];
-
-  if (contentLength && Number(contentLength) > 0) {
-    return true;
-  }
-
-  return Boolean(req.headers["transfer-encoding"]);
-}
-
 function contentTypeValidator(req, res, next) {
-  if (!BODY_METHODS.has(req.method) || !hasRequestBody(req)) {
+  if (!BODY_METHODS.has(req.method)) {
     return next();
   }
 
@@ -19,11 +20,11 @@ function contentTypeValidator(req, res, next) {
     return next();
   }
 
-  return res.status(400).json({
+  return res.status(415).json({
     success: false,
     error: {
-      type: "ValidationError",
-      message: "Content-Type must be application/json for requests with a body.",
+      type: "InvalidContentType",
+      message: "Content-Type must be application/json.",
     },
   });
 }

@@ -39,71 +39,17 @@ Returned when a request parameter or body value fails validation.
 
 ## Error Types
 
-| Type              | HTTP Status | Description                                                           |
-| ----------------- | ----------- | --------------------------------------------------------------------- |
-| `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
-| `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
-| `InsufficientReserve` | 422     | Account does not have enough XLM to cover the minimum reserve requirement |
-| `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
-| `NotFound`        | 404         | Route or resource not found                                           |
-| `RateLimitError`  | 429         | Too many requests from the same IP                                    |
-| `ServerError`     | 500         | Unexpected internal error                                             |
-
----
-
-### OfferNotFound
-
-Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID that does not exist, or when any operation references a non-existent offer.
-StellarKit API Error Reference
-
-Every error response follows the same envelope:
-
-```json
-{
-  "success": false,
-  "error": {
-    "type": "ErrorType",
-    "message": "Human-readable description."
-  }
-}
-```
-
-Some error types include additional fields such as `detail`, `suggestion`, `field`, `receivedValue`, `expectedFormat`, or Horizon-specific `extras`.
-
-For a complete reference of HTTP status codes returned by the API, see [Error Codes](./error-codes.md).
-
----
-
-## ValidationError
-
-Returned when a request parameter or body value fails validation.
-
-**Status:** `400`
-
-**Example:**
-
-```json
-{
-  "success": false,
-  "error": {
-    "type": "<ErrorType>",
-    "message": "...",
-    ...
-  }
-}
-```
-
-## Error Types
-
-| Type              | HTTP Status | Description                                                           |
-| ----------------- | ----------- | --------------------------------------------------------------------- |
-| `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
-| `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
-| `InsufficientReserve` | 422     | Account does not have enough XLM to cover the minimum reserve requirement |
-| `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
-| `NotFound`        | 404         | Route or resource not found                                           |
-| `RateLimitError`  | 429         | Too many requests from the same IP                                    |
-| `ServerError`     | 500         | Unexpected internal error                                             |
+| Type                  | HTTP Status | Description                                                           |
+| --------------------- | ----------- | --------------------------------------------------------------------- |
+| `ValidationError`     | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
+| `HorizonError`        | varies      | Error propagated from the Stellar Horizon API                         |
+| `InsufficientReserve` | 422         | Account does not have enough XLM to cover the minimum reserve requirement |
+| `OfferNotFound`       | 404         | A specific offer was requested but does not exist on the network      |
+| `TrustlineNotFound`   | 404         | The requested asset trustline does not exist on the account           |
+| `TomlFetchFailed`     | 502         | The issuer's stellar.toml could not be fetched (network error, missing file, or invalid format) |
+| `NotFound`            | 404         | Route or resource not found                                           |
+| `RateLimitError`      | 429         | Too many requests from the same IP                                    |
+| `ServerError`         | 500         | Unexpected internal error                                             |
 
 ---
 
@@ -117,19 +63,74 @@ Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID 
 {
   "success": false,
   "error": {
-    "type": "AccountNotFound",
-    "message": "Account GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN was not found on the Stellar testnet network.",
-    "suggestion": "Verify the account address is correct and that the account has been funded."
+    "type": "OfferNotFound",
+    "message": "Offer '12345' was not found on the Stellar testnet network.",
+    "suggestion": "The offer may have already been filled, cancelled, or the offer ID may be incorrect."
+  }
+}
+```
+
+---
+
+### TrustlineNotFound
+
+Returned when an endpoint looks up a specific asset trustline for an account and that trustline does not exist.
+
+**Status:** `404`
+
+**Affected endpoints:**
+- `GET /account/:id/asset-balance/:assetCode/:assetIssuer`
+- `GET /account/:id/freeze-status/:assetCode/:assetIssuer`
+- `GET /account/:id/can-receive/:assetCode/:assetIssuer`
+
+**Example response:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "TrustlineNotFound",
+    "message": "Account 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN' does not hold a trustline for USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.",
+    "suggestion": "The account must establish a trustline before holding this asset."
   }
 }
 ```
 
 **Common causes:**
-- The public key is valid but the account has not been created on the network
-- The account was merged and no longer exists
-- Using a testnet key on mainnet or vice versa
+- The account has never created a trustline for the requested asset
+- The trustline was removed by the account holder
+- The wrong issuer address was supplied
 
-**Suggested fix:** Verify the account address. If on testnet, fund the account using Friendbot (`GET /utils/friendbot/:accountId`).
+**Suggested fix:** The account must submit a `changeTrust` operation for the asset before it can hold a balance or interact with it.
+
+---
+
+## TomlFetchFailed
+
+Returned by `GET /asset/:code/:issuer/toml` when the issuer's `stellar.toml` file cannot be fetched — due to a network error, a missing file, or invalid TOML content.
+
+**Status:** `502`
+
+**Example response:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "TomlFetchFailed",
+    "message": "Could not fetch stellar.toml for issuer 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'.",
+    "suggestion": "Verify the issuer has a valid stellar.toml at their home domain. See https://developers.stellar.org/docs/issuing-assets/publishing-asset-info for requirements."
+  }
+}
+```
+
+**Common causes:**
+- The issuer account has no `home_domain` set
+- The issuer's home domain is unreachable or times out
+- `/.well-known/stellar.toml` does not exist at the issuer's home domain (404)
+- The file exists but is not valid TOML
+
+**Suggested fix:** The issuer must publish a valid `stellar.toml` at `https://<home_domain>/.well-known/stellar.toml`.
 
 ---
 
@@ -298,24 +299,10 @@ Returned when API key authentication is enabled and the request is missing or ha
 
 **Status:** `401`
 
-**Example:**
-
-```json
-{
-  "success": false,
-  "error": {
-    "type": "HorizonError",
-    "title": "Transaction Failed",
-    "detail": "The transaction failed when submitted to the Stellar network.",
-    "status": 400,
-    "extras": { "result_codes": { "transaction": "tx_failed" } },
-    "code": "tx_failed",
-    "message": "tx_failed"
-  }
-}
-```
+---
 
 ### ServerError
+
 **HTTP status:** `500` (or another 5xx status when set upstream)
 
 Returned for unexpected errors not covered by another error type. In production, the message is generic (`"An unexpected error occurred."`) to avoid leaking internals; the full message is included outside of production.

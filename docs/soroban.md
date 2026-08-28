@@ -1,6 +1,6 @@
 # Soroban Contract Endpoints
 
-This guide covers StellarKit API's two Soroban endpoints: `GET /soroban/contract/:id` and `GET /soroban/contract/:id/storage`. It explains what Soroban is, how contract IDs work, what each response field means, and how to use the endpoints to debug a deployed contract.
+This guide covers StellarKit API's Soroban endpoints: `GET /soroban/contract/:id`, `GET /soroban/contract/:id/storage`, and `GET /soroban/contract/:id/functions`. It explains what Soroban is, how contract IDs work, what each response field means, and how to use the endpoints to debug a deployed contract.
 
 ## What is Soroban?
 
@@ -40,6 +40,11 @@ curl https://your-stellarkit-instance.example.com/soroban/contract/CDLZFC3SYJYDZ
   "success": true,
   "data": {
     "contractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+    "wasmHash": null,
+    "deployer": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+    "deployedAt": "2024-06-01T12:00:00.000Z",
+    "deployedLedger": 689,
+    "isExpired": false,
     "executable": {
       "type": "stellar_asset",
       "wasmHash": null
@@ -55,8 +60,13 @@ curl https://your-stellarkit-instance.example.com/soroban/contract/CDLZFC3SYJYDZ
 | Field | Description |
 | --- | --- |
 | `contractId` | The contract address you queried. |
+| `wasmHash` | Top-level hex-encoded SHA-256 hash of the contract's WASM binary (64 characters), or `null` for Stellar Asset Contract executables. |
+| `deployer` | Stellar account (`G...`) that deployed the contract, or `null` if deployment metadata is unavailable. |
+| `deployedAt` | ISO 8601 timestamp of the deployment transaction, or `null` when unknown. |
+| `deployedLedger` | Ledger sequence number in which the contract was deployed, or `null` when unknown. |
+| `isExpired` | `true` when the current ledger is past `expiryLedger`; otherwise `false`. |
 | `executable.type` | `"wasm"` for a contract backed by uploaded WASM code, or `"stellar_asset"` for the built-in Stellar Asset Contract executable used by classic Stellar assets. |
-| `executable.wasmHash` | The hex-encoded SHA-256 hash of the contract's WASM binary, or `null` when `executable.type` is `"stellar_asset"`. |
+| `executable.wasmHash` | Same as top-level `wasmHash` — the hex-encoded SHA-256 hash of the contract's WASM binary, or `null` when `executable.type` is `"stellar_asset"`. |
 | `lastModifiedLedger` | The ledger sequence number the instance entry was last written in. |
 | `expiryLedger` | The ledger sequence number until which the instance entry is guaranteed to stay live on the ledger (its TTL), or `null` if unavailable. Once the network passes this ledger, the entry is archived and must be restored before it can be read or invoked again. |
 
@@ -160,9 +170,47 @@ curl -i "https://your-stellarkit-instance.example.com/soroban/contract/<id>/stor
 # X-Cache: MISS
 ```
 
+## `GET /soroban/contract/:id/functions`
+
+Returns the contract's exported function signatures parsed from its WASM ABI (`contractspecv0`). Use this before building invoke transactions so you know function names, parameter types, and return types.
+
+Stellar Asset Contracts and WASM binaries with no exported functions return an empty `functions` array rather than an error. Missing contracts return `404 ContractNotFound`. Responses are cached for 60 seconds (`CACHE_TTL_CONTRACT_FUNCTIONS_MS`).
+
+### Example request
+
+```bash
+curl https://your-stellarkit-instance.example.com/soroban/contract/CCJZ5DGASBWQXR5MPFCJXMBI333XE5U3FSJTNQU7RIKE3P5GN2K2WYD2/functions
+```
+
+### Example response
+
+```json
+{
+  "success": true,
+  "data": {
+    "functions": [
+      {
+        "name": "transfer",
+        "params": [
+          { "name": "from", "type": "Address" },
+          { "name": "to", "type": "Address" },
+          { "name": "amount", "type": "I128" }
+        ],
+        "returnType": "Void"
+      },
+      {
+        "name": "balance",
+        "params": [{ "name": "id", "type": "Address" }],
+        "returnType": "I128"
+      }
+    ]
+  }
+}
+```
+
 ## Configuration
 
-Both endpoints require a reachable Soroban RPC server, configured via `SOROBAN_RPC_URL`:
+These endpoints require a reachable Soroban RPC server, configured via `SOROBAN_RPC_URL`:
 
 ```env
 # Testnet default (used automatically if unset): https://soroban-testnet.stellar.org
@@ -170,4 +218,4 @@ Both endpoints require a reachable Soroban RPC server, configured via `SOROBAN_R
 SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 ```
 
-If `SOROBAN_RPC_URL` is unset and `STELLAR_NETWORK=mainnet`, both endpoints return a `500 ConfigError` telling you to set it.
+If `SOROBAN_RPC_URL` is unset and `STELLAR_NETWORK=mainnet`, these endpoints return a `500 ConfigError` telling you to set it.

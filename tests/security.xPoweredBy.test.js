@@ -1,8 +1,18 @@
 const request = require("supertest");
 const app = require("../src/index");
+const { server } = require("../src/config/stellar");
 
 describe("Security - X-Powered-By header", () => {
   describe("GET /health", () => {
+    beforeEach(() => {
+      jest.spyOn(server, "serverInfo").mockResolvedValue({
+        horizon_version: "2.33.0",
+      });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
     it("should not include X-Powered-By header", async () => {
       const res = await request(app).get("/health");
 
