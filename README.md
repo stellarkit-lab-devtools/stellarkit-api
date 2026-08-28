@@ -51,6 +51,8 @@ This project is ideal for:
 - [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
 - [Error Codes](docs/error-codes.md) - HTTP status code reference with descriptions, scenarios, and sample responses
 - [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
+- [Webhooks](docs/webhooks.md) - Event types, payload structure, delivery behavior, and retry schedule
+- [Webhook Security](docs/webhook-security.md) - HMAC-SHA256 signature verification, Node.js/Python/Go examples, secret storage, and dual-secret rotation
 - [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
 
 ---
