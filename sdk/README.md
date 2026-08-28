@@ -174,6 +174,7 @@ Every endpoint in the StellarKit API has a corresponding method. All methods ret
 | | `getAccountTrustlines(id)` | Trustlines with resolved TOML metadata |
 | | `getAccountPoolPositions(id)` | Share values in all liquidity pools |
 | | `searchAccountTransactions(id, memo)` | Search transactions by memo content |
+| | `getEffects(id, {limit?, cursor?, type?, order?})` | Paginated ledger effects (Effect {effectId, type, createdAt, asset?, amount?}) — `GET /account/:id/effects` |
 | **DEX** | `getDexSpread(sell, buy)` | Calculate bid-ask spread for a pair |
 | | `getDexPrice(sell, buy, amt)` | Best effective exchange rate |
 | | `getDexDepth(sell, buy)` | Full order book depth analysis |
