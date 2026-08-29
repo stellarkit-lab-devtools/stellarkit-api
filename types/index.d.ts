@@ -743,3 +743,19 @@ export interface AccountTransactionCountResponse {
 
 declare module 'stellarkit-api' {
 }
+
+export interface RiskScoreFactor {
+    name: string;
+      weight: number;
+        description?: string;
+        }
+
+        export type RiskLevel = 'low' | 'medium' | 'high';
+
+        export interface RiskScore {
+          score: number;
+            level: RiskLevel;
+              factors: RiskScoreFactor[];
+                computedAt: string;
+                }
+}
