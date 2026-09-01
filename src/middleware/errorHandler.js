@@ -1,11 +1,7 @@
 /**
  * Centralised error handler middleware.
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
- * All non-Horizon errors are wrapped in StellaKitError for consistency.
- *
- * Production safety: stack traces and internal file paths are never included
- * in responses when NODE_ENV=production. Full error details remain available
- * in development and test environments.
+ * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
 const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");

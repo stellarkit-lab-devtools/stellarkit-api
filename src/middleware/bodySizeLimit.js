@@ -47,7 +47,10 @@ function resolveLimit() {
   return { kb: DEFAULT_MAX_KB, expressLimit: `${DEFAULT_MAX_KB}kb` };
 }
 
-const { kb: MAX_KB, expressLimit: EXPRESS_LIMIT } = resolveLimit();
+const limit = resolveLimit();
+const requestBodySizeLimit = limit.expressLimit;
+const MAX_BODY_SIZE = limit.expressLimit;
+const MAX_BODY_SIZE_KB = limit.kb;
 
 // Capture raw body for webhook signature verification
 const bodySizeLimit = express.json({
@@ -63,10 +66,10 @@ module.exports = bodySizeLimit;
  * The resolved Express-compatible limit string (e.g. "10kb").
  * Exported so tests can assert the correct value is in use.
  */
-module.exports.MAX_BODY_SIZE = EXPRESS_LIMIT;
+module.exports.MAX_BODY_SIZE = limit.expressLimit;
 
 /**
  * The resolved limit in kilobytes as a number.
  * Exported for use in error messages and tests.
  */
-module.exports.MAX_BODY_SIZE_KB = MAX_KB;
+module.exports.MAX_BODY_SIZE_KB = limit.kb;

@@ -4,6 +4,7 @@ const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const GLOBAL_RATE_LIMIT_MAX = 100;
 const ACCOUNT_SUMMARY_RATE_LIMIT_MAX = 20;
 const ASSET_HOLDERS_RATE_LIMIT_MAX = 10;
+const DEFAULT_ACCOUNT_RATE_LIMIT_MAX = 500;
 
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -24,14 +25,15 @@ const RATE_LIMIT_WINDOW_MS = parsePositiveInteger(
  * @param {*} options - Rate limiter options
  */
 function rateLimitHandler(req, res, options) {
-  // Calculate retry-after in seconds (window in ms to seconds)
   const retryAfterSeconds = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
 
-  // Set rate limit headers on all rate-limited responses
-  res.set('Retry-After', String(retryAfterSeconds));
-  res.set('X-RateLimit-Limit', String(options.max));
-  res.set('X-RateLimit-Remaining', '0');
-  res.set('X-RateLimit-Reset', new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString());
+  res.set("Retry-After", String(retryAfterSeconds));
+  res.set("X-RateLimit-Limit", String(options.max));
+  res.set("X-RateLimit-Remaining", "0");
+  res.set(
+    "X-RateLimit-Reset",
+    new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString(),
+  );
 
   res.status(429).json({
     success: false,
@@ -50,27 +52,78 @@ function rateLimitHandler(req, res, options) {
  * @param {Object} config - Configuration object
  * @param {number} config.max - Maximum requests per window
  * @param {string} config.message - User-friendly error message
+ * @param {Function} [config.keyGenerator] - Custom key generator for rate limit key
  * @returns {Function} Express middleware
  */
-function createLimiter({ max, message }) {
+function createLimiter({ max, message, keyGenerator }) {
+  const limiterHandler = (req, res, _next, _options) => {
+    const retryAfterSeconds = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
+
+    res.set("Retry-After", String(retryAfterSeconds));
+    res.set("X-RateLimit-Limit", String(max));
+    res.set("X-RateLimit-Remaining", "0");
+    res.set(
+      "X-RateLimit-Reset",
+      new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString(),
+    );
+
+    res.status(429).json({
+      success: false,
+      error: {
+        type: "RateLimitExceeded",
+        message: "Too many requests, please try again later.",
+        retryAfter: retryAfterSeconds,
+        resetAt: new Date(Date.now() + RATE_LIMIT_WINDOW_MS).toISOString(),
+      },
+    });
+  };
+
   return rateLimit({
     windowMs: RATE_LIMIT_WINDOW_MS,
     max,
-    standardHeaders: false, // Don't use default RateLimit-* headers
-    legacyHeaders: false,   // Don't use deprecated X-RateLimit-* headers from express-rate-limit
-    handler: rateLimitHandler, // Use our custom handler
-    // Optional: Skip certain requests
+    standardHeaders: false,
+    legacyHeaders: false,
+    keyGenerator: keyGenerator || undefined,
+    handler: limiterHandler,
     skip: (req) => {
-      // Skip health check endpoint
       return req.path === "/health";
     },
   });
 }
 
+const GLOBAL_MAX = parsePositiveInteger(
+  process.env.RATE_LIMIT_MAX,
+  GLOBAL_RATE_LIMIT_MAX,
+);
+const ACCOUNT_MAX = parsePositiveInteger(
+  process.env.ACCOUNT_RATE_LIMIT_MAX,
+  DEFAULT_ACCOUNT_RATE_LIMIT_MAX,
+);
+
 const globalRateLimiter = createLimiter({
-  max: parsePositiveInteger(process.env.RATE_LIMIT_MAX, GLOBAL_RATE_LIMIT_MAX),
+  max: GLOBAL_MAX,
   message: "Too many requests, please try again after 15 minutes.",
 });
+
+const accountRateLimiter = createLimiter({
+  max: ACCOUNT_MAX,
+  message: "Too many account requests, please try again after 15 minutes.",
+  keyGenerator: (req) =>
+    String(req.headers["x-account-id"] || req.ip),
+});
+
+/**
+ * Composite rate-limit middleware.
+ * Requests with a valid X-Account-ID header use the per-account limiter;
+ * all others fall back to the global limiter.
+ */
+function rateLimitMiddleware(req, res, next) {
+  const accountId = req.headers["x-account-id"];
+  if (accountId) {
+    return accountRateLimiter(req, res, next);
+  }
+  return globalRateLimiter(req, res, next);
+}
 
 const accountSummaryRateLimiter = createLimiter({
   max: ACCOUNT_SUMMARY_RATE_LIMIT_MAX,
@@ -84,11 +137,11 @@ const assetHoldersRateLimiter = createLimiter({
     "Too many asset holder requests, please try again after 15 minutes.",
 });
 
-module.exports = globalRateLimiter;
-module.exports.accountSummaryRateLimiter = accountSummaryRateLimiter;
-module.exports.assetHoldersRateLimiter = assetHoldersRateLimiter;
+module.exports = rateLimitMiddleware;
+module.exports.accountRateLimiter = accountRateLimiter;
 module.exports.globalRateLimiter = globalRateLimiter;
 module.exports.accountSummaryRateLimiter = accountSummaryRateLimiter;
 module.exports.assetHoldersRateLimiter = assetHoldersRateLimiter;
 module.exports.createLimiter = createLimiter;
 module.exports.RATE_LIMIT_WINDOW_MS = RATE_LIMIT_WINDOW_MS;
+module.exports.ACCOUNT_RATE_LIMIT_MAX = ACCOUNT_MAX;
