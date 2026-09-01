@@ -301,7 +301,7 @@ router.get("/:id/trustlines", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
     const includeMetadata = req.query.includeMetadata === "true";
     const { assetCode } = req.query;
     const sponsored = req.query.sponsored;
@@ -565,7 +565,7 @@ router.get("/:id/sequence", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
     const cacheKey = `sequence:${id}`;
 
     if (!fresh) {
@@ -1209,35 +1209,60 @@ router.get("/:id/trades", async (req, res, next) => {
 /**
  * GET /account/:id/offers
  *
- * Returns open DEX offers for an account.
+ * Returns live open DEX offers for an account by calling
+ * `server.offers().forAccount(id)` on the Stellar Horizon SDK.
+ * Each offer is mapped to the StellarKit normalised shape:
+ *   offerId, selling, buying, amount, price, lastModifiedLedger
+ *
+ * All amounts are formatted as seven-decimal strings (Stellar precision).
  *
  * Query params:
- *   - offerId       (string)  — fetch a single offer by its numeric ID
- *   - expandAssets  (boolean) — when "true", embeds full { code, issuer, type }
- *                               objects for both selling and buying assets.
- *                               When omitted (default), returns simplified
- *                               asset strings for backward compatibility.
- *   - limit, order, cursor   — standard pagination
+ *   - limit, cursor   — standard pagination
+ *   - offerId         — fetch a single offer by its numeric ID
  *
  * @example
- *   GET /account/:id/offers                        → simplified asset strings
- *   GET /account/:id/offers?expandAssets=true      → full asset objects
+ *   GET /account/:id/offers
+ *   GET /account/:id/offers?limit=50&cursor=12345
  */
 router.get("/:id/offers", async (req, res, next) => {
   try {
     const { id } = req.params;
     const { offerId } = req.query;
 
-    // expandAssets=true embeds full { code, issuer, type } objects on each offer.
-    // Any value other than the string "true" keeps the default simplified form.
-    const expandAssets = req.query.expandAssets === "true";
-
     validateAccountId(id);
 
     if (offerId) {
       try {
         const offer = await server.offers().offer(offerId).call();
-        return success(res, offer);
+        const sellingAsset = normalizeAsset(
+          offer.selling_asset_code,
+          offer.selling_asset_issuer,
+          offer.selling_asset_type,
+        );
+        const buyingAsset = normalizeAsset(
+          offer.buying_asset_code,
+          offer.buying_asset_issuer,
+          offer.buying_asset_type,
+        );
+        let priceDecimal;
+        if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+          priceDecimal = (Number(offer.price_r.n) / Number(offer.price_r.d)).toFixed(7);
+        } else {
+          priceDecimal = parseFloat(offer.price || "0").toFixed(7);
+        }
+        return success(res, {
+          offerId: offer.id,
+          seller: offer.seller,
+          selling: {
+            asset: sellingAsset,
+            amount: parseFloat(offer.amount || "0").toFixed(7),
+          },
+          buying: {
+            asset: buyingAsset,
+          },
+          price: priceDecimal,
+          lastModifiedLedger: offer.last_modified_ledger,
+        });
       } catch (err) {
         if (err.response && err.response.status === 404) {
           const notFound = new Error(
@@ -1252,9 +1277,9 @@ router.get("/:id/offers", async (req, res, next) => {
       }
     }
 
-    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const { limit, cursor } = parsePaginationParams(req.query);
 
-    let query = server.offers().forAccount(id).limit(limit).order(order);
+    let query = server.offers().forAccount(id).limit(limit).order("desc");
     if (cursor) query = query.cursor(cursor);
 
     const offerResponse = await query.call();
@@ -1271,7 +1296,7 @@ router.get("/:id/offers", async (req, res, next) => {
         priceDecimal = parseFloat(offer.price || "0").toFixed(7);
       }
 
-      // Full normalized asset object { code, issuer, type }
+      // Full normalized asset objects { code, issuer, type }
       const sellingAsset = normalizeAsset(
         offer.selling_asset_code,
         offer.selling_asset_issuer,
@@ -1283,45 +1308,27 @@ router.get("/:id/offers", async (req, res, next) => {
         offer.buying_asset_type,
       );
 
-      if (expandAssets) {
-        // ?expandAssets=true — embed full asset objects on both sides
-        return {
-          id: offer.id,
-          seller: offer.seller,
-          selling: {
-            asset: sellingAsset,
-            amount: parseFloat(offer.amount || "0").toFixed(7),
-          },
-          buying: {
-            asset: buyingAsset,
-          },
-          price: priceDecimal,
-          lastModifiedLedger: offer.last_modified_ledger,
-        };
-      }
-
-      // Default (backward-compatible) — asset fields spread directly onto selling/buying
+      // Normalised shape: offerId, selling { asset, amount }, buying { asset },
+      // price, lastModifiedLedger — all amounts as seven-decimal strings
       return {
-        id: offer.id,
+        offerId: offer.id,
         seller: offer.seller,
         selling: {
-          ...sellingAsset,
-          // Format to 7 decimal places (Stellar precision standard)
+          asset: sellingAsset,
           amount: parseFloat(offer.amount || "0").toFixed(7),
         },
-        buying: buyingAsset,
-        // price is a 7-decimal string derived from the price_r fraction
+        buying: {
+          asset: buyingAsset,
+        },
         price: priceDecimal,
-        // camelCase rename of last_modified_ledger
         lastModifiedLedger: offer.last_modified_ledger,
       };
     });
 
-    const hasMore = (offerResponse.records || []).length === limit;
-    const nextCursor = hasMore
-      ? (offerResponse.records[offerResponse.records.length - 1] || {})
-        .paging_token
-      : null;
+    const nextCursor =
+      offers.length > 0
+        ? (offerResponse.records[offerResponse.records.length - 1] || {}).paging_token
+        : null;
 
     return success(res, {
       items: offers,
@@ -1338,6 +1345,102 @@ router.get("/:id/offers", async (req, res, next) => {
   }
 });
 
+
+/**
+ * GET /account/:id/history
+ * Returns a unified account activity feed combining recent operations and effects.
+ *
+ * Query params:
+ *   - limit (default 20, max 100)
+ *   - order (asc|desc, default desc)
+ */
+router.get("/:id/history", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const limit = validateLimit(req.query.limit ?? 20, 100);
+    const order = (req.query.order || "desc").toLowerCase();
+    if (order !== "asc" && order !== "desc") {
+      const err = new Error("Query parameter 'order' must be either 'asc' or 'desc'.");
+      err.isValidation = true;
+      err.field = "order";
+      err.receivedValue = String(req.query.order);
+      err.expectedFormat = "asc or desc";
+      throw err;
+    }
+
+    const operationQuery = server
+      .operations()
+      .forAccount(id)
+      .limit(limit)
+      .order(order);
+
+    const effectQuery = server
+      .effects()
+      .forAccount(id)
+      .limit(limit)
+      .order(order);
+
+    const [operationsResponse, effectsResponse] = await Promise.all([
+      operationQuery.call(),
+      effectQuery.call(),
+    ]);
+
+    const operationItems = (operationsResponse.records || []).map((op) => ({
+      id: op.id || `${op.paging_token || op.transaction_hash || "op"}`,
+      type: op.type,
+      category: "operation",
+      account: op.source_account || id,
+      createdAt: toISOTimestamp(op.created_at),
+      transactionHash: op.transaction_hash || null,
+      sourceAccount: op.source_account || null,
+      asset: op.asset_code || op.asset || null,
+      amount: op.amount || op.starting_balance || null,
+      from: op.from || null,
+      to: op.to || null,
+      pagingToken: op.paging_token || null,
+      raw: op,
+    }));
+
+    const effectItems = (effectsResponse.records || []).map((effect) => ({
+      id: effect.id || effect.paging_token || effect.transaction_hash || "effect",
+      type: effect.type,
+      category: "effect",
+      account: effect.account || id,
+      createdAt: toISOTimestamp(effect.created_at),
+      transactionHash: effect.transaction_hash || null,
+      asset: effect.asset || null,
+      amount: effect.amount || effect.starting_balance || null,
+      balance: effect.balance || null,
+      limit: effect.limit || null,
+      seller: effect.seller || null,
+      offerId: effect.offer_id || null,
+      trustor: effect.trustor || null,
+      trustee: effect.trustee || null,
+      pagingToken: effect.paging_token || null,
+      raw: effect,
+    }));
+
+    const merged = [...operationItems, ...effectItems].sort((a, b) => {
+      const left = new Date(a.createdAt || 0).getTime();
+      const right = new Date(b.createdAt || 0).getTime();
+      return order === "asc" ? left - right : right - left;
+    });
+
+    const items = merged.slice(0, limit);
+
+    return success(res, {
+      items,
+      total: merged.length,
+      limit,
+      order,
+      cursor: null,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
 
 /**
  * Builds a normalized { code, issuer, type } asset shape from a raw Horizon
@@ -1697,6 +1800,8 @@ function normalizeEffect(eff) {
   return { ...base };
 }
 
+router.normalizeEffect = normalizeEffect;
+
 /**
  * GET /account/:id/effects
  *
@@ -1917,7 +2022,7 @@ router.get("/:id", async (req, res, next) => {
     validateAccountId(id);
 
     const cacheKey = `account:${id}`;
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
 
     // Serve from cache unless caller requests a fresh fetch
     if (!fresh) {
@@ -2718,6 +2823,9 @@ router.get("/:id/inactivity", async (req, res, next) => {
 
 /**
  * GET /account/:id/can-receive/:assetCode/:assetIssuer
+ *
+ * Checks whether an account can receive a specific asset (trustline, authorization, capacity).
+ * Returns { canReceive, reason } where reason is null when canReceive is true.
  */
 router.get(
   "/:id/can-receive/:assetCode/:assetIssuer",
@@ -2728,11 +2836,9 @@ router.get(
       validateAssetCode(assetCode);
 
       const normalizedAssetCode = assetCode.toUpperCase();
-      const normalizedAssetIssuer =
-        normalizedAssetCode === "XLM" ? assetIssuer.toLowerCase() : assetIssuer;
 
       if (normalizedAssetCode === "XLM") {
-        if (normalizedAssetIssuer !== "native") {
+        if (assetIssuer.toLowerCase() !== "native") {
           const err = new Error(
             'Invalid asset issuer for XLM. Use "native" as the issuer.',
           );
@@ -2740,28 +2846,12 @@ router.get(
           err.status = 400;
           throw err;
         }
-      } else {
-        validateAccountId(assetIssuer);
+        await withHorizonTiming(req, () => server.loadAccount(id));
+        return success(res, { canReceive: true, reason: null });
       }
 
+      validateAccountId(assetIssuer);
       const account = await withHorizonTiming(req, () => server.loadAccount(id));
-
-      if (normalizedAssetCode === "XLM") {
-        return success(res, {
-          accountId: account.id,
-          asset: normalizeAsset("XLM", null, "native"),
-          canReceive: true,
-          reasons: [],
-          trustlineExists: true,
-          isAuthorized: true,
-          availableCapacity: null,
-          currentBalance: parseFloat(
-            (account.balances || []).find((b) => isNativeAsset(b))
-              ?.balance || "0",
-          ),
-          limit: null,
-        });
-      }
 
       const trustline = (account.balances || []).find(
         (b) =>
@@ -2771,10 +2861,13 @@ router.get(
       );
 
       if (!trustline) {
-        return next(makeTrustlineNotFoundError(id, normalizedAssetCode, assetIssuer));
+        return success(res, { canReceive: false, reason: "no_trustline" });
       }
 
-      const isAuthorized = trustline.is_authorized === true;
+      if (trustline.is_authorized !== true) {
+        return success(res, { canReceive: false, reason: "not_authorized" });
+      }
+
       const currentBalance = parseFloat(trustline.balance || "0");
       const limit = parseFloat(trustline.limit || "0");
       const buyingLiabilities = parseFloat(trustline.buying_liabilities || "0");
@@ -2783,29 +2876,11 @@ router.get(
         limit - currentBalance - buyingLiabilities,
       );
 
-      const canReceive = isAuthorized && availableCapacity > 0;
-
-      const reasons = [];
-      if (!isAuthorized) {
-        reasons.push("Trustline is not authorized by the issuer.");
-      }
-      if (isAuthorized && availableCapacity <= 0) {
-        reasons.push(
-          "No available capacity on trustline (limit reached or fully utilized).",
-        );
+      if (availableCapacity <= 0) {
+        return success(res, { canReceive: false, reason: "limit_reached" });
       }
 
-      return success(res, {
-        accountId: account.id,
-        asset: normalizeAsset(normalizedAssetCode, assetIssuer, undefined),
-        canReceive,
-        reasons,
-        trustlineExists: true,
-        isAuthorized,
-        availableCapacity,
-        currentBalance,
-        limit,
-      });
+      return success(res, { canReceive: true, reason: null });
     } catch (err) {
       handleAccountNotFound(err, next, req.params.id);
     }
@@ -3102,7 +3177,7 @@ router.get("/:id/pool-positions", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
     const cacheKey = `pool-positions:${id}`;
 
     if (!fresh) {
@@ -3496,7 +3571,7 @@ router.get("/:id/transaction-count", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
     const cacheKey = `transaction-count:${id}`;
 
     if (!fresh) {
@@ -3575,7 +3650,7 @@ router.get("/:id/signing-keys", async (req, res, next) => {
       minWeight = parsed;
     }
 
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
     const cacheKey = `signing-keys:${id}`;
 
     if (!fresh) {

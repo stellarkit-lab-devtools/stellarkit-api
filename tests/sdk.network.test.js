@@ -16,6 +16,10 @@
  *   - ?fresh=true query param is appended when { fresh: true } is passed
  *   - Strips trailing slash from baseUrl
  *   - X-API-Key header is sent when apiKey is provided
+ *   - getBaseFee() makes a real HTTP call to GET /network/base-fee
+ *   - Returns a typed BaseFee (baseFeeStroops, baseFeeXLM, isSurge)
+ *   - ?fresh=true bypasses the server cache when { fresh: true } is passed
+ *   - Throws StellarKitError on non-2xx response
  */
 
 let NetworkModule, StellarKitError;
@@ -58,6 +62,11 @@ try {
     async getValidators(options = {}) {
       const query = options.fresh ? "?fresh=true" : "";
       return this._get(`/network/validators${query}`);
+    }
+
+    async getBaseFee(options = {}) {
+      const query = options.fresh ? "?fresh=true" : "";
+      return this._get(`/network/base-fee${query}`);
     }
   };
 }
@@ -102,6 +111,22 @@ const VALIDATORS_DATA = {
     "stellar.org": [VALIDATOR_1],
   },
   ungrouped: [VALIDATOR_2],
+};
+
+const BASE_FEE_DATA = {
+  baseFeeStroops: 100,
+  baseFeeXLM: "0.0000100",
+  isSurge: false,
+  ledgerSequence: 52341882,
+  ledgerClosedAt: "2026-08-26T12:00:00Z",
+  note: "Base fee is reported in stroops and normalized XLM units.",
+};
+
+const SURGING_BASE_FEE_DATA = {
+  ...BASE_FEE_DATA,
+  baseFeeStroops: 5000,
+  baseFeeXLM: "0.0005000",
+  isSurge: true,
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -284,6 +309,149 @@ describe("NetworkModule", () => {
       const data = await module.getValidators();
       expect(data.validators).toHaveLength(0);
       expect(data.total).toBe(0);
+    });
+  });
+  // ── getBaseFee ─────────────────────────────────────────────────────────────
+
+  describe("getBaseFee", () => {
+    it("calls GET /network/base-fee and resolves the data payload", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+
+      const fee = await module.getBaseFee();
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/network/base-fee`,
+        expect.objectContaining({ headers: expect.any(Object) }),
+      );
+      expect(fee).toEqual(BASE_FEE_DATA);
+    });
+
+    it("returns a typed BaseFee with baseFeeStroops, baseFeeXLM, and isSurge", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      const fee = await module.getBaseFee();
+
+      expect(fee).toHaveProperty("baseFeeStroops");
+      expect(fee).toHaveProperty("baseFeeXLM");
+      expect(fee).toHaveProperty("isSurge");
+    });
+
+    it("maps baseFeeStroops as a number", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      const fee = await module.getBaseFee();
+
+      expect(typeof fee.baseFeeStroops).toBe("number");
+      expect(fee.baseFeeStroops).toBe(100);
+    });
+
+    it("maps baseFeeXLM as a seven-decimal string", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      const fee = await module.getBaseFee();
+
+      expect(typeof fee.baseFeeXLM).toBe("string");
+      expect(fee.baseFeeXLM).toBe("0.0000100");
+      expect(fee.baseFeeXLM).toMatch(/^\d+\.\d{7}$/);
+    });
+
+    it("maps isSurge as a boolean", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      const fee = await module.getBaseFee();
+
+      expect(typeof fee.isSurge).toBe("boolean");
+      expect(fee.isSurge).toBe(false);
+    });
+
+    it("reports isSurge true when the network is surging", async () => {
+      mockFetch(200, { success: true, data: SURGING_BASE_FEE_DATA });
+      const fee = await module.getBaseFee();
+
+      expect(fee.isSurge).toBe(true);
+      expect(fee.baseFeeStroops).toBe(5000);
+      expect(fee.baseFeeXLM).toBe("0.0005000");
+    });
+
+    it("maps the ledger the fee was read from", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      const fee = await module.getBaseFee();
+
+      expect(fee.ledgerSequence).toBe(52341882);
+      expect(fee.ledgerClosedAt).toBe("2026-08-26T12:00:00Z");
+    });
+
+    it("tolerates a null ledger when Horizon returned no ledger record", async () => {
+      mockFetch(200, {
+        success: true,
+        data: { ...BASE_FEE_DATA, ledgerSequence: null, ledgerClosedAt: null },
+      });
+      const fee = await module.getBaseFee();
+
+      expect(fee.ledgerSequence).toBeNull();
+      expect(fee.ledgerClosedAt).toBeNull();
+      expect(fee.baseFeeStroops).toBe(100);
+    });
+
+    it("appends ?fresh=true when { fresh: true } is passed", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      await module.getBaseFee({ fresh: true });
+
+      const [url] = global.fetch.mock.calls[0];
+      expect(url).toBe(`${BASE_URL}/network/base-fee?fresh=true`);
+    });
+
+    it("does not append fresh param by default", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      await module.getBaseFee();
+
+      const [url] = global.fetch.mock.calls[0];
+      expect(url).toBe(`${BASE_URL}/network/base-fee`);
+      expect(url).not.toContain("fresh");
+    });
+
+    it("does not append fresh param when { fresh: false } is passed", async () => {
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      await module.getBaseFee({ fresh: false });
+
+      const [url] = global.fetch.mock.calls[0];
+      expect(url).not.toContain("fresh");
+    });
+
+    it("throws StellarKitError on 502 (Horizon unreachable)", async () => {
+      mockFetch(502, {
+        success: false,
+        error: { message: "Unable to fetch fee data from Horizon.", type: "HorizonUnavailable" },
+      });
+
+      await expect(module.getBaseFee()).rejects.toThrow(StellarKitError);
+    });
+
+    it("carries status, message, and type from the error envelope", async () => {
+      mockFetch(502, {
+        success: false,
+        error: { message: "Unable to fetch fee data from Horizon.", type: "HorizonUnavailable" },
+      });
+
+      expect.assertions(4);
+      try {
+        await module.getBaseFee();
+      } catch (err) {
+        expect(err.name).toBe("StellarKitError");
+        expect(err.status).toBe(502);
+        expect(err.message).toBe("Unable to fetch fee data from Horizon.");
+        expect(err.type).toBe("HorizonUnavailable");
+      }
+    });
+
+    it("throws StellarKitError on 500", async () => {
+      mockFetch(500, { success: false, error: { message: "Server error", type: "InternalError" } });
+      await expect(module.getBaseFee()).rejects.toThrow(StellarKitError);
+    });
+
+    it("sends X-API-Key header when apiKey is provided", async () => {
+      const m = new NetworkModule({ baseUrl: BASE_URL, apiKey: "my-key" });
+      mockFetch(200, { success: true, data: BASE_FEE_DATA });
+      await m.getBaseFee();
+
+      const [, opts] = global.fetch.mock.calls[0];
+      expect(opts.headers["X-API-Key"]).toBe("my-key");
     });
   });
 });

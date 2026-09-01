@@ -1,12 +1,12 @@
 /**
  * Centralised error handler middleware.
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
- * All non-Horizon errors are wrapped in StellaKitError for consistency.
+ * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
 const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
-const StellaKitError = require("../utils/StellaKitError");
+const StellarKitError = require("../utils/StellarKitError");
 const {
   HORIZON_TIMEOUT_MESSAGE,
   HORIZON_TIMEOUT_SUGGESTION,
@@ -14,6 +14,40 @@ const {
 } = require("../utils/errors");
 const { NETWORK } = require("../config/stellar");
 const metrics = require("../services/metrics");
+
+/**
+ * Returns true when the application is running in production mode.
+ * Used to gate whether internal error details are included in responses.
+ */
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
+/**
+ * Strips internal implementation details from a message string when running
+ * in production. Removes:
+ *   - Absolute file paths (Windows and POSIX)
+ *   - Stack frame lines ("at SomeFunction (file:line:col)")
+ *
+ * In non-production environments the message is returned unchanged so
+ * developers see the full error text in development / test runs.
+ *
+ * @param {string} message - Raw error message that may contain internals.
+ * @param {string} [fallback="An unexpected error occurred."] - Safe fallback for production.
+ * @returns {string} Sanitised message.
+ */
+function sanitizeMessage(message, fallback = "An unexpected error occurred.") {
+  if (!isProduction()) return message;
+  if (!message || typeof message !== "string") return fallback;
+
+  // Strip Windows absolute paths (C:\...) and POSIX absolute paths (/...)
+  const hasFilePath = /([A-Za-z]:\\[^\s]+|\/[^\s]*\/[^\s]+)/.test(message);
+  // Strip stack frame lines produced by V8 ("    at Foo (bar.js:1:2)")
+  const hasStackFrame = /^\s+at\s+/m.test(message);
+
+  if (hasFilePath || hasStackFrame) return fallback;
+  return message;
+}
 
 /**
  * Logs 4xx and 5xx responses using the structured logger.
@@ -42,6 +76,7 @@ function logError(status, req, message) {
 
 /**
  * Send an error response AND record the status code in the metrics service.
+ * Also tracks the error per-endpoint (route + method combination).
  *
  * @param {import('express').Response} res
  * @param {number} status
@@ -49,6 +84,19 @@ function logError(status, req, message) {
  */
 function errorResponse(res, status, body) {
   metrics.incrementError(status);
+
+  // Track error per endpoint (route + method combination)
+  const req = res.req;
+  if (req) {
+    const method = req.method;
+    // Use the Express matched route pattern when available so dynamic segments
+    // like /account/:id are grouped together rather than tracked per unique ID.
+    const routePattern = (req.route && req.route.path)
+      ? (req.baseUrl || "") + req.route.path
+      : req.path;
+    metrics.incrementErrorByEndpoint(method, routePattern, status);
+  }
+
   return res.status(status).json(body);
 }
 
@@ -149,7 +197,7 @@ function withRequestId(body, req) {
 
 function errorHandler(err, req, res, next) {
   if (isConnectionError(err)) {
-    const ske = new StellaKitError(
+    const ske = new StellarKitError(
       "Unable to connect to the Stellar Horizon node.",
       503,
       "HorizonUnavailable",
@@ -166,7 +214,7 @@ function errorHandler(err, req, res, next) {
   if (err?.isOfferNotFound || isOfferNotFoundError(err)) {
     const offerId = err?.offerId || "unknown";
     const message = `Offer '${offerId}' was not found on the Stellar ${NETWORK} network.`;
-    const ske = new StellaKitError(
+    const ske = new StellarKitError(
       message,
       404,
       "OfferNotFound",
@@ -206,7 +254,7 @@ function errorHandler(err, req, res, next) {
     const status = mappedStatus ?? err.response.status ?? 400;
 
     if (isTransactionSubmissionFailure(horizonError)) {
-      const body = buildTransactionSubmissionFailedError horizonError);
+      const body = buildTransactionSubmissionFailedError(horizonError);
       logError(status, req, body.message);
       return errorResponse(res, status, withRequestId({ success: false, error: body }, req));
     }
@@ -237,8 +285,8 @@ function errorHandler(err, req, res, next) {
     return errorResponse(res, status, withRequestId(body, req));
   }
 
-  // StellaKitError instances — already structured
-  if (err instanceof StellaKitError) {
+  // StellarKitError instances — already structured
+  if (err instanceof StellarKitError) {
     logError(err.statusCode, req, err.message);
     return errorResponse(res, err.statusCode, withRequestId({
       success: false,
@@ -253,16 +301,14 @@ function errorHandler(err, req, res, next) {
       error: {
         type: "InternalError",
         title: "Internal Server Error",
-        detail: process.env.NODE_ENV === "production"
-          ? "An unexpected error occurred."
-          : err.message,
+        detail: sanitizeMessage(err.message),
       },
     }, req));
   }
   // Payload too large errors from body parsers
   if (err.type === "entity.too.large" || err.status === 413) {
     const maxBodySize = process.env.MAX_BODY_SIZE || "10kb";
-    const ske = new StellaKitError(
+    const ske = new StellarKitError(
       `Payload too large. Maximum request body size is ${maxBodySize}.`,
       413,
       "PayloadTooLargeError",
@@ -332,6 +378,20 @@ function errorHandler(err, req, res, next) {
     }, req));
   }
 
+  // LiquidityPoolNotFound errors (Horizon 404 on pool lookup)
+  if (err.isLiquidityPoolNotFound) {
+    logError(404, req, err.message);
+    return errorResponse(res, 404, withRequestId({
+      success: false,
+      error: {
+        type: "LiquidityPoolNotFound",
+        message: err.message,
+        suggestion:
+          "Verify the pool ID is correct and that the pool has not been dissolved.",
+      },
+    }, req));
+  }
+
   // TomlFetchFailed errors — issuer's stellar.toml could not be fetched
   // (network error, missing file, or invalid format)
   if (err.isTomlFetchFailed) {
@@ -373,14 +433,57 @@ function errorHandler(err, req, res, next) {
     }, req));
   }
 
+  // HorizonTimeout errors — Horizon did not respond in time
+  if (isHorizonTimeoutError(err)) {
+    logError(504, req, HORIZON_TIMEOUT_MESSAGE);
+    return errorResponse(res, 504, withRequestId({
+      success: false,
+      error: {
+        type: "HorizonTimeout",
+        message: HORIZON_TIMEOUT_MESSAGE,
+        suggestion: HORIZON_TIMEOUT_SUGGESTION,
+      },
+    }, req));
+  }
+
+  // ValidationError — duck-typed validation failures (isValidation flag)
+  if (err.isValidation) {
+    logError(400, req, err.message);
+    return errorResponse(res, 400, withRequestId({
+      success: false,
+      error: {
+        type: "ValidationError",
+        message: err.message,
+        field: err.field,
+        receivedValue: err.receivedValue,
+        expectedFormat: err.expectedFormat,
+        suggestion: err.expectedFormat ? `Expected format: ${err.expectedFormat}` : undefined,
+      },
+    }, req));
+  }
+
+  // InsufficientXLMReserve — account lacks required XLM reserve
+  if (err.isInsufficientXLMReserve) {
+    const body = {
+      type: "ServerError",
+      message: err.message,
+    };
+    if (err.suggestion) body.suggestion = err.suggestion;
+    logError(500, req, err.message);
+    return errorResponse(res, 500, withRequestId({
+      success: false,
+      error: body,
+    }, req));
+  }
+
   // Fallback for any other error
   const status = err.status || err.statusCode || 500;
-  const message = err.message || "Internal Server Error";
-  logError(status, req, message);
+  const message = sanitizeMessage(err.message || "Internal Server Error");
+  logError(status, req, err.message || "Internal Server Error");
   return errorResponse(res, status, withRequestId({
     success: false,
     error: {
-      type: err.type || "InternalError",
+      type: err.type || "ServerError",
       message,
     },
   }, req));

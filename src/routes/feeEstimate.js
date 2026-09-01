@@ -165,7 +165,7 @@ router.get("/", async (req, res, next) => {
 router.get("/surge-status", async (req, res, next) => {
   try {
     const cacheKey = "fee-surge-status";
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
@@ -274,7 +274,7 @@ router.get("/surge-status", async (req, res, next) => {
 router.get("/trends", async (req, res, next) => {
   try {
     const cacheKey = "fee-trends";
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
 
     // Check cache first (unless fresh=true)
     if (!fresh) {
@@ -342,6 +342,107 @@ router.get("/trends", async (req, res, next) => {
 
     res.set("X-Cache", "MISS");
     return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /fee-estimate/batch
+ * Returns fee estimates for multiple transaction types in a single call.
+ *
+ * Accepts an array of transaction type descriptors (type + operationCount) and
+ * returns a computed fee estimate for each entry. Maximum 10 entries per request.
+ *
+ * Request body:
+ *   { transactions: [{ type: string, operationCount: number }] }
+ *
+ * Response:
+ *   { success: true, data: { estimates: [{ type, operationCount, feeStroops, feeXLM }] } }
+ *
+ * @example
+ * POST /fee-estimate/batch
+ * { "transactions": [{ "type": "payment", "operationCount": 1 }, { "type": "swap", "operationCount": 3 }] }
+ */
+router.post("/batch", async (req, res, next) => {
+  try {
+    const BATCH_MAX = 10;
+    const { transactions } = req.body || {};
+
+    // Validate presence and type
+    if (!transactions || !Array.isArray(transactions)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: "Property 'transactions' is required and must be an array.",
+          suggestion: "Send a JSON body with { transactions: [{ type, operationCount }] }.",
+        },
+      });
+    }
+
+    // Enforce maximum batch size
+    if (transactions.length > BATCH_MAX) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: `Maximum of ${BATCH_MAX} transactions allowed per batch request. Received ${transactions.length}.`,
+          suggestion: `Split your request into batches of ${BATCH_MAX} or fewer entries.`,
+        },
+      });
+    }
+
+    // Validate each entry has the required shape
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
+      if (!tx || typeof tx !== "object") {
+        return res.status(400).json({
+          success: false,
+          error: {
+            type: "ValidationError",
+            message: `transactions[${i}] must be an object with 'type' (string) and 'operationCount' (number).`,
+          },
+        });
+      }
+      if (typeof tx.type !== "string" || tx.type.trim() === "") {
+        return res.status(400).json({
+          success: false,
+          error: {
+            type: "ValidationError",
+            message: `transactions[${i}].type must be a non-empty string.`,
+          },
+        });
+      }
+      const opCount = Number(tx.operationCount);
+      if (!Number.isInteger(opCount) || opCount < 1) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            type: "ValidationError",
+            message: `transactions[${i}].operationCount must be a positive integer.`,
+          },
+        });
+      }
+    }
+
+    // Fetch live fee stats from Horizon (single call for the whole batch)
+    const feeStats = await server.feeStats();
+
+    const baseFeeStroops = parseInt(feeStats.fee_charged.p50, 10) || 100;
+
+    const estimates = transactions.map((tx) => {
+      const operationCount = Math.max(1, parseInt(tx.operationCount, 10));
+      const feeStroops = baseFeeStroops * operationCount;
+      return {
+        type: tx.type,
+        operationCount,
+        feeStroops,
+        feeXLM: parseStellarAmount(feeStroops),
+      };
+    });
+
+    return success(res, { estimates });
   } catch (err) {
     next(err);
   }

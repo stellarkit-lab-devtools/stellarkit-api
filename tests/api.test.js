@@ -174,10 +174,30 @@ describe("StellarKit API", () => {
       expect(res.headers["access-control-allow-origin"]).toBe("*");
     });
 
-    it("returns and echoes a request ID header", async () => {
+    it("returns and echoes a valid request ID header", async () => {
       const res = await request(app).get("/health").set("X-Request-ID", "req-123");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-request-id"]).toBe("req-123");
+    });
+
+    it("generates a new UUID when request ID header is oversized", async () => {
+      const res = await request(app)
+        .get("/health")
+        .set("X-Request-ID", "a".repeat(150));
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-request-id"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
+    });
+
+    it("generates a new UUID when request ID header contains invalid characters", async () => {
+      const res = await request(app)
+        .get("/health")
+        .set("X-Request-ID", "invalid;id<script>");
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-request-id"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
     });
   });
 

@@ -104,6 +104,46 @@ function makeTomlFetchFailedError(issuer) {
   return err;
 }
 
+/**
+ * Builds the structured OrderBookEmpty error body returned by the DEX and
+ * asset-price routes when Horizon reports no active order book for a pair.
+ *
+ * Unlike the other factories in this module this returns a plain object, not
+ * an Error: the DEX routes embed it directly as the `error` field of a 404
+ * response rather than passing it to the error handler.
+ *
+ * @param {string} sellAssetCode - Code of the asset being sold (base).
+ * @param {string} buyAssetCode  - Code of the asset being bought (counter).
+ * @returns {{ type: string, message: string, suggestion: string }}
+ */
+function makeOrderBookEmptyError(sellAssetCode, buyAssetCode) {
+  return {
+    type: "OrderBookEmpty",
+    message: `No active order book found for ${sellAssetCode}/${buyAssetCode}.`,
+    suggestion:
+      "This pair has no active offers on the Stellar DEX. Check the asset codes and issuers, or try a more liquid pair such as XLM/USDC.",
+  };
+}
+
+/**
+ * Creates a structured LiquidityPoolNotFound error for Horizon 404 responses
+ * on liquidity pool lookups.
+ *
+ * @param {string} poolId - The liquidity pool ID that was not found
+ * @param {string} network - Network name ("testnet" or "mainnet")
+ * @returns {Error}
+ */
+function makeLiquidityPoolNotFoundError(poolId, network) {
+  const err = new Error(
+    `Liquidity pool ${poolId} was not found on the Stellar ${network} network.`
+  );
+  err.isLiquidityPoolNotFound = true;
+  err.poolId = poolId;
+  err.network = network;
+  err.status = 404;
+  return err;
+}
+
 module.exports = {
   HORIZON_TIMEOUT_MESSAGE,
   HORIZON_TIMEOUT_SUGGESTION,
@@ -113,4 +153,6 @@ module.exports = {
   makeAssetNotFoundError,
   makeTrustlineNotFoundError,
   makeTomlFetchFailedError,
+  makeOrderBookEmptyError,
+  makeLiquidityPoolNotFoundError,
 };

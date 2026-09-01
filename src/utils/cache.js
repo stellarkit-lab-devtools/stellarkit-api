@@ -7,4 +7,5 @@ function createCache() {
 module.exports = {
   networkStatusCache: createCache(),
   feeEstimateCache: createCache(),
+  contractDependenciesCache: createCache(),
 };

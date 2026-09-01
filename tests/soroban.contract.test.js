@@ -8,6 +8,7 @@ jest.mock("../src/config/stellar", () => {
     sorobanServer: {
       getLedgerEntries: jest.fn(),
       getLatestLedger: jest.fn(),
+      getContractData: jest.fn(),
     },
   };
 });
@@ -47,16 +48,26 @@ function buildInstanceEntry({ contractId, executableType = "wasm", wasmHash, sto
   };
 }
 
+function getContractDataResponseFromEntry(entry, contractId) {
+  const contractData = entry.val.contractData();
+  return {
+    contractId,
+    key: contractData.key(),
+    durability: contractData.durability(),
+    val: contractData.val(),
+  };
+}
+
 describe("GET /soroban/contract/:id", () => {
   const contractId = StrKey.encodeContract(Buffer.alloc(32, 2));
-  const deployer = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+  const deployer = "GAAZI4TCRTYY5OJHCTJC2A4Q4SY6CJWJH5IAJTGKIN2ER'LBNCVKOCCWN";
   const deployedAt = "2024-06-01T12:00:00.000Z";
   const deployedLedger = 42;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    sorobanServer.getLatestLedger.mockResolvedValue({ sequence: 150 });
-    fetchContractDeployment.mockResolvedValue({
+    sorobanServer.getLatestLedger.mockResolved({ sequence: 150 });
+    fetchContractDeployment.mockResolved({
       deployer,
       deployedAt,
       deployedLedger,
@@ -65,9 +76,9 @@ describe("GET /soroban/contract/:id", () => {
 
   it("returns enriched wasm contract details with deployment metadata", async () => {
     const wasmHash = Buffer.alloc(32, 7);
-    sorobanServer.getLedgerEntries.mockResolvedValue({
-      entries: [buildInstanceEntry({ contractId, executableType: "wasm", wasmHash })],
-    });
+    const entry = buildInstanceEntry({ contractId, executableType: "wasm", wasmHash });
+    sorobanServer.getLedgerEntries.mockResolved({ entries: [entry] });
+    sorobanServer.getContractData.mockResolved(getContractDataResponseFromEntry(entry, contractId));
 
     const res = await request(app).get(`/soroban/contract/${contractId}`);
 
@@ -91,10 +102,10 @@ describe("GET /soroban/contract/:id", () => {
   });
 
   it("marks the contract as expired when the current ledger is past expiry", async () => {
-    sorobanServer.getLatestLedger.mockResolvedValue({ sequence: 250 });
-    sorobanServer.getLedgerEntries.mockResolvedValue({
-      entries: [buildInstanceEntry({ contractId, executableType: "wasm" })],
-    });
+    sorobanServer.getLatestLedger.mockResolved({ sequence: 250 });
+    const entry = buildInstanceEntry({ contractId, executableType: "wasm" });
+    sorobanServer.getLedgerEntries.mockResolved({ entries: [entry] });
+    sorobanServer.getContractData.mockResolved(getContractDataResponseFromEntry(entry, contractId));
 
     const res = await request(app).get(`/soroban/contract/${contractId}`);
 
@@ -103,14 +114,14 @@ describe("GET /soroban/contract/:id", () => {
   });
 
   it("returns normalized stellar_asset contract details", async () => {
-    sorobanServer.getLedgerEntries.mockResolvedValue({
-      entries: [buildInstanceEntry({ contractId, executableType: "stellar_asset" })],
-    });
+    const entry = buildInstanceEntry({ contractId, executableType: "stellar_asset" });
+    sorobanServer.getLedgerEntries.mockResolved({ entries: [entry] });
+    sorobanServer.getContractData.mockResolved(getContractDataResponseFromEntry(entry, contractId));
 
     const res = await request(app).get(`/soroban/contract/${contractId}`);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.data.wasmHash).toBeNull();
+    expect(res.body.data.wasmHash).toBe(null);
     expect(res.body.data.executable).toEqual({ type: "stellar_asset", wasmHash: null });
     expect(res.body.data).toMatchObject({
       deployer,
@@ -121,7 +132,8 @@ describe("GET /soroban/contract/:id", () => {
   });
 
   it("returns 404 when the contract is not found", async () => {
-    sorobanServer.getLedgerEntries.mockResolvedValue({ entries: [] });
+    sorobanServer.getLedgerEntries.mockResolved({ entries: [] });
+    sorobanServer.getContractData.mockResolved(null);
 
     const res = await request(app).get(`/soroban/contract/${contractId}`);
 
@@ -130,7 +142,7 @@ describe("GET /soroban/contract/:id", () => {
   });
 
   it("validates the contract ID", async () => {
-    const res = await request(app).get("/soroban/contract/NOT_A_CONTRACT");
+    const res = await request(app).get("/soroban/contract/NOTA_CONTRACT");
 
     expect(res.statusCode).toBe(400);
     expect(res.body.error.type).toBe("ValidationError");

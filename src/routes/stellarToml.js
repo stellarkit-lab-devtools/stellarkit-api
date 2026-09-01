@@ -69,7 +69,7 @@ router.get("/", (req, res, next) => {
 router.get("/:domain", async (req, res, next) => {
   try {
     const domain = validateDomain(req.params.domain);
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
 
     const { toml, cacheHit } = await fetchNormalisedToml(domain, fresh);
 

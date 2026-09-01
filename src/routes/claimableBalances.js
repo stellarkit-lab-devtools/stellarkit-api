@@ -225,7 +225,7 @@ router.get("/by-sponsor/:address", async (req, res, next) => {
     validateAccountId(address);
 
     const { limit, cursor } = parsePaginationParams(req.query, 200);
-    const fresh = req.query.fresh === "true";
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
     const cacheKey = `claimable-balances:by-sponsor:${address}:${limit}:${cursor || ""}`;
 
     if (!fresh) {

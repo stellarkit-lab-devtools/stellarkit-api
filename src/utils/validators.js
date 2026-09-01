@@ -344,6 +344,20 @@ function validateTransactionHash(hash) {
   return hash;
 }
 
+/**
+ * Returns true when the given string is a valid Stellar liquidity pool ID.
+ *
+ * A pool ID is a 64-character lowercase hexadecimal string as returned by
+ * Horizon. We validate the format before hitting Horizon so callers receive a
+ * clean 400 error rather than a Horizon 404 for a syntactically wrong ID.
+ *
+ * @param {string|null|undefined} poolId
+ * @returns {boolean}
+ */
+function isValidPoolId(poolId) {
+  return typeof poolId === "string" && /^[0-9a-f]{64}$/.test(poolId);
+}
+
 module.exports = {
   validateAccountId,
   validateContractId,
@@ -356,4 +370,5 @@ module.exports = {
   validateStellarAddress,
   validateCredentialType,
   validateTransactionHash,
+  isValidPoolId,
 };

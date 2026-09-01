@@ -44,6 +44,9 @@ function stopHorizonTimer(req) {
   req.horizonResponseTimeMs = Math.round(((req.horizonResponseTimeMs || 0) + elapsed) * 1000) / 1000;
 }
 
+const SLOW_REQUEST_THRESHOLD_MS =
+  parseInt(process.env.SLOW_REQUEST_THRESHOLD_MS, 10) || 2000;
+
 function requestLogger(req, res, next) {
   const start = process.hrtime.bigint();
 

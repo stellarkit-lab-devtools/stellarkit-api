@@ -123,6 +123,12 @@ const cacheTTL = {
     10000
   ),
 
+  /** /soroban/contract/:id/storage — instance storage entries */
+  contractStorage: msToSeconds(
+    process.env.CACHE_TTL_CONTRACT_STORAGE_MS,
+    15000
+  ),
+
   /** /account/:id/trades — trade history per account */
   trades: msToSeconds(
     process.env.CACHE_TTL_TRADES_MS,

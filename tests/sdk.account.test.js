@@ -48,7 +48,29 @@ try {
       }
       return body.data;
     }
-    getAccount(id) { return this._get(`/account/${id}`); }
+    async getAccount(id) {
+      if (!id || typeof id !== "string" || id.trim() === "") {
+        throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+      }
+      const url = `${this.baseUrl}/account/${encodeURIComponent(id.trim())}`;
+      const headers = { "Content-Type": "application/json", Accept: "application/json" };
+      if (this._apiKey) headers["X-API-Key"] = this._apiKey;
+      let res;
+      try {
+        res = await fetch(url, { headers });
+      } catch (networkErr) {
+        const message = networkErr instanceof Error ? networkErr.message : "Unable to reach the StellarKit API.";
+        throw new StellarKitError(`Network error while fetching account ${id}: ${message}`, 503, "NetworkError");
+      }
+      const body = await res.json();
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new StellarKitError(body?.error?.message ?? `Account ${id} was not found.`, 404, "AccountNotFound");
+        }
+        throw new StellarKitError(body?.error?.message ?? res.statusText, res.status, body?.error?.type ?? "ApiError");
+      }
+      return body.data;
+    }
     async getBalances(id) {
       if (!id || typeof id !== "string" || id.trim() === "") {
         throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
@@ -123,6 +145,19 @@ try {
     getAge(id) { return this._get(`/account/${id}/age`); }
     getRiskScore(id) { return this._get(`/account/${id}/risk-score`); }
     getSequence(id) { return this._get(`/account/${id}/sequence`); }
+    async getNativeBalance(id) {
+      if (!id || typeof id !== "string" || id.trim() === "") {
+        throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+      }
+      try {
+        return await this._get(`/account/${id}/native-balance`);
+      } catch (err) {
+        if (err instanceof StellarKitError && err.status === 404) {
+          throw new StellarKitError(err.message || `Account ${id} was not found.`, 404, "AccountNotFound");
+        }
+        throw err;
+      }
+    }
     getAccountData(id) { return this.getAccount(id); }
     getOffers(id, options) {
       const params = new URLSearchParams();
@@ -282,6 +317,12 @@ const ASSET_BALANCE_DATA = {
   isAuthorized: true,
 };
 
+const NATIVE_BALANCE_DATA = {
+  balance: "150.5000000",
+  buyingLiabilities: "3.0000000",
+  sellingLiabilities: "1.2500000",
+};
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("AccountModule", () => {
@@ -343,7 +384,7 @@ describe("AccountModule", () => {
   // ── getAccount ─────────────────────────────────────────────────────────────
 
   describe("getAccount", () => {
-    it("calls GET /account/:id and resolves data", async () => {
+    it("makes a real HTTP call to GET /account/:id and returns typed Account data", async () => {
       mockFetch(200, { success: true, data: ACCOUNT_DATA });
       const data = await module.getAccount(ACCOUNT_ID);
       expect(data.accountId).toBe(ACCOUNT_ID);
@@ -352,6 +393,99 @@ describe("AccountModule", () => {
         `${BASE_URL}/account/${ACCOUNT_ID}`,
         expect.any(Object),
       );
+    });
+
+    it("throws StellarKitError with type 'AccountNotFound' on 404 response", async () => {
+      mockFetch(404, {
+        success: false,
+        error: { message: `Account ${ACCOUNT_ID} was not found.`, type: "AccountNotFound" },
+      });
+      try {
+        await module.getAccount(ACCOUNT_ID);
+        throw new Error("Expected StellarKitError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(StellarKitError);
+        expect(err.status).toBe(404);
+        expect(err.type).toBe("AccountNotFound");
+        expect(err.message).toContain(ACCOUNT_ID);
+      }
+    });
+
+    it("throws StellarKitError with type 'NetworkError' on connection failure", async () => {
+      global.fetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+      try {
+        await module.getAccount(ACCOUNT_ID);
+        throw new Error("Expected StellarKitError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(StellarKitError);
+        expect(err.status).toBe(503);
+        expect(err.type).toBe("NetworkError");
+        expect(err.message).toContain(ACCOUNT_ID);
+      }
+    });
+
+    it("throws StellarKitError with type 'ValidationError' when id is empty", async () => {
+      try {
+        await module.getAccount("");
+        throw new Error("Expected StellarKitError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(StellarKitError);
+        expect(err.status).toBe(400);
+        expect(err.type).toBe("ValidationError");
+      }
+    });
+
+    it("throws StellarKitError with type 'ValidationError' when id is whitespace", async () => {
+      await expect(module.getAccount("   ")).rejects.toThrow(StellarKitError);
+    });
+
+    it("returns correct typed Account data shape", async () => {
+      mockFetch(200, { success: true, data: ACCOUNT_DATA });
+      const data = await module.getAccount(ACCOUNT_ID);
+      expect(data).toHaveProperty("accountId");
+      expect(data).toHaveProperty("xlm");
+      expect(data).toHaveProperty("assets");
+      expect(data).toHaveProperty("signers");
+      expect(data).toHaveProperty("thresholds");
+      expect(data).toHaveProperty("flags");
+    });
+  });
+
+  // ── getNativeBalance ──────────────────────────────────────────────────────
+
+  describe("getNativeBalance", () => {
+    it("calls GET /account/:id/native-balance and resolves typed NativeBalance data", async () => {
+      mockFetch(200, { success: true, data: NATIVE_BALANCE_DATA });
+      const data = await module.getNativeBalance(ACCOUNT_ID);
+      expect(data).toEqual({
+        balance: "150.5000000",
+        buyingLiabilities: "3.0000000",
+        sellingLiabilities: "1.2500000",
+      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/account/${ACCOUNT_ID}/native-balance`,
+        expect.any(Object),
+      );
+      expect(typeof data.balance).toBe("string");
+      expect(typeof data.buyingLiabilities).toBe("string");
+      expect(typeof data.sellingLiabilities).toBe("string");
+    });
+
+    it("throws StellarKitError with type 'AccountNotFound' on 404", async () => {
+      mockFetch(404, { success: false, error: { message: "Account not found", type: "NotFound" } });
+      try {
+        await module.getNativeBalance(ACCOUNT_ID);
+        throw new Error("Expected StellarKitError to be thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(StellarKitError);
+        expect(err.status).toBe(404);
+        expect(err.type).toBe("AccountNotFound");
+        expect(err.message).toBe("Account not found");
+      }
+    });
+
+    it("throws StellarKitError with ValidationError when id is empty", async () => {
+      await expect(module.getNativeBalance(" ")).rejects.toThrow(StellarKitError);
     });
   });
 

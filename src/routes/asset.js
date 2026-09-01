@@ -10,7 +10,12 @@ const { assetHoldersRateLimiter } = require("../middleware/rateLimiter");
 const normalizeAssetCode = require("../middleware/normalizeAssetCode");
 const { validateAccountId, validateAssetCode, validateAsset, validateLimit } = require("../utils/validators");
 const { parsePaginationParams } = require("../utils/pagination");
-const { makeAssetNotFoundError, makeAccountNotFoundError, makeTomlFetchFailedError } = require("../utils/errors");
+const {
+  makeAssetNotFoundError,
+  makeAccountNotFoundError,
+  makeTomlFetchFailedError,
+  makeOrderBookEmptyError,
+} = require("../utils/errors");
 const cacheTTL = require("../config/cacheConfig");
 const { normalizeAsset } = require("../utils/asset");
 const { fetchNormalisedToml } = require("../utils/tomlResolver");
@@ -125,7 +130,7 @@ router.get(
       const assetCode = code.toUpperCase();
       const { limit, order, cursor } = parsePaginationParams(req.query);
 
-      const fresh = req.query.fresh === "true";
+      const fresh = req.query.fresh === true || req.query.fresh === "true";
       const minBalance = parseNonNegativeDecimalQueryParam(
         req.query.minBalance,
         "minBalance",
@@ -674,13 +679,34 @@ router.get("/:code/:issuer/toml", async (req, res, next) => {
 
 /**
  * GET /asset/:code/:issuer/price
- * Returns the current DEX price for an asset quoted in XLM.
+ * Returns the current DEX price for an asset quoted in XLM, derived from the
+ * live Horizon order book for the ASSET/XLM pair.
+ *
+ * `bid` is the best price a buyer is currently offering, `ask` is the best
+ * price a seller is asking, and `mid` is their midpoint. When only one side of
+ * the book has offers, `mid` falls back to that side's price. All three are
+ * seven-decimal strings so they can be fed straight back into Stellar
+ * operations without precision loss.
+ *
+ * Responses are cached for 5 seconds by default (CACHE_TTL_ASSET_PRICE_MS).
  *
  * @param {string} code   - Asset code (e.g. USDC)
  * @param {string} issuer - Issuer account public key (G...)
+ * @param {string} [fresh] - Query param; "true" bypasses the cache.
  *
  * @example
  * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/price
+ * // {
+ * //   "success": true,
+ * //   "data": {
+ * //     "asset": { "code": "USDC", "issuer": "GA5Z...", "type": "credit_alphanum4" },
+ * //     "quoteAsset": "XLM",
+ * //     "bid": "0.1284000",
+ * //     "ask": "0.1291000",
+ * //     "mid": "0.1287500",
+ * //     "priceInXlm": "0.1287500"
+ * //   }
+ * // }
  */
 router.get("/:code/:issuer/price", async (req, res, next) => {
   try {
@@ -700,27 +726,38 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
     }
 
     const asset = new Asset(assetCode, issuer);
-    const amount = "1.0000000";
 
-    const pathsResponse = await server
-      .strictSendPaths(asset, amount, [Asset.native()])
+    const orderBookResponse = await server
+      .orderbook(asset, Asset.native())
+      .limit(200)
       .call();
 
-    const records = pathsResponse.records || [];
+    const bids = orderBookResponse.bids || [];
+    const asks = orderBookResponse.asks || [];
 
-    if (records.length === 0) {
-      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
+    if (bids.length === 0 && asks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(assetCode, "XLM"),
+      });
     }
 
-    const best = records.reduce((a, b) =>
-      parseFloat(a.destination_amount) >= parseFloat(b.destination_amount) ? a : b
-    );
+    const bid = bids.length > 0 ? parseFloat(bids[0].price) : null;
+    const ask = asks.length > 0 ? parseFloat(asks[0].price) : null;
+
+    // With both sides quoted the mid is their midpoint; with only one side
+    // quoted that side is the only price the market is offering.
+    const mid = bid !== null && ask !== null ? (bid + ask) / 2 : (bid !== null ? bid : ask);
 
     const data = {
       asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
-      priceInXlm: best.destination_amount,
-      sourceAmount: best.source_amount,
       quoteAsset: "XLM",
+      bid: bid !== null ? bid.toFixed(7) : null,
+      ask: ask !== null ? ask.toFixed(7) : null,
+      mid: mid.toFixed(7),
+      // Retained for backwards compatibility with callers written against the
+      // previous path-payment response; always mirrors `mid`.
+      priceInXlm: mid.toFixed(7),
     };
 
     cacheService.set(cacheKey, data, cacheTTL.assetPrice);
@@ -728,6 +765,12 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(String(req.params.code).toUpperCase(), "XLM"),
+      });
+    }
     next(err);
   }
 });

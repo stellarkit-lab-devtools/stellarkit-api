@@ -181,4 +181,82 @@ describe("Webhook Delivery Service", () => {
       expect(result.attempt).toBe(2);
     });
   });
+
+  describe("Paused webhook filtering", () => {
+    it("should skip paused webhooks during delivery", async () => {
+      const webhooks = [
+        { id: "webhook_1", url: "https://example.com/webhook1", status: "paused" },
+        { id: "webhook_2", url: "https://example.com/webhook2", status: "active" },
+      ];
+
+      const payload = { event: "payment.received" };
+
+      axios.post.mockResolvedValue({ status: 200 });
+
+      const results = await webhookDelivery.triggerWebhooks(webhooks, payload);
+
+      // Only the active webhook should be delivered
+      expect(results).toHaveLength(1);
+      expect(results[0].webhookId).toBe("webhook_2");
+      expect(axios.post).toHaveBeenCalledTimes(1);
+      expect(axios.post).toHaveBeenCalledWith(
+        "https://example.com/webhook2",
+        payload,
+        expect.anything()
+      );
+    });
+
+    it("should deliver to all active webhooks and skip paused ones", async () => {
+      const webhooks = [
+        { id: "webhook_1", url: "https://example.com/webhook1", status: "active" },
+        { id: "webhook_2", url: "https://example.com/webhook2", status: "paused" },
+        { id: "webhook_3", url: "https://example.com/webhook3", status: "active" },
+        { id: "webhook_4", url: "https://example.com/webhook4", status: "paused" },
+      ];
+
+      const payload = { event: "payment.received" };
+
+      axios.post.mockResolvedValue({ status: 200 });
+
+      const results = await webhookDelivery.triggerWebhooks(webhooks, payload);
+
+      // Only the two active webhooks should be delivered
+      expect(results).toHaveLength(2);
+      expect(results.map((r) => r.webhookId)).toEqual(["webhook_1", "webhook_3"]);
+      expect(axios.post).toHaveBeenCalledTimes(2);
+    });
+
+    it("should return empty array when all webhooks are paused", async () => {
+      const webhooks = [
+        { id: "webhook_1", url: "https://example.com/webhook1", status: "paused" },
+        { id: "webhook_2", url: "https://example.com/webhook2", status: "paused" },
+      ];
+
+      const payload = { event: "payment.received" };
+
+      axios.post.mockResolvedValue({ status: 200 });
+
+      const results = await webhookDelivery.triggerWebhooks(webhooks, payload);
+
+      expect(results).toEqual([]);
+      expect(axios.post).not.toHaveBeenCalled();
+    });
+
+    it("should treat webhooks without status field as active (backward compatibility)", async () => {
+      const webhooks = [
+        { id: "webhook_1", url: "https://example.com/webhook1" }, // No status field
+        { id: "webhook_2", url: "https://example.com/webhook2", status: "active" },
+      ];
+
+      const payload = { event: "payment.received" };
+
+      axios.post.mockResolvedValue({ status: 200 });
+
+      const results = await webhookDelivery.triggerWebhooks(webhooks, payload);
+
+      // Both should be delivered (one has no status, one is active)
+      expect(results).toHaveLength(2);
+      expect(axios.post).toHaveBeenCalledTimes(2);
+    });
+  });
 });

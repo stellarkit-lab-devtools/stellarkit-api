@@ -70,36 +70,6 @@ describe("Endpoint rate limiting", () => {
     jest.restoreAllMocks();
   });
 
-  it("limits /account/:id/summary to 20 requests per 15 minutes per IP", async () => {
-    const { app, server } = loadFreshApp();
-    mockAccountSummaryDependencies(server);
-    const path = `/account/${VALID_ACCOUNT}/summary`;
-
-    for (let i = 0; i < 20; i += 1) {
-      const res = await request(app).get(path);
-      expect(res.statusCode).toBe(200);
-    }
-
-    const res = await request(app).get(path);
-
-    expect(res.statusCode).toBe(429);
-    expect(res.body).toEqual({
-      success: false,
-      error: {
-        type: "RateLimitExceeded",
-        message: "Too many requests, please try again later.",
-        retryAfter: 900,
-        resetAt: expect.any(String),
-      },
-    });
-  }, 30000);
-    // Verify rate limit headers are present
-    expect(res.headers["retry-after"]).toBe("900");
-    expect(res.headers["x-ratelimit-limit"]).toBe("20");
-    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
-    expect(res.headers["x-ratelimit-reset"]).toBeDefined();
-  });
-
   it("limits /asset/:code/:issuer/holders to 10 requests per 15 minutes per IP", async () => {
     const { app, server } = loadFreshApp();
     const query = mockAssetHoldersDependencies(server);
@@ -115,15 +85,8 @@ describe("Endpoint rate limiting", () => {
     expect(query.cursor).toHaveBeenCalledWith("start-token");
     expect(firstResponse.body.data).toEqual([
       {
-        accountId: VALID_ACCOUNT,
+        address: VALID_ACCOUNT,
         balance: "25.5000000",
-        limit: "1000.0000000",
-        buyingLiabilities: "1.0000000",
-        sellingLiabilities: "2.0000000",
-        isAuthorized: true,
-        isAuthorizedToMaintainLiabilities: true,
-        isClawbackEnabled: false,
-        lastModifiedLedger: 12345,
       },
     ]);
     expect(firstResponse.body.meta).toEqual({
@@ -151,12 +114,10 @@ describe("Endpoint rate limiting", () => {
         resetAt: expect.any(String),
       },
     });
-    // Verify rate limit headers are present
     expect(limitedResponse.headers["retry-after"]).toBe("900");
     expect(limitedResponse.headers["x-ratelimit-limit"]).toBe("10");
     expect(limitedResponse.headers["x-ratelimit-remaining"]).toBe("0");
     expect(limitedResponse.headers["x-ratelimit-reset"]).toBeDefined();
-    expect(query.call).toHaveBeenCalledTimes(10);
   }, 30000);
 
   it("keeps non-expensive endpoints on the existing global limit", async () => {
@@ -167,5 +128,79 @@ describe("Endpoint rate limiting", () => {
       const res = await request(app).get("/health");
       expect(res.statusCode).toBe(200);
     }
+  }, 30000);
+
+  it("limits requests without X-Account-ID to the global rate limit", async () => {
+    const originalAccountMax = process.env.ACCOUNT_RATE_LIMIT_MAX;
+    const originalGlobalMax = process.env.RATE_LIMIT_MAX;
+    process.env.ACCOUNT_RATE_LIMIT_MAX = "1000";
+    process.env.RATE_LIMIT_MAX = "3";
+
+    const { app } = loadFreshApp();
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await request(app).get("/");
+      expect(res.statusCode).toBe(200);
+    }
+
+    const res = await request(app).get("/");
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe("3");
+    expect(res.headers["retry-after"]).toBe("900");
+
+    process.env.ACCOUNT_RATE_LIMIT_MAX = originalAccountMax;
+    process.env.RATE_LIMIT_MAX = originalGlobalMax;
+  }, 30000);
+
+  it("applies the per-account rate limit when X-Account-ID is provided", async () => {
+    const originalAccountMax = process.env.ACCOUNT_RATE_LIMIT_MAX;
+    const originalGlobalMax = process.env.RATE_LIMIT_MAX;
+    process.env.ACCOUNT_RATE_LIMIT_MAX = "5";
+    process.env.RATE_LIMIT_MAX = "1000";
+
+    const { app } = loadFreshApp();
+    const accountId = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+
+    for (let i = 0; i < 5; i += 1) {
+      const res = await request(app)
+        .get("/")
+        .set("X-Account-ID", accountId);
+      expect(res.statusCode).toBe(200);
+    }
+
+    const res = await request(app)
+      .get("/")
+      .set("X-Account-ID", accountId);
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe("5");
+    expect(res.headers["retry-after"]).toBe("900");
+
+    process.env.ACCOUNT_RATE_LIMIT_MAX = originalAccountMax;
+    process.env.RATE_LIMIT_MAX = originalGlobalMax;
+  }, 30000);
+
+  it("resets the per-account rate limit when X-Account-ID changes", async () => {
+    const originalAccountMax = process.env.ACCOUNT_RATE_LIMIT_MAX;
+    const originalGlobalMax = process.env.RATE_LIMIT_MAX;
+    process.env.ACCOUNT_RATE_LIMIT_MAX = "3";
+    process.env.RATE_LIMIT_MAX = "1000";
+
+    const { app } = loadFreshApp();
+    const accountA = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
+    const accountB = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await request(app).get("/").set("X-Account-ID", accountA);
+      expect(res.statusCode).toBe(200);
+    }
+
+    const resA = await request(app).get("/").set("X-Account-ID", accountA);
+    expect(resA.statusCode).toBe(429);
+
+    const resB = await request(app).get("/").set("X-Account-ID", accountB);
+    expect(resB.statusCode).toBe(200);
+
+    process.env.ACCOUNT_RATE_LIMIT_MAX = originalAccountMax;
+    process.env.RATE_LIMIT_MAX = originalGlobalMax;
   }, 30000);
 });

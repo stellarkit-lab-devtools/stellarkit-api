@@ -50,6 +50,10 @@ class CacheService {
     });
     this.hits = 0;
     this.misses = 0;
+    // Counts entries removed via `delete()` (forced eviction), separate from
+    // natural TTL expiry which node-cache handles internally and never routes
+    // through this method.
+    this.evictions = 0;
   }
 
   /**
@@ -109,6 +113,7 @@ class CacheService {
    */
   delete(key) {
     this.cache.del(key);
+    this.evictions++;
   }
 
   /**

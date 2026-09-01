@@ -10,6 +10,7 @@
 const request = require("supertest");
 const app = require("../src/index");
 const { Keypair } = require("@stellar/stellar-sdk");
+const cacheService = require("../src/services/cache");
 
 jest.mock("../src/config/stellar", () => {
   const originalModule = jest.requireActual("../src/config/stellar");
@@ -59,6 +60,7 @@ function accountWithTrustline() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  cacheService.flush();
 });
 
 // ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ describe("GET /account/:id/asset-balance/:assetCode/:assetIssuer", () => {
     server.loadAccount.mockResolvedValue(accountWithoutTrustline());
 
     const res = await request(app).get(
-      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}`
+      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}?fresh=true`,
     );
 
     expect(res.statusCode).toBe(404);
@@ -86,7 +88,7 @@ describe("GET /account/:id/asset-balance/:assetCode/:assetIssuer", () => {
     server.loadAccount.mockResolvedValue(accountWithTrustline());
 
     const res = await request(app).get(
-      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}`
+      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}?fresh=true`,
     );
 
     expect(res.statusCode).toBe(200);
@@ -133,34 +135,31 @@ describe("GET /account/:id/freeze-status/:assetCode/:assetIssuer", () => {
 // GET /account/:id/can-receive/:assetCode/:assetIssuer
 // ---------------------------------------------------------------------------
 describe("GET /account/:id/can-receive/:assetCode/:assetIssuer", () => {
-  it("returns TrustlineNotFound when the trustline does not exist", async () => {
+  it("returns no_trustline reason when the trustline does not exist", async () => {
     server.loadAccount.mockResolvedValue(accountWithoutTrustline());
 
     const res = await request(app).get(
-      `/account/${ACCOUNT_ID}/can-receive/${ASSET_CODE}/${ISSUER_ID}`
-    );
-
-    expect(res.statusCode).toBe(404);
-    expect(res.body.success).toBe(false);
-    expect(res.body.error.type).toBe("TrustlineNotFound");
-    expect(res.body.error.message).toMatch(ACCOUNT_ID);
-    expect(res.body.error.message).toMatch(`${ASSET_CODE}:${ISSUER_ID}`);
-    expect(res.body.error.suggestion).toBe(
-      "The account must establish a trustline before holding this asset."
-    );
-  });
-
-  it("returns 200 when the trustline exists and is authorized", async () => {
-    server.loadAccount.mockResolvedValue(accountWithTrustline());
-
-    const res = await request(app).get(
-      `/account/${ACCOUNT_ID}/can-receive/${ASSET_CODE}/${ISSUER_ID}`
+      `/account/${ACCOUNT_ID}/can-receive/${ASSET_CODE}/${ISSUER_ID}`,
     );
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.canReceive).toBe(true);
-    expect(res.body.data.trustlineExists).toBe(true);
+    expect(res.body.data).toEqual({
+      canReceive: false,
+      reason: "no_trustline",
+    });
+  });
+
+  it("returns canReceive true when the trustline exists and is authorized", async () => {
+    server.loadAccount.mockResolvedValue(accountWithTrustline());
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/can-receive/${ASSET_CODE}/${ISSUER_ID}`,
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual({ canReceive: true, reason: null });
   });
 });
 
@@ -172,7 +171,7 @@ describe("TrustlineNotFound error shape", () => {
     server.loadAccount.mockResolvedValue(accountWithoutTrustline());
 
     const res = await request(app).get(
-      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}`
+      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}?fresh=true`,
     );
 
     expect(res.body.error).toMatchObject({
@@ -186,7 +185,7 @@ describe("TrustlineNotFound error shape", () => {
     server.loadAccount.mockResolvedValue(accountWithoutTrustline());
 
     const res = await request(app).get(
-      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}`
+      `/account/${ACCOUNT_ID}/asset-balance/${ASSET_CODE}/${ISSUER_ID}?fresh=true`,
     );
 
     const expected = `Account '${ACCOUNT_ID}' does not hold a trustline for ${ASSET_CODE}:${ISSUER_ID}.`;

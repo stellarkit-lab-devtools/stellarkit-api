@@ -355,3 +355,34 @@ describe("DELETE /webhooks/:webhookId", () => {
     expect(listRes.body.data.webhooks[0].webhookId).toBe(r2.body.data.webhookId);
   });
 });
+
+// ── WebhookStore.updateStatus() tests ─────────────────────────────────────────
+
+describe("WebhookStore.updateStatus()", () => {
+  it("returns the updated entry with status set to 'paused'", () => {
+    const entry = webhookStore.register({ url: VALID_URL, events: VALID_EVENTS });
+    const updated = webhookStore.updateStatus(entry.webhookId, "paused");
+    
+    expect(updated).toBeDefined();
+    expect(updated.status).toBe("paused");
+    expect(updated.webhookId).toBe(entry.webhookId);
+  });
+
+  it("returns the updated entry with status set to 'active'", () => {
+    const entry = webhookStore.register({ url: VALID_URL, events: VALID_EVENTS });
+    webhookStore.updateStatus(entry.webhookId, "paused");
+    const resumed = webhookStore.updateStatus(entry.webhookId, "active");
+    
+    expect(resumed.status).toBe("active");
+  });
+
+  it("returns null when the webhook does not exist", () => {
+    const result = webhookStore.updateStatus("nonexistent-id", "paused");
+    expect(result).toBeNull();
+  });
+
+  it("webhook status defaults to 'active' on registration", () => {
+    const entry = webhookStore.register({ url: VALID_URL, events: VALID_EVENTS });
+    expect(entry.status).toBe("active");
+  });
+});

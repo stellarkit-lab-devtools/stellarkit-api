@@ -62,6 +62,57 @@ function buildInstanceEntry({ contractId, storageEntries = [], lastModified = 42
 describe("GET /soroban/contract/:id/storage", () => {
   const contractId = StrKey.encodeContract(Buffer.alloc(32, 3));
 
+  it("returns the contract storage snapshot for the requested ledger", async () => {
+    const entry = buildInstanceEntry({
+      contractId,
+      storageEntries: [scEntry("counter", xdr.ScVal.scvU32(7))],
+      lastModified: 42,
+      liveUntil: 999,
+    });
+    sorobanServer.getLedgerEntries.mockResolvedValue({ entries: [entry] });
+
+    const res = await request(app).get(`/soroban/contract/${contractId}/storage/snapshot?ledger=42`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toMatchObject({
+      contractId,
+      ledger: 42,
+      entries: [
+        expect.objectContaining({
+          key: "counter",
+          value: 7,
+          lastModifiedLedger: 42,
+          expiryLedger: 999,
+        }),
+      ],
+    });
+  });
+
+  it("returns 404 when the contract did not exist at the requested ledger", async () => {
+    const entry = buildInstanceEntry({
+      contractId,
+      storageEntries: [scEntry("counter", xdr.ScVal.scvU32(7))],
+      lastModified: 42,
+      liveUntil: 999,
+    });
+    sorobanServer.getLedgerEntries.mockResolvedValue({ entries: [entry] });
+
+    const res = await request(app).get(`/soroban/contract/${contractId}/storage/snapshot?ledger=41`);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.type).toBe("ContractNotFound");
+  });
+
+  it("returns 400 when the ledger query param is missing", async () => {
+    const res = await request(app).get(`/soroban/contract/${contractId}/storage/snapshot`);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.type).toBe("ValidationError");
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     cacheService.flush();

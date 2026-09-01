@@ -115,7 +115,7 @@ export class SorobanModule {
     if (!id || typeof id !== "string" || id.trim() === "") {
       throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
     }
-    return this._get<ContractData>(`/contract/${id}`);
+    return this._get<ContractData>(`/soroban/contract/${id}`);
   }
 
   /**

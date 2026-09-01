@@ -24,11 +24,13 @@ const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
 const requestIdMiddleware = require("./middleware/requestId");
 const requestLogger = require("./middleware/requestLogger");
+const metricsCollector = require("./middleware/metricsCollector");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
 const sanitize = require("./middleware/sanitize");
 const rejectDuplicateQueryParams = require("./middleware/rejectDuplicateQueryParams");
 const coerceQueryParams = require("./middleware/coerceQueryParams");
 const etagMiddleware = require("./middleware/etag");
+const routeCounter = require("./middleware/routeCounter");
 const metricsService = require("./services/metrics");
 
 const networkStatusRouter = require("./routes/networkStatus");
@@ -40,6 +42,8 @@ const accountsRouter = require("./routes/accounts");
 const transactionsRouter = require("./routes/transactions");
 const assetRouter = require("./routes/asset");
 const dexRouter = require("./routes/dex");
+const { validateAccountId } = require("./utils/validators");
+const { success } = require("./utils/response");
 const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
@@ -201,19 +205,24 @@ if (allowedOriginsEnv) {
 }
 app.use(requestIdMiddleware);
 app.use(requestLogger);
+app.use(metricsCollector);
 app.use(contentTypeValidator);
 app.use(bodySizeLimit);
 app.use(rejectDuplicateQueryParams);
 app.use(hpp({ whitelist: ["limit", "order", "cursor", "operations"] }));
 
-// ── Rate Limiting ───────────────────────────────────────────────────────────
-app.use(rateLimiter);
-
 // ── Metrics request counter ─────────────────────────────────────────────────
+// Count ALL requests (including /metrics) before routing
 app.use((req, res, next) => {
   metricsService.incrementRequests();
   next();
 });
+
+// ── Metrics (excluded from rate limiting) ───────────────────────────────────
+app.use("/metrics", metricsRouter);
+
+// ── Rate Limiting ───────────────────────────────────────────────────────────
+app.use(rateLimiter);
 
 // ── Input Sanitization ──────────────────────────────────────────────────────
 app.use(sanitize);
@@ -262,6 +271,68 @@ app.use("/fee-estimate", feeEstimateRouter);
 app.use("/network-status", etagMiddleware, networkStatusRouter);
 app.use("/fee-estimate", etagMiddleware, feeEstimateRouter);
 const accountCounterpartiesRouter = require("./routes/account.counterparties");
+const accountsBatchRouter = express.Router();
+accountsBatchRouter.post("/multisig-info", async (req, res, next) => {
+  try {
+    const { accountIds } = req.body;
+
+    if (!Array.isArray(accountIds)) {
+      const err = new Error("Property 'accountIds' is required and must be an array.");
+      err.isValidation = true;
+      err.field = "accountIds";
+      err.expectedFormat = "[" + "accountId1, accountId2, ...]";
+      throw err;
+    }
+
+    if (accountIds.length === 0) {
+      return success(res, { items: [], total: 0 });
+    }
+
+    if (accountIds.length > 20) {
+      const err = new Error("Maximum of 20 account IDs allowed per request.");
+      err.isValidation = true;
+      err.field = "accountIds";
+      err.expectedFormat = "up to 20 account IDs";
+      throw err;
+    }
+
+    const validAccounts = accountIds.map((accountId) => {
+      validateAccountId(accountId);
+      return accountId;
+    });
+
+    const results = await Promise.all(
+      validAccounts.map(async (accountId) => {
+        const account = await server.loadAccount(accountId);
+        const thresholds = account.thresholds || {};
+        const signers = (account.signers || []).map((signer) => ({
+          key: signer.key,
+          weight: signer.weight,
+          type: signer.type,
+        }));
+
+        return {
+          accountId,
+          signers,
+          thresholds: {
+            low: thresholds.low_threshold ?? null,
+            med: thresholds.med_threshold ?? null,
+            high: thresholds.high_threshold ?? null,
+          },
+          signerCount: signers.length,
+        };
+      }),
+    );
+
+    return success(res, {
+      items: results,
+      total: results.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+app.use("/accounts", accountsBatchRouter);
 app.use("/account", etagMiddleware, accountRouter);
 app.use("/account", etagMiddleware, accountCounterpartiesRouter);
 app.use("/accounts", accountsRouter);
@@ -299,14 +370,17 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/fee-estimate?operations=N", description: "Fee estimate for N operations" },
         { method: "GET", path: "/fee-estimate/surge-status", description: "Identify fee surge periods and get actionable recommendations" },
         { method: "GET", path: "/fee-estimate/trends", description: "Analyze fee trends across last 50 ledgers with statistical summary" },
+        { method: "POST", path: "/fee-estimate/batch", description: "Batch fee estimates for up to 10 transaction types in a single call" },
         { method: "GET", path: "/account/:id", description: "Account details, balances, signers" },
         { method: "GET", path: "/account/:id/reserve-breakdown", description: "Per-type breakdown of the minimum XLM reserve requirement" },
         { method: "GET", path: "/account/:id/age", description: "Account age and longevity metrics" },
         { method: "GET", path: "/account/:id/balances", description: "XLM and asset balances for an account" },
+        { method: "GET", path: "/account/:id/history", description: "Unified activity feed combining account operations and effects" },
         { method: "GET", path: "/account/:id/sequence", description: "Current sequence number for an account" },
         { method: "GET", path: "/account/:id/freeze-status/:assetCode/:assetIssuer", description: "Check if an asset is frozen on an account" },
         { method: "GET", path: "/account/:id/can-receive/:assetCode/:assetIssuer", description: "Check if an account can receive a specific asset" },
         { method: "POST", path: "/account/:id/multisig-plan", description: "Plan multisig transactions by calculating signer combinations for each threshold" },
+        { method: "POST", path: "/accounts/multisig-info", description: "Batch multisig configuration lookup for multiple accounts" },
         { method: "GET", path: "/account/:id/pool-positions", description: "Calculate liquidity pool positions and share values" },
         { method: "GET", path: "/account/:id/transactions/search", description: "Search account transactions by memo content" },
         { method: "GET", path: "/account/:id/volume", description: "Total transaction volume by asset over a time period" },
@@ -336,6 +410,8 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/soroban/contract/:id", description: "Soroban contract instance details (executable type, wasm hash)" },
         { method: "GET", path: "/soroban/contract/:id/storage", description: "Soroban contract instance-storage entries" },
         { method: "GET", path: "/soroban/contract/:id/functions", description: "Exported Soroban contract function signatures parsed from the contract ABI" },
+        { method: "GET", path: "/soroban/contract/:id/invoke-simulation", description: "Simulate a Soroban contract function invocation to estimate fees and resource usage without submitting to the network" },
+        { method: "POST", path: "/accounts/transaction-counts", description: "Batch transaction count lookup for up to 20 accounts including first and last transaction timestamps" },
         { method: "GET", path: "/liquidity-pools/:id", description: "Live Horizon liquidity pool details" },
         {
           method: "GET",

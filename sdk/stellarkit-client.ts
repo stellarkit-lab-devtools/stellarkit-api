@@ -14,6 +14,7 @@ import type {
   AssetResponse,
   AssetSearchResponse,
   PoolPositionsResponse,
+  SorobanContractResponse,
   TransactionSearchResponse,
 } from "../types/index.d";
 
@@ -773,6 +774,18 @@ export class StellarKitClient {
    */
   async getPoolReserveRatio(poolId: string): Promise<unknown> {
     return this._request(`/liquidity-pools/${poolId}/reserve-ratio`);
+  }
+
+  // ── Soroban Contracts ─────────────────────────────────────────────────────
+
+  /**
+   * Get Soroban contract metadata backed by live Stellar RPC data.
+   *
+   * @param contractId - Soroban contract ID
+   * @returns Contract metadata including deployer and expiry status
+   */
+  async getSorobanContract(contractId: string): Promise<SorobanContractResponse["data"]> {
+    return this._request(`/soroban/contract/${contractId}`);
   }
 
   // ── Claimable Balances ─────────────────────────────────────────────────────

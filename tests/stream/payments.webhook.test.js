@@ -156,4 +156,53 @@ describe("Payment Stream - Webhook Delivery Integration", () => {
       "Webhook delivery failed"
     );
   });
+
+  it("filters matched payment webhooks by minAmount, assetCode, and assetIssuer", async () => {
+    const payment = {
+      amount: "75.0000000",
+      asset: {
+        code: "USDC",
+        issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        type: "credit_alphanum4",
+      },
+    };
+
+    const matching = webhookRegistry.register(VALID_KEY, "payment.received", "https://example.com/matching", {
+      minAmount: "50",
+      assetCode: "USDC",
+      assetIssuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    });
+
+    const nonMatching = webhookRegistry.register(VALID_KEY, "payment.received", "https://example.com/nonmatching", {
+      minAmount: "100",
+      assetCode: "USDC",
+      assetIssuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    });
+
+    const webhooks = webhookRegistry.getWebhooks(VALID_KEY, "payment.received");
+    const filtered = webhooks.filter((webhook) => webhookDelivery.matchesPaymentFilters(webhook, payment));
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].id).toBe(matching.id);
+    expect(filtered[0].id).not.toBe(nonMatching.id);
+  });
+
+  it("skips payment webhooks when the payload does not satisfy the filter", async () => {
+    const payment = {
+      amount: "25.0000000",
+      asset: {
+        code: "USDC",
+        issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+        type: "credit_alphanum4",
+      },
+    };
+
+    const webhook = webhookRegistry.register(VALID_KEY, "payment.received", "https://example.com/webhook", {
+      minAmount: "50",
+      assetCode: "USDC",
+      assetIssuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    });
+
+    expect(webhookDelivery.matchesPaymentFilters(webhook, payment)).toBe(false);
+  });
 });

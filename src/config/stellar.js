@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { Horizon, rpc } = require("@stellar/stellar-sdk");
+const { Horizon, rpc, xdr } = require("@stellar/stellar-sdk");
 const {
   makeAccountNotFoundError,
   makeHorizonTimeoutError,
@@ -86,7 +86,93 @@ async function fetchAccountCreation(publicKey) {
   }
 }
 
+async function fetchContract(contractId) {
+  if (!sorobanServer) {
+    const err = new Error("Soroban RPC is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  try {
+    const contractData = await sorobanServer.getContractData(
+      contractId,
+      xdr.ScVal.scvLedgerKeyContractInstance()
+    );
+
+    const contractDataEntry = xdr.ContractDataEntry.fromXDR(
+      contractData.xdr,
+      "base64"
+    );
+    const instance = contractDataEntry.val().contractInstance();
+    const executable = instance.executable();
+    const wasmHash = executable.wasm()
+      ? executable.wasm().toString("hex")
+      : null;
+    const deployer = instance.deployer()
+      ? instance.deployer().toString()
+      : null;
+    const deployedLedger = contractData.lastModifiedLedgerSeq;
+
+    let expiryLedger = null;
+    let currentLedger = null;
+    if (wasmHash) {
+      const hashBuffer = Buffer.from(wasmHash, "hex");
+      const contractCodeKey = xdr.LedgerKey.contractCode(
+        new xdr.LedgerKeyContractCode({ hash: hashBuffer })
+      );
+      const ledgerEntries = await sorobanServer.getLedgerEntries([
+        contractCodeKey,
+      ]);
+      if (ledgerEntries && ledgerEntries.latestLedger) {
+        currentLedger = ledgerEntries.latestLedger;
+      }
+      const entry =
+        ledgerEntries && ledgerEntries.entries && ledgerEntries.entries[0];
+      if (entry) {
+        const ledgerEntry = xdr.LedgerEntry.fromXDR(entry.xdr, "base64");
+        const ttl = ledgerEntry.ext().v1().ttl();
+        expiryLedger = ledgerEntry.lastModifiedLedgerSeq() + ttl;
+      }
+    }
+
+    const isExpired =
+      currentLedger != null && expiryLedger != null && currentLedger >= expiryLedger;
+
+    let deployedAt = null;
+    if (deployedLedger) {
+      try {
+        const ledger = await server.ledgers().ledger(deployedLedger).call();
+        deployedAt = ledger.closed_at;
+      } catch (e) {
+        deployedAt = null;
+      }
+    }
+
+    return {
+      contractId,
+      wasmHash,
+      deployer,
+      deployedLedger,
+      deployedAt,
+      isExpired,
+      expiryLedger,
+    };
+  } catch (err) {
+    if (
+      err.status === 404 ||
+      err.code === -32602 ||
+      (err.message && err.message.toLowerCase().includes("not found"))
+    ) {
+      const notFound = new Error(`Contract ${contractId} not found`);
+      notFound.status = 404;
+      throw notFound;
+    }
+    throw err;
+  }
+}
+
 module.exports = {
+  fetchContract,
   server,
   horizonUrl,
   NETWORK,

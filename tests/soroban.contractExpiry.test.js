@@ -1,18 +1,18 @@
 "use strict";
 
 /**
- * Tests for GET /soroban/contract/:id/expiry
+ * Tests for GET /soroban/contract/:id and GET /soroban/contract/:id/expiry
  *
- * Verifies:
- *   - Returns { success: true, data: { contractId, expiryLedger, currentLedger,
- *     ledgersRemaining, estimatedTimeRemainingSeconds, isExpiringSoon } }
- *   - isExpiringSoon is true when fewer than 10 000 ledgers remain
- *   - isExpiringSoon is false when >= 10 000 ledgers remain
+ * Verifies GET /soroban/contract/:id:
+ *   - Returns { success: true, data: { contractId, wasmHash, deployer,
+ *     deployedLedger, deployedAt, isExpired, expiryLedger } }
+ *   - isExpired is true when currentLedger >= expiryLedger
+ *   - isExpired is false when currentLedger < expiryLedger
  *   - Returns 404 when the contract does not exist
  *   - Returns 400 for an invalid contract ID
  *   - Response is cached (X-Cache: HIT on second request within TTL)
  *   - ?fresh=true bypasses the cache
- *   - estimatedTimeRemainingSeconds = ledgersRemaining × 5
+ *   - Also retains existing /expiry summary coverage
  */
 
 const request = require("supertest");
@@ -25,6 +25,7 @@ jest.mock("../src/config/stellar", () => {
   return {
     ...originalModule,
     sorobanServer: {
+      getContractData: jest.fn(),
       getLedgerEntries: jest.fn(),
       getLatestLedger: jest.fn(),
     },
@@ -53,6 +54,12 @@ const app = require("../src/index");
 // A valid Soroban contract address (C... strkey)
 const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 5));
 
+const DEPLOYER = StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 7));
+const WASM_HASH = Buffer.alloc(32, 1);
+const WASM_HASH_HEX = WASM_HASH.toString("hex");
+const DEPLOYED_LEDGER = 5000;
+const DEPLOYED_AT = new Date(DEPLOYED_LEDGER * 5 * 1000).toISOString();
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -61,7 +68,7 @@ const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 5));
  */
 function buildInstanceEntry(liveUntilLedgerSeq) {
   const address    = new Contract(CONTRACT_ID).address().toScAddress();
-  const executable = new xdr.ContractExecutable("contractExecutableWasm", Buffer.alloc(32, 1));
+  const executable = new xdr.ContractExecutable("contractExecutableWasm", WASM_HASH);
   const instance   = new xdr.ScContractInstance({ executable, storage: null });
   const contractData = new xdr.ContractDataEntry({
     ext:        new xdr.ExtensionPoint(0),
@@ -86,6 +93,21 @@ function setupHealthyContract({ expiryLedger = 60000, currentLedger = 40000 } = 
 
 function setupContractNotFound() {
   sorobanServer.getLedgerEntries.mockResolvedValue({ entries: [] });
+  sorobanServer.getContractData.mockResolvedValue({ contractData: null });
+}
+
+function setupMetadataContract({ expiryLedger = 60000, currentLedger = 40000, deployedLedger = DEPLOYED_LEDGER } = {}) {
+  const entry = buildInstanceEntry(expiryLedger);
+  entry.lastModifiedLedgerSeq = deployedLedger;
+  entry.deployer = DEPLOYER;
+  sorobanServer.getContractData.mockResolvedValue({
+    contractData: entry.val.contractData(),
+    lastModifiedLedgerSeq: deployedLedger,
+    liveUntilLedgerSeq: expiryLedger,
+    deployer: DEPLOYER,
+  });
+  sorobanServer.getLedgerEntries.mockResolvedValue({ entries: [entry] });
+  sorobanServer.getLatestLedger.mockResolvedValue({ sequence: currentLedger });
 }
 
 beforeEach(() => {
@@ -241,5 +263,57 @@ describe("GET /soroban/contract/:id/expiry — caching", () => {
     const miss = await request(app).get(`/soroban/contract/${CONTRACT_ID}/expiry`);
     const hit  = await request(app).get(`/soroban/contract/${CONTRACT_ID}/expiry`);
     expect(hit.body.data).toEqual(miss.body.data);
+  });
+});
+
+describe("GET /soroban/contract/:id — metadata mapping", () => {
+  it("returns 200 and maps all metadata fields from RPC", async () => {
+    setupMetadataContract({ expiryLedger: 60000, currentLedger: 40000, deployedLedger: DEPLOYED_LEDGER });
+    const res = await request(app).get(`/soroban/contract/${CONTRACT_ID}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(sorobanServer.getContractData).toHaveBeenCalled();
+    expect(sorobanServer.getLedgerEntries).toHaveBeenCalled();
+    expect(res.body.data).toEqual({
+      contractId: CONTRACT_ID,
+      wasmHash: WASM_HASH_HEX,
+      deployer: DEPLOYER,
+      deployedLedger: DEPLOYED_LEDGER,
+      deployedAt: DEPLOYED_AT,
+      isExpired: false,
+      expiryLedger: 60000,
+    });
+  });
+
+  it("computes isExpired as true when currentLedger has reached expiryLedger", async () => {
+    setupMetadataContract({ expiryLedger: 60000, currentLedger: 60000 });
+    const res = await request(app).get(`/soroban/contract/${CONTRACT_ID}`);
+    expect(res.body.data.isExpired).toBe(true);
+  });
+
+  it("computes isExpired as true when currentLedger is past expiryLedger", async () => {
+    setupMetadataContract({ expiryLedger: 60000, currentLedger: 60001 });
+    const res = await request(app).get(`/soroban/contract/${CONTRACT_ID}`);
+    expect(res.body.data.isExpired).toBe(true);
+  });
+
+  it("computes isExpired as false when currentLedger is before expiryLedger", async () => {
+    setupMetadataContract({ expiryLedger: 60000, currentLedger: 59999 });
+    const res = await request(app).get(`/soroban/contract/${CONTRACT_ID}`);
+    expect(res.body.data.isExpired).toBe(false);
+  });
+
+  it("returns 404 when the contract does not exist", async () => {
+    setupContractNotFound();
+    const res = await request(app).get(`/soroban/contract/${CONTRACT_ID}`);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.type).toBe("ContractNotFound");
+  });
+
+  it("returns 400 for an invalid contract ID", async () => {
+    const res = await request(app).get("/soroban/contract/NOTACONTRACT");
+    expect(res.statusCode).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 });

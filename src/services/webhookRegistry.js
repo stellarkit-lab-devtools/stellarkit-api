@@ -23,9 +23,10 @@ class WebhookRegistry {
    * @param {string} accountId - The Stellar account ID
    * @param {string} eventType - The event type (e.g., "payment.received")
    * @param {string} url - The webhook URL to call
+   * @param {object} [filters={}] - Optional payment-specific filters
    * @returns {Object} The registered webhook object with id
    */
-  register(accountId, eventType, url) {
+  register(accountId, eventType, url, filters = {}) {
     if (!this.webhooks[accountId]) {
       this.webhooks[accountId] = {};
     }
@@ -34,11 +35,15 @@ class WebhookRegistry {
       this.webhooks[accountId][eventType] = [];
     }
 
+    const minAmount = filters.minAmount === undefined || filters.minAmount === null || filters.minAmount === "" ? null : Number(filters.minAmount);
     const webhook = {
       id: `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       url,
       active: true,
       createdAt: new Date().toISOString(),
+      minAmount: Number.isFinite(minAmount) ? minAmount : null,
+      assetCode: typeof filters.assetCode === "string" && filters.assetCode.trim() !== "" ? filters.assetCode.trim() : null,
+      assetIssuer: typeof filters.assetIssuer === "string" && filters.assetIssuer.trim() !== "" ? filters.assetIssuer.trim() : null,
     };
 
     this.webhooks[accountId][eventType].push(webhook);

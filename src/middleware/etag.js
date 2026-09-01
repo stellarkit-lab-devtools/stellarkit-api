@@ -36,6 +36,13 @@ function etagMiddleware(req, res, next) {
     return next();
   }
 
+  // When the caller explicitly requests a fresh fetch (?fresh=true), skip the
+  // ETag short-circuit so the route can set its own X-Cache: MISS header and
+  // return the live response without a 304 redirect.
+  if (req.query && (req.query.fresh === true || req.query.fresh === 'true')) {
+    return next();
+  }
+
   // Store the original json method
   const originalJson = res.json.bind(res);
 

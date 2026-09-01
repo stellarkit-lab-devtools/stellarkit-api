@@ -231,9 +231,14 @@ export class AccountModule {
   /**
    * Get full account details including XLM balance, assets, signers, thresholds, and flags.
    *
-   * @param id - Stellar account public key (non-empty string).
+   * Makes a real HTTP call to `GET /account/:id` on the configured StellarKit API
+   * and returns the typed Account payload.
+   *
+   * @param id - Stellar account public key (non-empty string starting with G).
    * @returns Resolves to the account data payload.
-   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404).
+   * @throws {StellarKitError} With `type: "ValidationError"` when `id` is missing or empty.
+   * @throws {StellarKitError} With `type: "AccountNotFound"` when the account does not exist (404).
+   * @throws {StellarKitError} With `type: "NetworkError"` when the API cannot be reached.
    *
    * @example
    * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
@@ -244,7 +249,44 @@ export class AccountModule {
     if (!id || typeof id !== "string" || id.trim() === "") {
       throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
     }
-    return this._get<AccountResponse["data"]>(`/account/${id}`);
+
+    const url = `${this.baseUrl}/account/${encodeURIComponent(id.trim())}`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: this.headers });
+    } catch (networkErr) {
+      // Connection failure — DNS error, refused connection, timeout, etc.
+      const message =
+        networkErr instanceof Error
+          ? networkErr.message
+          : "Unable to reach the StellarKit API.";
+      throw new StellarKitError(
+        `Network error while fetching account ${id}: ${message}`,
+        503,
+        "NetworkError",
+      );
+    }
+
+    const body = await res.json();
+
+    if (!res.ok) {
+      // Map 404 → AccountNotFound per acceptance criteria
+      if (res.status === 404) {
+        throw new StellarKitError(
+          body?.error?.message ?? `Account ${id} was not found.`,
+          404,
+          "AccountNotFound",
+        );
+      }
+      throw new StellarKitError(
+        body?.error?.message ?? res.statusText,
+        res.status,
+        body?.error?.type ?? "ApiError",
+      );
+    }
+
+    return (body as { data: AccountResponse["data"] }).data;
   }
 
   /**
@@ -263,7 +305,19 @@ export class AccountModule {
     if (!id || typeof id !== "string" || id.trim() === "") {
       throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
     }
-    return this._get<NativeBalance>(`/account/${id}/native-balance`);
+
+    try {
+      return await this._get<NativeBalance>(`/account/${id}/native-balance`);
+    } catch (err) {
+      if (err instanceof StellarKitError && err.status === 404) {
+        throw new StellarKitError(
+          err.message || `Account ${id} was not found.`,
+          404,
+          "AccountNotFound",
+        );
+      }
+      throw err;
+    }
   }
 
   /**

@@ -77,9 +77,30 @@ export interface FeePercentiles {
   timestamp: string;
 }
 
-/**
- * FeesModule wraps all `/fee-estimate/*` routes of the StellarKit API
- * into fully-typed async methods.
+/** A single entry in a batch fee estimate request. */
+export interface BatchFeeEstimateInput {
+  /** Arbitrary label for the transaction type (e.g. "payment", "swap"). */
+  type: string;
+  /** Number of operations in this transaction (minimum 1). */
+  operationCount: number;
+}
+
+/** A single fee estimate returned by the batch endpoint. */
+export interface BatchFeeEstimateResult {
+  /** The transaction type label echoed from the request. */
+  type: string;
+  /** Number of operations used to compute this estimate. */
+  operationCount: number;
+  /** Total fee in stroops (baseFee * operationCount). */
+  feeStroops: number;
+  /** Total fee in XLM as a seven-decimal string (e.g. "0.0000200"). */
+  feeXLM: string;
+}
+
+/** Response data returned by POST /fee-estimate/batch. */
+export interface BatchFeeEstimateResponse {
+  estimates: BatchFeeEstimateResult[];
+}
  *
  * @example
  * ```ts
@@ -107,6 +128,24 @@ export class FeesModule {
   /** @private Fetch a path and return the `data` field, or throw StellarKitError. */
   private async _get<T>(path: string): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, { headers: this.headers });
+    const body = await res.json();
+    if (!res.ok) {
+      throw new StellarKitError(
+        body?.error?.message ?? res.statusText,
+        res.status,
+        body?.error?.type ?? "ApiError",
+      );
+    }
+    return (body as { data: T }).data;
+  }
+
+  /** @private POST a path with a JSON body and return the `data` field, or throw StellarKitError. */
+  private async _post<T>(path: string, payload: unknown): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: this.headers,
+      body: JSON.stringify(payload),
+    });
     const body = await res.json();
     if (!res.ok) {
       throw new StellarKitError(
@@ -194,5 +233,33 @@ export class FeesModule {
     if (fresh) params.set("fresh", "true");
     const query = params.toString();
     return this._get<FeePercentiles>(`/network/fee-percentiles${query ? `?${query}` : ""}`);
+  }
+
+  /**
+   * Get fee estimates for multiple transaction types in a single API call.
+   *
+   * Sends up to 10 transaction descriptors to POST /fee-estimate/batch and returns
+   * a fee estimate for each one. Each estimate includes the fee in both stroops and XLM.
+   *
+   * @param transactions - Array of up to 10 entries, each with a `type` label and
+   *   an `operationCount` (the number of operations in that transaction).
+   * @returns Resolves to a BatchFeeEstimateResponse containing an `estimates` array.
+   * @throws {StellarKitError} On non-2xx response (e.g. 400 when > 10 entries are sent).
+   *
+   * @example
+   * ```ts
+   * const fees = new FeesModule({ baseUrl: "http://localhost:3000" });
+   * const { estimates } = await fees.getBatchFeeEstimate([
+   *   { type: "payment",      operationCount: 1 },
+   *   { type: "swap",         operationCount: 3 },
+   *   { type: "multisig_pay", operationCount: 2 },
+   * ]);
+   * estimates.forEach(e => console.log(`${e.type}: ${e.feeXLM} XLM`));
+   * ```
+   */
+  async getBatchFeeEstimate(
+    transactions: BatchFeeEstimateInput[],
+  ): Promise<BatchFeeEstimateResponse> {
+    return this._post<BatchFeeEstimateResponse>("/fee-estimate/batch", { transactions });
   }
 }

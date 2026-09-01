@@ -45,6 +45,7 @@ Returned when a request parameter or body value fails validation.
 | `HorizonError`        | varies      | Error propagated from the Stellar Horizon API                         |
 | `InsufficientReserve` | 422         | Account does not have enough XLM to cover the minimum reserve requirement |
 | `OfferNotFound`       | 404         | A specific offer was requested but does not exist on the network      |
+| `LiquidityPoolNotFound` | 404       | A specific liquidity pool was requested but does not exist on the network |
 | `TrustlineNotFound`   | 404         | The requested asset trustline does not exist on the account           |
 | `TomlFetchFailed`     | 502         | The issuer's stellar.toml could not be fetched (network error, missing file, or invalid format) |
 | `NotFound`            | 404         | Route or resource not found                                           |
@@ -102,6 +103,40 @@ Returned when an endpoint looks up a specific asset trustline for an account and
 - The wrong issuer address was supplied
 
 **Suggested fix:** The account must submit a `changeTrust` operation for the asset before it can hold a balance or interact with it.
+
+---
+
+### LiquidityPoolNotFound
+
+Returned when a liquidity pool endpoint (`GET /liquidity-pools/:id`, `GET /liquidity-pools/:id/trades`, `GET /liquidity-pools/:id/profitability`, `GET /liquidity-pools/:id/reserve-ratio`) is called with a pool ID that does not exist on the network. The raw Horizon `404` is translated into this structured error.
+
+**Status:** `404`
+
+**Affected endpoints:**
+- `GET /liquidity-pools/:id`
+- `GET /liquidity-pools/:id/trades`
+- `GET /liquidity-pools/:id/profitability`
+- `GET /liquidity-pools/:id/reserve-ratio`
+
+**Example response:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "LiquidityPoolNotFound",
+    "message": "Liquidity pool '67339253ccd0390f4886b5952d7f8d68f70f61280d908e234190c609c95b6026' was not found on the Stellar mainnet network.",
+    "suggestion": "Verify the pool ID is correct and that the pool has not been dissolved."
+  }
+}
+```
+
+**Common causes:**
+- The pool ID is misspelled or truncated
+- The liquidity pool has been dissolved and removed from the network
+- The pool exists on a different network (e.g., looking up a mainnet pool on testnet)
+
+**Suggested fix:** Verify the pool ID is a valid 64-character hex string and that the pool exists on the configured network. See [Mainnet vs Testnet Configuration](./deployment.md#mainnet-vs-testnet-configuration) for guidance.
 
 ---
 

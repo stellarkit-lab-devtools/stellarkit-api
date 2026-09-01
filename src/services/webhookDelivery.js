@@ -13,6 +13,9 @@ const logger = require("../utils/logger");
 const RETRY_DELAYS_MS = [5000, 25000, 125000];
 const MAX_ATTEMPTS = 4; // 1 initial + 3 retries
 
+/** Default window (ms) for collecting events into a single delivery batch. */
+const DEFAULT_BATCH_WINDOW_MS = 500;
+
 /**
  * Webhook delivery service.
  *
@@ -20,12 +23,25 @@ const MAX_ATTEMPTS = 4; // 1 initial + 3 retries
  *   - Up to 3 retries on network errors or non-2xx responses
  *   - Exponential backoff: 5 s, 25 s, 125 s between retries
  *   - Permanent failure logging after all retries are exhausted
+ *   - Batching: events for the same webhook fired within WEBHOOK_BATCH_WINDOW_MS
+ *     (default 500 ms) of each other are collected and delivered as a single
+ *     HTTP request with an `events` array, reducing overhead for high-volume
+ *     accounts.
  */
 class WebhookDelivery {
   constructor() {
     this.timeoutMs = 30000;
     // Allow tests to override delays without real waiting
     this._retryDelays = RETRY_DELAYS_MS;
+
+    // Events fired for the same webhook within this window are collected
+    // and delivered as a single HTTP request instead of one per event.
+    this._batchWindowMs = Number(process.env.WEBHOOK_BATCH_WINDOW_MS) || DEFAULT_BATCH_WINDOW_MS;
+    /**
+     * Pending batches keyed by webhook id (falls back to url).
+     * @type {Map<string, { webhook: Object, events: Array, resolvers: Array<Function>, timer: NodeJS.Timeout }>}
+     */
+    this._pendingBatches = new Map();
   }
 
   /**
@@ -35,16 +51,110 @@ class WebhookDelivery {
    * @param {Object} payload - The event payload to send.
    * @returns {Promise<Array>} Array of delivery result objects.
    */
+  matchesPaymentFilters(webhook, payment) {
+    if (!webhook || !payment) {
+      return false;
+    }
+
+    if (webhook.minAmount !== undefined && webhook.minAmount !== null && webhook.minAmount !== "") {
+      const paymentAmount = Number(payment.amount ?? payment.starting_balance ?? 0);
+      if (!Number.isFinite(paymentAmount) || paymentAmount < Number(webhook.minAmount)) {
+        return false;
+      }
+    }
+
+    if (webhook.assetCode !== undefined && webhook.assetCode !== null && webhook.assetCode !== "") {
+      const code = payment.asset && payment.asset.code ? payment.asset.code : (payment.assetCode || payment.asset_code || "");
+      if (!String(code || "").trim() || String(code).toUpperCase() !== String(webhook.assetCode).trim().toUpperCase()) {
+        return false;
+      }
+    }
+
+    if (webhook.assetIssuer !== undefined && webhook.assetIssuer !== null && webhook.assetIssuer !== "") {
+      const issuer = payment.asset && payment.asset.issuer ? payment.asset.issuer : (payment.assetIssuer || payment.asset_issuer || "");
+      if (!String(issuer || "").trim() || String(issuer) !== String(webhook.assetIssuer).trim()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   async triggerWebhooks(webhooks, payload) {
     if (!webhooks || webhooks.length === 0) {
       return [];
     }
 
-    const deliveryPromises = webhooks.map((webhook) =>
-      this.deliverWebhook(webhook, payload),
+    // Filter out paused webhooks
+    const activeWebhooks = webhooks.filter((webhook) => webhook.status !== "paused");
+    if (activeWebhooks.length === 0) {
+      return [];
+    }
+
+    const filteredWebhooks = payload && payload.payment
+      ? activeWebhooks.filter((webhook) => this.matchesPaymentFilters(webhook, payload.payment))
+      : activeWebhooks;
+
+    if (filteredWebhooks.length === 0) {
+      return [];
+    }
+
+    const deliveryPromises = filteredWebhooks.map((webhook) =>
+      this._enqueueForBatch(webhook, payload),
     );
 
     return Promise.all(deliveryPromises);
+  }
+
+  /**
+   * Queue an event payload for a webhook, batching it with any other events
+   * for the same webhook that arrive within `_batchWindowMs`.
+   *
+   * The first event for a webhook opens the batch window; every subsequent
+   * event for that same webhook arriving before the window closes is
+   * collected into the same batch. When the window closes, a single event
+   * is delivered with its original (unwrapped) payload shape for backward
+   * compatibility; two or more events are delivered as one request with an
+   * `{ events: [...] }` body.
+   *
+   * @param {Object} webhook - Webhook object with `id` and `url` properties.
+   * @param {Object} payload - The event payload to send.
+   * @returns {Promise<Object>} Resolves with the shared delivery result once
+   *   the batch containing this event has been flushed.
+   */
+  _enqueueForBatch(webhook, payload) {
+    const key = webhook.id ?? webhook.url;
+
+    let batch = this._pendingBatches.get(key);
+    if (!batch) {
+      batch = { webhook, events: [], resolvers: [] };
+      batch.timer = setTimeout(() => this._flushBatch(key), this._batchWindowMs);
+      this._pendingBatches.set(key, batch);
+    }
+
+    batch.events.push(payload);
+    return new Promise((resolve) => {
+      batch.resolvers.push(resolve);
+    });
+  }
+
+  /**
+   * Deliver a pending batch of events for one webhook and resolve every
+   * caller that queued an event into it with the shared result.
+   *
+   * @param {string} key - The batch key (webhook id or url) to flush.
+   * @returns {Promise<void>}
+   */
+  async _flushBatch(key) {
+    const batch = this._pendingBatches.get(key);
+    if (!batch) return;
+    this._pendingBatches.delete(key);
+
+    const { webhook, events, resolvers } = batch;
+    const deliveryPayload = events.length === 1 ? events[0] : { event: "batch", events };
+
+    const result = await this.deliverWebhook(webhook, deliveryPayload);
+    resolvers.forEach((resolve) => resolve(result));
   }
 
   /**
