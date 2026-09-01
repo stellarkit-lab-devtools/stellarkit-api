@@ -1,4 +1,6 @@
-const apiKeyMiddleware = require("../src/middleware/apiKeyAuth");
+const apiKeyMiddleware = (req, res, next) => {
+  return require("../src/middleware/apiKeyAuth")(req, res, next);
+};
 
 describe("API Key Middleware", () => {
   let req, res, next;

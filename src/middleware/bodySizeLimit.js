@@ -47,6 +47,7 @@ function resolveLimit() {
   return { kb: DEFAULT_MAX_KB, expressLimit: `${DEFAULT_MAX_KB}kb` };
 }
 
+const { kb: MAX_KB, expressLimit: EXPRESS_LIMIT } = resolveLimit();
 const limit = resolveLimit();
 const requestBodySizeLimit = limit.expressLimit;
 const MAX_BODY_SIZE = limit.expressLimit;
