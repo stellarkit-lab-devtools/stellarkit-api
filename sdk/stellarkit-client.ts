@@ -14,9 +14,8 @@ import type {
   AssetResponse,
   AssetSearchResponse,
   PoolPositionsResponse,
-  SorobanContractResponse,
   TransactionSearchResponse,
-} from "../types/index.d";
+} from "../types/index.d.ts";
 
 /**
  * Typed error thrown by StellarKitClient on non-2xx API responses.
@@ -784,7 +783,7 @@ export class StellarKitClient {
    * @param contractId - Soroban contract ID
    * @returns Contract metadata including deployer and expiry status
    */
-  async getSorobanContract(contractId: string): Promise<SorobanContractResponse["data"]> {
+  async getSorobanContract(contractId: string): Promise<unknown> {
     return this._request(`/soroban/contract/${contractId}`);
   }
 
