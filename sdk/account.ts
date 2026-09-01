@@ -681,8 +681,11 @@ export class AccountModule {
    * @param options.limit - Maximum number of effects to return (default: 10, max: 200).
    * @param options.cursor - Pagination cursor from a previous response.
    * @param options.type - Optional effect type filter (e.g., "account_credited", "account_debited").
+   * @param options.order - Optional sort order ("asc" for oldest first, "desc" for newest first, default "desc").
+   * @param options.fresh - When true, bypasses server cache and fetches live data from Horizon (adds ?fresh=true).
    * @returns Resolves to a paginated response containing effect records.
    * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response (e.g. 404 when account not found).
+   * @throws {StellarKitError} With `type: "ValidationError"` when `type` or `order` is an empty string or invalid.
    *
    * @example
    * const account = new AccountModule({ baseUrl: "http://localhost:3000" });
@@ -697,18 +700,30 @@ export class AccountModule {
    * // Paginate through effects
    * const page1 = await account.getEffects("GAAZI4...", { limit: 50 });
    * const page2 = await account.getEffects("GAAZI4...", { limit: 50, cursor: page1.cursor });
+   *
+   * @example
+   * // Oldest-first with type filter and fresh data
+   * const oldest = await account.getEffects("GAAZI4...", { type: "trade", order: "asc", limit: 10, fresh: true });
    */
   async getEffects(
     id: string,
-    options?: { limit?: number; cursor?: string; type?: string },
+    options?: { limit?: number; cursor?: string; type?: string; order?: "asc" | "desc"; fresh?: boolean },
   ): Promise<PaginatedResponse<Effect>> {
     if (!id || typeof id !== "string" || id.trim() === "") {
       throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    if (options?.type !== undefined && (typeof options.type !== "string" || options.type.trim() === "")) {
+      throw new StellarKitError("type must be a non-empty string when provided", 400, "ValidationError");
+    }
+    if (options?.order !== undefined && options.order !== "asc" && options.order !== "desc") {
+      throw new StellarKitError("order must be \"asc\" or \"desc\" when provided", 400, "ValidationError");
     }
     const params: Record<string, string | number | undefined> = {};
     if (options?.limit !== undefined) params.limit = options.limit;
     if (options?.cursor) params.cursor = options.cursor;
     if (options?.type) params.type = options.type;
+    if (options?.order) params.order = options.order;
+    if (options?.fresh) params.fresh = "true";
     return this._get<PaginatedResponse<Effect>>(`/account/${id}/effects`, params);
   }
 

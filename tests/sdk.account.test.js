@@ -367,7 +367,7 @@ describe("AccountModule", () => {
         expect(err.name).toBe("StellarKitError");
         expect(err.status).toBe(404);
         expect(err.message).toBe("Account not found");
-        expect(err.type).toBe("NOT_FOUND");
+        expect(err.type).toBe("AccountNotFound");
       }
     });
 

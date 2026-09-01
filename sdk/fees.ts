@@ -101,6 +101,9 @@ export interface BatchFeeEstimateResult {
 export interface BatchFeeEstimateResponse {
   estimates: BatchFeeEstimateResult[];
 }
+
+/**
+ * FeesModule wraps /fee-estimate and /network/fee-percentiles routes.
  *
  * @example
  * ```ts
