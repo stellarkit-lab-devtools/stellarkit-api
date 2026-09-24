@@ -108,8 +108,9 @@ This project is ideal for:
 | GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
 | GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
 | GET | `/account/:id/subentry-health` | Subentry usage and remaining capacity | — |
-| GET | `/account/:id/sponsorship` | Sponsorship relationships for the account | — |
-| GET | `/account/:id/sponsorships` | Typed sponsorship summary with sponsoredBy and sponsoring arrays | — |
+| GET | `/account/:id/sponsorship` | Sponsorship relationships for the account — returns raw sponsored entries and accounts this account is sponsoring. **Prefer `/sponsorships` for new integrations.** Note: both endpoints will be consolidated in a future release (see issue #19). | — |
+| GET | `/account/:id/sponsorships` | **Preferred.** Typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays; each entry includes `type`, `address`, `sponsor`, and `reserveAmount`. More structured than `/sponsorship`. Note: will be consolidated with `/sponsorship` in a future release (see issue #19). | — |
+| GET | `/account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorises each as eligible, not yet claimable, or expired. See the [Claimable Balances](#understanding-claimable-balances) section for details. | `limit`, `cursor`, `order`, `fresh` |
 | GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
@@ -220,11 +221,12 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 - `src/index.js` — application entry point
 - `src/websocket.js` — WebSocket helper for Stellar streaming data
-- `src/config/stellar.js` — Stellar network configuration
-- `src/routes/` — Express route handlers for API endpoints
-- `src/utils/` — shared helpers for formatting, validation, caching, response shaping
-- `src/middleware/` — validation, error handling, rate limiting
-- `tests/` — API and integration tests
+- `src/config/` — Stellar network configuration and cache TTL settings
+- `src/routes/` — Express route handlers (21 files covering account, asset, DEX, liquidity pools, claimable balances, Soroban, webhooks, and more)
+- `src/services/` — cache, metrics, webhook delivery, and contract event polling services
+- `src/utils/` — shared helpers for formatting, validation, caching, response shaping, and Horizon mapping
+- `src/middleware/` — API key auth, validation, error handling, rate limiting, sanitisation, and request logging
+- `tests/` — 170+ test files organised into root-level unit tests, plus `integration/`, `middleware/`, `routes/`, `stream/`, and `utils/` subdirectories
 - `types/index.d.ts` — exported TypeScript type definitions
 
 ---
@@ -451,7 +453,7 @@ StellarKit API exposes claimable balance data through two surfaces:
 | Endpoint                                       | Description                                                                                                                                                                                                                                           |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /account/:id/summary`                     | Returns the account's open claimable balances alongside recent transactions, open offers, and account details.                                                                                                                                        |
-| `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). |
+| `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). Also listed in the [Account API reference table](#account). |
 
 Use the `/claimable-balances/eligible` endpoint to build dashboards that show users exactly which funds are available to claim today and which are still locked. The API handles predicate evaluation server-side, so clients do not need to implement their own predicate logic.
 
@@ -702,7 +704,9 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 ### `GET /account/:id/sponsorship`
 
-Returns sponsorship relationships — entries on this account sponsored by others, and accounts this account is sponsoring.
+> **Note:** Both `/sponsorship` and `/sponsorships` will be consolidated in a future release (issue #19). For new integrations, prefer `/sponsorships` — it returns a more structured response.
+
+Returns sponsorship relationships — entries on this account sponsored by others, and accounts this account is sponsoring. The response includes a flat `sponsoredEntries` array (each entry has `type`, `sponsor`, and `reserveAmount`) and an `accountsSponsoring` array of account IDs this account sponsors. Use this endpoint for audit or billing workflows where you need the raw list of sponsored ledger entries.
 
 ```bash
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorship"
@@ -710,7 +714,9 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 ### `GET /account/:id/sponsorships`
 
-Returns a typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays. Each `sponsoredBy` entry includes a `type`, `address`, `sponsor`, and `reserveAmount`.
+> **Preferred endpoint.** Will be consolidated with `/sponsorship` in a future release (issue #19).
+
+Returns a typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays. Each `sponsoredBy` entry includes a `type`, `address`, `sponsor`, and `reserveAmount`. Unlike `/sponsorship`, this endpoint organises results into distinct typed arrays making it easier to filter by entry type (trustline, signer, data entry, offer) and to display sponsorship direction clearly in a UI.
 
 ```bash
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorships"
@@ -1677,7 +1683,7 @@ Account sponsorship in Stellar allows one account (the sponsor) to cover the bas
 
 Using this API:
 
-- Inspect sponsorship relationships using `GET /account/:id/sponsorship`. This endpoint helps determine whether an account or its ledger entries are sponsored, who the sponsor is, and which entries are covered — useful for UI indicators, billing reconciliation, or migration workflows.
+- Inspect sponsorship relationships using `GET /account/:id/sponsorships` (preferred) or `GET /account/:id/sponsorship`. See the [API reference table](#account) for a comparison of the two endpoints and which to use for new integrations.
 
 Note: This repository documents the sponsorship inspection endpoint; it does not change any runtime behavior or add sponsorship logic.
 
@@ -2079,28 +2085,127 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting.
 
 ```
 stellarkit-api/
-├── scripts/
-│   └── ws-client-demo.js  # Runnable CLI demo for real-time ledger stream
+├── docs/                        # Supplementary documentation
+├── examples/                    # Runnable usage examples
 ├── src/
 │   ├── config/
-│   │   └── stellar.js         # Stellar SDK + Horizon setup
+│   │   ├── cacheConfig.js       # Cache TTL configuration
+│   │   └── stellar.js           # Stellar SDK + Horizon setup
 │   ├── middleware/
-│   │   ├── errorHandler.js    # Centralised error formatting
-│   │   └── rateLimiter.js     # Rate limiting
+│   │   ├── apiKeyAuth.js        # API key authentication
+│   │   ├── bodySizeLimit.js     # Request body size limiting
+│   │   ├── coerceQueryParams.js # Query param type coercion
+│   │   ├── contentTypeValidator.js
+│   │   ├── errorHandler.js      # Centralised error formatting
+│   │   ├── etag.js              # ETag response caching headers
+│   │   ├── metricsCollector.js  # Request metrics collection
+│   │   ├── normalizeAssetCode.js
+│   │   ├── rateLimiter.js       # Rate limiting
+│   │   ├── rejectDuplicateQueryParams.js
+│   │   ├── requestId.js         # Request ID injection
+│   │   ├── requestLogger.js     # HTTP request logging
+│   │   ├── restrictHttpMethods.js
+│   │   ├── routeCounter.js      # Route hit counter
+│   │   ├── sanitize.js          # Input sanitisation
+│   │   ├── validateRouteParams.js
+│   │   └── webhookSignatureAuth.js
 │   ├── routes/
-│   │   ├── account.js         # /account endpoints
-│   │   ├── asset.js           # /asset endpoints
-│   │   ├── feeEstimate.js     # /fee-estimate endpoint
-│   │   ├── networkStatus.js   # /network-status endpoint
-│   │   └── transactions.js    # /transactions endpoints
+│   │   ├── account.js           # /account endpoints
+│   │   ├── account.counterparties.js
+│   │   ├── accounts.js          # /accounts bulk endpoints
+│   │   ├── accountsBulk.js      # Additional bulk account ops
+│   │   ├── asset.js             # /asset endpoints
+│   │   ├── assetsOverview.js    # /assets overview
+│   │   ├── cacheStats.js        # /cache/stats endpoint
+│   │   ├── claimableBalances.js # /claimable-balances endpoints
+│   │   ├── dex.js               # /dex endpoints
+│   │   ├── feeEstimate.js       # /fee-estimate endpoints
+│   │   ├── liquidityPool.js     # /liquidity-pools endpoints
+│   │   ├── metrics.js           # /metrics endpoints
+│   │   ├── network.js           # /network endpoints
+│   │   ├── networkStatus.js     # /network-status endpoint
+│   │   ├── soroban.js           # /soroban endpoints
+│   │   ├── stellarToml.js       # /stellar-toml endpoint
+│   │   ├── stream.js            # /stream SSE endpoints
+│   │   ├── transaction.effects.js
+│   │   ├── transactions.js      # /transactions endpoints
+│   │   ├── utils.js             # /utils endpoints
+│   │   └── webhooks.js          # /webhooks endpoints
+│   ├── services/
+│   │   ├── cache.js             # In-memory cache service
+│   │   ├── contractEventPoller.js
+│   │   ├── metrics.js           # Metrics aggregation
+│   │   ├── trustlineChangeDetector.js
+│   │   ├── webhookDelivery.js
+│   │   ├── webhookRegistry.js
+│   │   ├── webhookService.js
+│   │   └── webhookStore.js
 │   ├── utils/
-│   │   ├── response.js        # Response helpers
-│   │   └── validators.js      # Input validation helpers
-│   ├── index.js               # App entry point
-│   └── websocket.js           # WebSocket stream handler
+│   │   ├── accountAge.js
+│   │   ├── asset.js
+│   │   ├── assetHelpers.js
+│   │   ├── assetToml.js
+│   │   ├── cache.js
+│   │   ├── contractDeployment.js
+│   │   ├── contractSpec.js
+│   │   ├── crypto.js
+│   │   ├── effectTypes.js
+│   │   ├── errors.js
+│   │   ├── formatAmount.js
+│   │   ├── formatBalance.js
+│   │   ├── formatLedgerSequence.js
+│   │   ├── formatTransaction.js
+│   │   ├── horizonErrors.js
+│   │   ├── horizonHealth.js
+│   │   ├── horizonStatusMapper.js
+│   │   ├── logger.js
+│   │   ├── mapAccountTrade.js
+│   │   ├── mapFeeEstimate.js
+│   │   ├── mapNetworkStatus.js
+│   │   ├── memo.js
+│   │   ├── operationFormatter.js
+│   │   ├── pagination.js
+│   │   ├── parseStellarAmount.js
+│   │   ├── response.js          # Response helpers
+│   │   ├── StellarKitError.js
+│   │   ├── toCamelCase.js
+│   │   ├── tomlResolver.js
+│   │   └── validators.js        # Input validation helpers
+│   ├── index.js                 # App entry point
+│   └── websocket.js             # WebSocket stream handler
 ├── tests/
-│   ├── api.test.js
-│   └── websocket.test.js      # WebSocket stream integration tests
+│   ├── integration/             # End-to-end integration tests
+│   │   ├── account.test.js
+│   │   ├── dex.test.js
+│   │   └── network.test.js
+│   ├── middleware/              # Middleware unit tests
+│   │   ├── contentTypeValidator.test.js
+│   │   ├── errorHandler.test.js
+│   │   ├── rejectDuplicateQueryParams.test.js
+│   │   ├── requestId.test.js
+│   │   ├── restrictHttpMethods.test.js
+│   │   └── sanitize.test.js
+│   ├── routes/                  # Route-level unit tests
+│   │   └── feeEstimate.test.js
+│   ├── stream/                  # Streaming endpoint tests
+│   │   ├── ledgers.test.js
+│   │   ├── payments.test.js
+│   │   ├── payments.webhook.test.js
+│   │   └── transactions.test.js
+│   ├── utils/                   # Utility unit tests
+│   │   ├── contractDeployment.test.js
+│   │   ├── crypto.test.js
+│   │   ├── validateCursor.test.js
+│   │   └── validators.test.js
+│   ├── account.*.test.js        # Account endpoint tests (60+ files)
+│   ├── asset.*.test.js          # Asset endpoint tests
+│   ├── claimableBalances.*.test.js
+│   ├── dex.*.test.js
+│   ├── network.*.test.js
+│   ├── soroban.*.test.js
+│   ├── webhooks.*.test.js
+│   ├── api.test.js              # General API smoke tests
+│   └── websocket.test.js        # WebSocket stream tests
 ├── .env.example
 ├── package.json
 └── README.md
