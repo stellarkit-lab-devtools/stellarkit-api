@@ -113,6 +113,7 @@ This project is ideal for:
 | GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
+| GET | `/account/:id/signers` | Current signers and their weights | — |
 | POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
 
 ### Transactions
