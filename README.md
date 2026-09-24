@@ -218,6 +218,11 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 ## Project Structure
 
+- `.github/` — CI workflows and pull request templates
+- `docs/` — user and developer guides for endpoints, deployment, and security
+- `examples/` — runnable example scripts (multisig checks, pool positions, spread calculation, transaction search)
+- `scripts/` — utility scripts for seeding testnet data and demoing the WebSocket client
+- `sdk/` — TypeScript SDK client for typed access to StellarKit API endpoints
 - `src/index.js` — application entry point
 - `src/websocket.js` — WebSocket helper for Stellar streaming data
 - `src/config/stellar.js` — Stellar network configuration
@@ -225,7 +230,7 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 - `src/utils/` — shared helpers for formatting, validation, caching, response shaping
 - `src/middleware/` — validation, error handling, rate limiting
 - `tests/` — API and integration tests
-- `types/index.d.ts` — exported TypeScript type definitions
+- `types/` — exported TypeScript type definitions for safe integration in TypeScript projects
 
 ---
 
