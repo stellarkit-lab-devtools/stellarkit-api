@@ -525,6 +525,28 @@ Returns a list of available API endpoints and a brief description.
 
 Returns basic service health status.
 
+### `GET /cache/stats`
+
+Returns cache performance statistics for monitoring.
+
+```bash
+curl -X GET "http://localhost:3000/cache/stats"
+```
+
+Sample response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "hits": 42,
+    "misses": 10,
+    "hitRate": "80.77%",
+    "cachedKeys": 5
+  }
+}
+```
+
 ### `GET /network-status`
 
 Returns current Stellar network information, latest ledger data, fee settings, and protocol version.
