@@ -206,7 +206,7 @@ router.get(
       const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
       const meta = {
-        count: filteredHolders.length,
+        total: filteredHolders.length,
         limit,
         order,
         nextCursor,
