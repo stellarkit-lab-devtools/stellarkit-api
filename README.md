@@ -351,11 +351,11 @@ If a medium-threshold operation requires `2`, then either signer C alone or sign
 StellarKit API exposes the account's multisignature details through dedicated account endpoints:
 
 - `GET /account/:id/signers` returns the account's current signers and their weights.
-- `GET /account/:id/multisig-plan` returns the account's threshold plan and how signers contribute to low, medium, and high threshold requirements.
+- `POST /account/:id/multisig-plan` returns the account's threshold plan and how signers contribute to low, medium, and high threshold requirements. It accepts an `availableSigners` array in the request body.
 
 These endpoints let developers inspect who can sign transactions, how much combined weight is available, and whether the account is configured correctly for its intended security model.
 
-> Use `GET /account/:id/signers` to verify signer keys and weights, and `GET /account/:id/multisig-plan` to understand the threshold requirements before submitting multisig transactions.
+> Use `GET /account/:id/signers` to verify signer keys and weights, and `POST /account/:id/multisig-plan` to understand the threshold requirements before submitting multisig transactions.
 
 ---
 
