@@ -112,6 +112,7 @@ This project is ideal for:
 | GET | `/account/:id/sponsorships` | Typed sponsorship summary with sponsoredBy and sponsoring arrays | — |
 | GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
+| GET | `/account/:id/claimable-balances/eligible` | Evaluates claimable balances where the account is a claimant, categorizes each as eligible, not yet claimable, or expired | — |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
 | POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
 
