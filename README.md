@@ -794,6 +794,46 @@ Retrieves transaction history for an account, with pagination.
 
 Retrieves operation history for an account, with pagination.
 
+### `POST /transactions/batch-status`
+
+Checks the confirmation status of multiple transaction hashes in a single request (max 20 hashes).
+
+```bash
+curl -X POST "http://localhost:3000/transactions/batch-status" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hashes": [
+      "8f5d12c9f3e2a4b6c1d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8",
+      "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+    ]
+  }'
+```
+
+Sample response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "hash": "8f5d12c9f3e2a4b6c1d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8",
+        "found": true,
+        "successful": true,
+        "ledger": 54527872,
+        "createdAt": "2026-09-24T10:15:00Z",
+        "fee": "100"
+      },
+      {
+        "hash": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
+        "found": false
+      }
+    ],
+    "total": 2
+  }
+}
+```
+
 ### `GET /asset/:code/:issuer`
 
 Returns metadata and statistics for a specific Stellar asset.
