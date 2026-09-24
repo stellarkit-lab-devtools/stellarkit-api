@@ -103,7 +103,7 @@ This project is ideal for:
 | GET | `/account/:id/analytics` | Basic account activity analytics | — |
 | GET | `/account/:id/transaction-count` | Total transaction count, first and last transaction timestamps | — |
 | GET | `/account/:id/inactivity` | Days since last transaction and status | — |
-| GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
+| GET | `/account/:id/volume` | Transaction volume by asset over the last N days (default 30, max 90) | `days` (default: 30, max: 90) |
 | GET | `/account/:id/risk-score` | Computed risk score and contributing factors | — |
 | GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
 | GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
