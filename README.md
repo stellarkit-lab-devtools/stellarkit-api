@@ -86,6 +86,7 @@ This project is ideal for:
 | ------ | ---- | ----------- | ------------ |
 | GET | `/fee-estimate` | Fee tiers for transaction submission | `operations`, `fresh` |
 | GET | `/fee-estimate/surge-status` | Fee surge detection and recommendations | `fresh` |
+| GET | `/fee-estimate/trends` | Fee trend analysis across the last 50 ledgers (avg, min, max, trend direction, and recommendation) | `fresh` |
 
 ### Account
 
@@ -1373,11 +1374,13 @@ yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
 ### Using Asset Formats in API Requests
 
 **DEX Endpoints:**
-When querying DEX endpoints like `/dex/orderbook`, `/dex/depth`, or `/dex/spread`, always use the CODE:ISSUER format:
+When querying DEX endpoints like `/dex/depth`, `/dex/spread`, `/dex/price`, or `/dex/imbalance`, use the CODE:ISSUER format as path parameters:
 
 ```
-GET /dex/orderbook?buyingAsset=USDC:GBBD47IF...&sellingAsset=XLM:native
-GET /dex/spread?buyingAsset=yXLM:GARDN...&sellingAsset=USDC:GBBD...
+GET /dex/depth/XLM:native/USDC:GBBD47IF...
+GET /dex/spread/XLM:native/USDC:GBBD47IF...
+GET /dex/spread/yXLM:GARDN.../USDC:GBBD...
+GET /dex/price/XLM:native/USDC:GBBD47IF...?amount=100
 ```
 
 **Asset Lookup Endpoints:**
