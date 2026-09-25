@@ -221,8 +221,12 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 ## Project Structure
 
+### Core Files
+
 - `src/index.js` — application entry point
 - `src/websocket.js` — WebSocket helper for Stellar streaming data
+- `src/config/stellar.js` — Stellar network configuration and shared Horizon server instance
+- `tests/` — API and integration tests
 - `src/config/` — Stellar SDK and Horizon server configuration, cache config
 - `src/routes/` — Express route handlers for all API endpoints
 - `src/utils/` — shared helpers for formatting, validation, caching, and response shaping
@@ -236,6 +240,71 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 - `sdk/` — TypeScript SDK client with typed methods for accounts, assets, DEX, fees, network, and Soroban
 - `types/` — bundled TypeScript type declarations for use in TypeScript projects
 - `.github/` — GitHub Actions CI workflow and pull request template
+
+### src/routes/ — Express Route Handlers
+
+Contains endpoint implementations (21 route files). All routes import the shared Horizon server instance from `src/config/stellar.js` to ensure consistent SDK configuration across the application.
+
+### src/utils/ — Utility Helpers (30 Files)
+
+Shared helpers for formatting, validation, caching, and response shaping:
+
+| File | Purpose |
+|------|---------|
+| `response.js` | Wraps data in consistent JSON success response envelopes with metadata. |
+| `validators.js` | Query parameter and account ID validators for pagination, asset codes, and Stellar addresses. |
+| `errors.js` | Detects and translates Horizon timeout errors and provides user-friendly messages. |
+| `StellarKitError.js` | Custom error class for consistent error handling with HTTP status, type, detail, and suggestions. |
+| `cache.js` | Creates shared NodeCache instances for network status, fee estimates, and contract dependencies. |
+| `logger.js` | Structured Pino-based logger with automatic redaction of sensitive fields and environment-based verbosity. |
+| `horizonErrors.js` | Provides plain-English translations for common Horizon error codes (tx_bad_seq, op_no_trust, etc.). |
+| `horizonHealth.js` | Pings Horizon and returns connectivity status (ok/degraded/unreachable) for health checks. |
+| `horizonStatusMapper.js` | Maps Horizon result codes to corresponding HTTP status codes (e.g., tx_bad_seq → 409). |
+| `formatAmount.js` | Normalizes Stellar amounts to fixed seven-decimal string format across types. |
+| `formatBalance.js` | Formats Stellar balance strings with thousand separators (e.g., "10,000.1234567"). |
+| `formatLedgerSequence.js` | Converts ledger sequence numbers to consistent integer format from string or number inputs. |
+| `formatTransaction.js` | Formats Horizon transaction records into clean SSE payload structure. |
+| `parseStellarAmount.js` | Converts stroops (Stellar's smallest unit) to seven-decimal XLM strings. |
+| `operationFormatter.js` | Normalizes Horizon operation records into consistent API operation shape. |
+| `toCamelCase.js` | Recursively converts snake_case object keys to camelCase throughout nested structures. |
+| `memo.js` | Decodes Stellar memos from base64 to UTF-8 text or hexadecimal hashes. |
+| `asset.js` | Parses Stellar asset strings in "CODE:ISSUER" format into SDK Asset objects. |
+| `assetHelpers.js` | Utility helpers for detecting native XLM assets across different object shapes. |
+| `assetToml.js` | Fetches and normalizes asset metadata from TOML files (home domain resolution). |
+| `tomlResolver.js` | Resolves and caches TOML files from asset home domains with inline comment stripping. |
+| `accountAge.js` | Calculates account age and longevity metrics with maturity classification (new, established). |
+| `contractDeployment.js` | Finds Soroban contract deployment metadata (deployer, timestamp, ledger) from Horizon operations. |
+| `contractSpec.js` | Parses and maps Soroban contract specification XDR data to human-readable type information. |
+| `crypto.js` | Generates SHA-256 proof hashes with salt for cryptographic verification and security features. |
+| `effectTypes.js` | Defines the canonical list of valid Horizon effect type strings for validation. |
+| `mapAccountTrade.js` | Maps raw Horizon trade records to normalized StellarKit shape with formatted prices. |
+| `mapFeeEstimate.js` | Maps Horizon fee statistics to StellarKit fee estimate response with surge capacity detection. |
+| `mapNetworkStatus.js` | Maps Horizon server info and latest ledger into normalized network status payload. |
+| `pagination.js` | Resolves page numbers to Horizon paging cursors using async token lookups. |
+
+### src/middleware/ — Request Processing (17 Files)
+
+Middleware functions that validate, transform, and handle requests. Middleware execution order is important — see [docs/project-structure.md](docs/project-structure.md) for details.
+
+| File | Purpose |
+|------|---------|
+| `errorHandler.js` | Centralized error handler that formats Horizon/SDK errors into consistent JSON responses. |
+| `rateLimiter.js` | Express rate limiter with configurable per-endpoint limits (global, account, asset endpoints). |
+| `requestLogger.js` | Logs completed requests with method, path, status, request ID, and response time via Pino. |
+| `requestId.js` | Generates or validates incoming request IDs with UUID fallback and injection pattern checking. |
+| `sanitize.js` | Trims whitespace and strips null bytes from params/query; validates length and injection patterns. |
+| `apiKeyAuth.js` | Optional API key authentication middleware that validates X-API-Key header against hashed keys from env. |
+| `restrictHttpMethods.js` | Rejects unsupported HTTP methods (only GET, POST, DELETE, PATCH allowed; returns 405). |
+| `contentTypeValidator.js` | Requires "application/json" Content-Type header for POST and PATCH requests (415 rejection). |
+| `bodySizeLimit.js` | Enforces maximum request body size (default 10 KB) with configurable KB or legacy size strings. |
+| `coerceQueryParams.js` | Converts query parameters (limit, operations, fresh) from strings to integers/booleans. |
+| `normalizeAssetCode.js` | Uppercases asset code in route params and query params for consistent handling. |
+| `rejectDuplicateQueryParams.js` | Prevents HTTP parameter pollution by rejecting requests with duplicate query keys. |
+| `validateRouteParams.js` | Validates required route parameters are not empty and registers param validation handlers. |
+| `etag.js` | Generates ETags from response bodies and returns 304 Not Modified if client If-None-Match matches. |
+| `metricsCollector.js` | Intercepts responses and forwards status code, response time, and cache headers to metrics service. |
+| `routeCounter.js` | Per-route request counter middleware that tracks totals by "METHOD /path" pattern. |
+| `webhookSignatureAuth.js` | Validates HMAC-SHA256 webhook signatures with optional secret rotation support. |
 
 ---
 
