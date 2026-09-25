@@ -10,6 +10,7 @@ Thank you for your interest in contributing! StellarKit API participates in the 
 - [📖 Documentation](#documentation)
 - [🛠️ Development Setup](#development-setup)
 - [📋 How to Contribute](#how-to-contribute)
+- [🚫 What Not to Commit](#-what-not-to-commit)
 - [✅ PR Checklist](#pr-checklist)
 - [🧱 Code Style](#-code-style)
 - [🔍 Linting](#-linting)
@@ -58,6 +59,24 @@ For a detailed overview of the project structure, conventions, and where to add 
 4. **Code** — Make your changes. Follow the existing patterns.
 5. **Test** — Run `npm test` and make sure all tests pass. Add new tests for new functionality.
 6. **PR** — Open a Pull Request with a clear title and description referencing the issue: `Closes #123`.
+
+---
+
+## 🚫 What Not to Commit
+
+Keep the repository clean. The following file types must **never** be included in a PR:
+
+| File type | Examples | Where it belongs instead |
+|---|---|---|
+| Test output files | `test-out.txt`, `test-result.txt`, `*-output.txt` | Discard locally; they are not part of the codebase |
+| Implementation summary docs | `IMPLEMENTATION_SUMMARY.md`, `CHANGES_MADE.txt`, `REFACTORING_SUMMARY.md` | Summarise in the PR description or CHANGELOG.md |
+| Ad-hoc / one-off scripts | `run-test.js`, `verify-*.js`, `manual-verification.sh` | Permanent, reusable scripts go in `scripts/` with a clear name and comment |
+| PR-specific notes | `PR_*.md`, `*_FIX_SUMMARY.md`, `X_POWERED_BY_FIX_SUMMARY.md` | The PR description on GitHub is the right place for this |
+| Local debugging artefacts | `*.log`, any scratch file created while investigating a bug | Delete before opening a PR |
+
+> **Rule of thumb:** if the file only makes sense in the context of *your current working session*, it does not belong in the repo.
+
+Changelog-worthy release notes go in [`CHANGELOG.md`](CHANGELOG.md). Reusable helper scripts go in [`scripts/`](scripts/). Everything else stays local or goes in the PR description.
 
 ---
 
