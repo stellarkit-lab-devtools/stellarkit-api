@@ -379,6 +379,10 @@ router.get("/recommended-fee", async (req, res, next) => {
 
 const LEDGER_TIMING_CACHE_TTL = 10;
 
+const LEDGER_HISTORY_DEFAULT_LIMIT = 10;
+const LEDGER_HISTORY_MAX_LIMIT = 50;
+const LEDGER_HISTORY_CACHE_TTL = 10;
+
 /**
  * GET /network/ledger-timing
  * Computes average ledger close time from the last 10 ledgers.
@@ -438,6 +442,107 @@ router.get("/ledger-timing", async (req, res, next) => {
     };
 
     cacheService.set(cacheKey, data, LEDGER_TIMING_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /network/ledger-history
+ * Returns recent ledger data, newest first.
+ *
+ * Query params:
+ *   - limit (number, 1–50, default: 10) — Maximum number of ledgers to return.
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
+ * Response shape:
+ *   { success: true, data: { ledgers: [...], count, limit } }
+ *
+ * Each ledger entry:
+ *   {
+ *     sequence:         <number>   // ledger sequence
+ *     closedAt:         <string>   // ISO 8601 close time
+ *     transactionCount: <number>
+ *     operationCount:   <number>
+ *     baseFee:          <number>   // base fee in stroops
+ *   }
+ *
+ * Errors:
+ *   400 — limit is not an integer between 1 and 50
+ *
+ * @example
+ * GET /network/ledger-history
+ * GET /network/ledger-history?limit=5
+ */
+router.get("/ledger-history", async (req, res, next) => {
+  try {
+    const rawLimit =
+      req.query.limit !== undefined
+        ? req.query.limit
+        : LEDGER_HISTORY_DEFAULT_LIMIT;
+    const parsed = parseInt(rawLimit, 10);
+
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > LEDGER_HISTORY_MAX_LIMIT) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: `limit must be a positive integer between 1 and ${LEDGER_HISTORY_MAX_LIMIT}.`,
+        },
+      });
+    }
+
+    const limit = parsed;
+    const fresh = isFreshRequest(req.query);
+    const cacheKey = `network-ledger-history:${limit}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const ledgerResponse = await withHorizonTiming(req, () =>
+      server.ledgers().order("desc").limit(limit).call()
+    );
+    const records = ledgerResponse.records || [];
+
+    const ledgers = records.slice(0, limit).map((ledger) => {
+      const transactionCountRaw = Number(
+        ledger.successful_transaction_count ??
+          ledger.transaction_count ??
+          0
+      );
+      const operationCountRaw = Number(ledger.operation_count ?? 0);
+      const baseFeeRaw = parseInt(
+        ledger.base_fee_in_stroops ?? ledger.base_fee ?? "0",
+        10
+      );
+
+      return {
+        sequence: formatLedgerSequence(ledger.sequence),
+        closedAt: ledger.closed_at || null,
+        transactionCount: Number.isFinite(transactionCountRaw)
+          ? transactionCountRaw
+          : 0,
+        operationCount: Number.isFinite(operationCountRaw)
+          ? operationCountRaw
+          : 0,
+        baseFee: Number.isFinite(baseFeeRaw) ? baseFeeRaw : 0,
+      };
+    });
+
+    const data = {
+      ledgers,
+      count: ledgers.length,
+      limit,
+    };
+
+    cacheService.set(cacheKey, data, LEDGER_HISTORY_CACHE_TTL);
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {
