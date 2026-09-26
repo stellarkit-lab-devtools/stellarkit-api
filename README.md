@@ -103,7 +103,7 @@ This project is ideal for:
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
 | GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
 | GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
-| GET | `/account/:id/analytics` | Basic account activity analytics | — |
+| GET | `/account/:id/analytics` | Account activity analytics: transaction frequency, first/last seen timestamps, and average transactions per day | — |
 | GET | `/account/:id/transaction-count` | Total transaction count, first and last transaction timestamps | — |
 | GET | `/account/:id/inactivity` | Days since last transaction and status | — |
 | GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
@@ -770,6 +770,14 @@ Returns days since the account's last transaction and a status label (`active`, 
 
 ```bash
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/inactivity"
+```
+
+### `GET /account/:id/analytics`
+
+Returns basic account activity analytics derived from the account's transaction history. Includes the total number of successful transactions, average transactions per day over the account's active period, and first/last seen timestamps.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/analytics"
 ```
 
 ### `GET /account/:id/subentry-health`
@@ -1503,10 +1511,21 @@ GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
     "status": "ok",
     "service": "StellarKit API",
     "version": "1.0.0",
-    "network": "testnet"
+    "timestamp": "2024-07-01T12:00:00.000Z",
+    "network": "testnet",
+    "uptimeSeconds": 42,
+    "nodeVersion": "v20.11.0",
+    "startedAt": "2024-07-01T11:59:18.000Z",
+    "horizon": {
+      "status": "ok",
+      "responseTimeMs": 45,
+      "network": "testnet"
+    }
   }
 }
 ```
+
+> **Note:** The `version` field is read dynamically from `package.json` at runtime. The value shown above reflects the current release and will update automatically with each new version.
 
 ### Network Status
 
