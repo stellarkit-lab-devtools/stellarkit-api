@@ -34,6 +34,7 @@ beforeEach(() => {
   server.offers.mockReturnValue({
     forAccount: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
+    order: jest.fn().mockReturnThis(),
     cursor: jest.fn().mockReturnThis(),
     call: jest.fn().mockResolvedValue({ records: mockOffers }),
   });
