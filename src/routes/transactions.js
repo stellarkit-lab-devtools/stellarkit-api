@@ -138,9 +138,14 @@ router.get("/:id", async (req, res, next) => {
 
     return success(res, {
       items: transactions,
-      total: transactions.length,
-      limit,
-      cursor: nextCursor,
+    }, {
+      meta: {
+        count: transactions.length,
+        limit,
+        order,
+        nextCursor: nextCursor || null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -312,9 +317,14 @@ router.get("/:id/operations", async (req, res, next) => {
 
     return success(res, {
       operations,
-      total: operations.length,
-      limit,
-      cursor: operations.length ? nextCursor : null,
+    }, {
+      meta: {
+        count: operations.length,
+        limit,
+        order,
+        nextCursor: operations.length ? nextCursor : null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);

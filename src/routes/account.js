@@ -898,9 +898,14 @@ router.get("/:id/operations", async (req, res, next) => {
 
     return success(res, {
       operations,
-      total: operations.length,
-      limit,
-      cursor: operations.length ? nextCursor : null,
+    }, {
+      meta: {
+        count: operations.length,
+        limit,
+        order: "desc",
+        nextCursor: operations.length ? nextCursor : null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     if (err && err.response && err.response.status === 404) {
@@ -1098,10 +1103,14 @@ router.get("/:id/payments", async (req, res, next) => {
 
     return success(res, {
       payments,
-      items: payments,
-      total: payments.length,
-      limit,
-      cursor: payments.length ? nextCursor : null,
+    }, {
+      meta: {
+        count: payments.length,
+        limit,
+        order,
+        nextCursor: payments.length ? nextCursor : null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -1192,15 +1201,21 @@ router.get("/:id/trades", async (req, res, next) => {
 
     const data = {
       trades,
-      items: trades,
-      total: trades.length,
-      limit,
-      cursor: trades.length ? nextCursor : null,
     };
 
-    cacheService.set(cacheKey, data, cacheTTL.trades);
+    const metadata = {
+      meta: {
+        count: trades.length,
+        limit,
+        order,
+        nextCursor: trades.length ? nextCursor : null,
+        hasMore: nextCursor !== null,
+      },
+    };
+
+    cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.trades);
     res.set("X-Cache", "MISS");
-    return success(res, data);
+    return success(res, data, metadata);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -1332,9 +1347,14 @@ router.get("/:id/offers", async (req, res, next) => {
 
     return success(res, {
       items: offers,
-      total: offers.length,
-      limit,
-      cursor: nextCursor,
+    }, {
+      meta: {
+        count: offers.length,
+        limit,
+        order: "desc",
+        nextCursor: nextCursor || null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     if (req.query.offerId) {

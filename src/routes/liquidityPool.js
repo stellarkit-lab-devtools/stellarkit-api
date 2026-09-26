@@ -188,16 +188,23 @@ router.get("/:id/trades", async (req, res, next) => {
 
     const data = {
       trades: normalizedRecords,
-      total: normalizedRecords.length,
-      limit,
-      cursor: filteredRecords.length
-        ? filteredRecords[filteredRecords.length - 1].paging_token || null
-        : null,
     };
 
-    cacheService.set(cacheKey, data, cacheTTL.poolTrades);
+    const metadata = {
+      meta: {
+        count: normalizedRecords.length,
+        limit,
+        order,
+        nextCursor: filteredRecords.length
+          ? filteredRecords[filteredRecords.length - 1].paging_token || null
+          : null,
+        hasMore: filteredRecords.length > 0 && filteredRecords.length === limit,
+      },
+    };
+
+    cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.poolTrades);
     res.set("X-Cache", "MISS");
-    return success(res, data);
+    return success(res, data, metadata);
   } catch (err) {
     next(err);
   }

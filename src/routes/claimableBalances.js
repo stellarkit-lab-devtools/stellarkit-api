@@ -254,14 +254,21 @@ router.get("/by-sponsor/:address", async (req, res, next) => {
 
     const data = {
       balances,
-      total: balances.length,
-      limit,
-      cursor: nextCursor,
     };
 
-    cacheService.set(cacheKey, data, cacheTTL.balancesBySponsor);
+    const metadata = {
+      meta: {
+        count: balances.length,
+        limit,
+        order: "desc",
+        nextCursor: nextCursor || null,
+        hasMore: nextCursor !== null,
+      },
+    };
+
+    cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.balancesBySponsor);
     res.set("X-Cache", "MISS");
-    return res.json({ success: true, data });
+    return res.json({ success: true, data, ...metadata });
   } catch (err) {
     next(err);
   }
