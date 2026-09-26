@@ -2311,6 +2311,141 @@ router.get("/:id/risk-score", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/compliance-check
+ * Runs a multi-factor compliance check on an account and returns a `passed`
+ * boolean and a `recommendation` of "allow", "review", or "deny".
+ *
+ * The check combines:
+ *   1. Risk score — high risk (rating "high") triggers "review" or "deny"
+ *   2. Freeze flags — any frozen trustline triggers passed: false and "deny"
+ *   3. Account existence — missing account returns 404
+ *
+ * Response shape:
+ *   {
+ *     accountId:      string,
+ *     passed:         boolean,
+ *     recommendation: "allow" | "review" | "deny",
+ *     riskScore:      number,
+ *     riskRating:     "low" | "medium" | "high",
+ *     checks: {
+ *       riskScore: { passed: boolean, detail: string },
+ *       freezeFlags: { passed: boolean, frozenAssets: string[] }
+ *     }
+ *   }
+ *
+ * @example
+ * GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/compliance-check
+ */
+router.get("/:id/compliance-check", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // ── Risk score computation (reuse same logic as /risk-score) ───────────
+    const firstOpResponse = await server
+      .operations()
+      .forAccount(id)
+      .order("asc")
+      .limit(1)
+      .call();
+    const firstOp = firstOpResponse.records[0];
+
+    const recentTxResponse = await server
+      .transactions()
+      .forAccount(id)
+      .order("desc")
+      .limit(60)
+      .call();
+    const recentTxs = recentTxResponse.records;
+
+    let score = 50;
+
+    // Factor: account age
+    if (firstOp) {
+      const daysOld = Math.floor(
+        (Date.now() - new Date(firstOp.created_at).getTime()) / (1000 * 60 * 60 * 24)
+      );
+      if (daysOld > 365) score += 15;
+      else if (daysOld > 30) score += 10;
+      else score -= 15;
+    } else {
+      score -= 10;
+    }
+
+    // Factor: home domain
+    if (account.home_domain) score += 10;
+    else score -= 5;
+
+    // Factor: multi-sig
+    if (account.signers.length > 1) score += 10;
+
+    // Factor: trustline count
+    const trustlineCount = (account.balances || []).filter(
+      (b) => isNonNativeAsset(b)
+    ).length;
+    if (trustlineCount > 30) score -= 15;
+    else if (trustlineCount > 10) score -= 5;
+    else score += 5;
+
+    // Factor: recent activity
+    if (recentTxs.length > 50) score -= 10;
+    else if (recentTxs.length > 20) score -= 5;
+    else score += 5;
+
+    score = Math.max(0, Math.min(100, score));
+
+    let riskRating;
+    if (score >= 70) riskRating = "low";
+    else if (score >= 40) riskRating = "medium";
+    else riskRating = "high";
+
+    // ── Freeze flag check ───────────────────────────────────────────────────
+    const frozenAssets = (account.balances || [])
+      .filter((b) => isNonNativeAsset(b) && !b.is_authorized)
+      .map((b) => `${b.asset_code}:${b.asset_issuer}`);
+
+    const hasFreezeFlag = frozenAssets.length > 0;
+
+    // ── Determine overall outcome ───────────────────────────────────────────
+    let passed = true;
+    let recommendation = "allow";
+
+    if (hasFreezeFlag) {
+      passed = false;
+      recommendation = "deny";
+    } else if (riskRating === "high") {
+      passed = false;
+      recommendation = "deny";
+    } else if (riskRating === "medium") {
+      // Medium risk does not automatically fail — flag for manual review
+      recommendation = "review";
+    }
+
+    return success(res, {
+      accountId: account.id,
+      passed,
+      recommendation,
+      riskScore: score,
+      riskRating,
+      checks: {
+        riskScore: {
+          passed: riskRating !== "high",
+          detail: `Risk rating is "${riskRating}" (score: ${score})`,
+        },
+        freezeFlags: {
+          passed: !hasFreezeFlag,
+          frozenAssets,
+        },
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/payments
  * Returns only payment and create_account operations for an account,
  * filtered from the full operations list.
