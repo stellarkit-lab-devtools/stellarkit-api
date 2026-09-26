@@ -86,14 +86,13 @@ describe("Transaction Batch Status Checker", () => {
       });
     });
 
-    it("returns an empty items array and total 0 for an empty hashes array", async () => {
+    it("returns 400 for an empty hashes array", async () => {
       const res = await request(app)
         .post("/transactions/batch-status")
         .send({ hashes: [] });
 
-      expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data).toEqual({ items: [], total: 0 });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
     });
 
     it("returns 400 if more than 20 hashes are provided", async () => {
@@ -107,14 +106,22 @@ describe("Transaction Batch Status Checker", () => {
       expect(res.body.error.message).toContain("Maximum of 20 hashes allowed");
     });
 
-    it("returns 400 if any hash is invalid", async () => {
+    it("returns error entry for invalid hash format without failing the whole request", async () => {
+      jest.spyOn(server, "transactions").mockReturnValue({
+        transaction: jest.fn().mockReturnValue({
+          call: jest.fn().mockResolvedValue({ hash: VALID_HASH, successful: true, ledger: 1, created_at: "2024-01-01T00:00:00Z", fee_charged: "100" }),
+        }),
+      });
+
       const res = await request(app)
         .post("/transactions/batch-status")
         .send({ hashes: [VALID_HASH, "INVALID_HASH"] });
 
-      expect(res.statusCode).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error.message).toContain("Invalid transaction hash");
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.items).toHaveLength(2);
+      expect(res.body.data.items[1]).toMatchObject({ hash: "INVALID_HASH", found: false });
+      expect(res.body.data.items[1].error).toBeDefined();
     });
 
     it("returns 400 if hashes property is missing or not an array", async () => {
