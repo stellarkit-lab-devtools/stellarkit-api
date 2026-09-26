@@ -155,6 +155,7 @@ This project is ideal for:
 
 | Method | Path | Description | Query Params |
 | ------ | ---- | ----------- | ------------ |
+| GET | `/liquidity-pools` | List liquidity pools with normalized reserves, fees, shares, and trustline metadata | `limit`, `cursor`, `page`, `order`, `fresh` |
 | GET | `/liquidity-pools/:id` | Live pool details from Horizon (reserves, fee, shares) | — |
 | GET | `/liquidity-pools/:id/profitability` | Estimated annualized fee income | — |
 | GET | `/liquidity-pools/:id/reserve-ratio` | Reserve ratio and drift from equal | — |
@@ -589,7 +590,7 @@ StellarKit API provides several endpoints to interact with and analyze liquidity
 
 | Endpoint                                  | Description                                                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /liquidity-pools`                    | Retrieves a list of all liquidity pools on the network with reserve details and fee information.                |
+| `GET /liquidity-pools`                    | Retrieves a paginated list of liquidity pools with normalized reserve details and fee information. Supports `limit` (1–100), `cursor` (Horizon paging token), `page` (1-based convenience pagination), `order` (`asc`/`desc`), and `fresh=true` to bypass the cache. |
 | `GET /liquidity-pools/:id`                | Fetches detailed information about a specific pool, including reserves, share count, and fee basis points.      |
 | `GET /account/:id/pool-positions`         | Returns all liquidity pool positions for an account with calculated share values and equivalent reserves.       |
 | `GET /dex/pool-share-value/:poolId/:shares` | Calculates the equivalent value of a specific number of pool shares in both reserve assets.                    |
