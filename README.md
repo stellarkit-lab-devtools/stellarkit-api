@@ -60,6 +60,7 @@ This project is ideal for:
 - [Performance Guide](docs/performance.md) - Latency expectations, cache TTL tuning, Horizon optimization, and scaling recommendations
 - [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
 - [Error Codes](docs/error-codes.md) - HTTP status code reference with descriptions, scenarios, and sample responses
+- [Account Endpoints Guide](docs/account-endpoints.md) - Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint
 - [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
 - [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
 - [Utilities Guide](docs/utilities.md) - All utility endpoints with use cases, curl examples, and sample responses
@@ -214,6 +215,7 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 ## Documentation
 
 - [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`.
+- [docs/account-endpoints.md](docs/account-endpoints.md) — Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint.
 - [docs/webhooks.md](docs/webhooks.md) — Webhook registration, events, payloads, signature verification, retries, and unregistration.
 - [docs/webhook-security.md](docs/webhook-security.md) — Verifying HMAC-SHA256 delivery signatures (Node.js/Python/Go), handling invalid signatures, secret storage, and dual-secret rotation.
 - [docs/batch-endpoints.md](docs/batch-endpoints.md) — Batch API endpoints, address/hash limits, per-entry errors, and when to use batch vs individual.
@@ -1035,7 +1037,7 @@ When an error occurs, the response structure differs:
 {
   "success": false,
   "error": {
-    "type": "ACCOUNT_NOT_FOUND",
+    "type": "AccountNotFound",
     "message": "Account does not exist on the Stellar network"
   }
 }
@@ -1044,7 +1046,7 @@ When an error occurs, the response structure differs:
 **Fields:**
 
 - `success` **(boolean)**: Always `false` for error responses.
-- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `ACCOUNT_NOT_FOUND`, `INVALID_REQUEST`, `RATE_LIMITED`).
+- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `AccountNotFound`, `InvalidAccountId`, `ValidationError`).
 - `error.message` **(string)**: A human-readable error message describing what went wrong.
 
 #### Error Response Example
@@ -1053,7 +1055,7 @@ When an error occurs, the response structure differs:
 {
   "success": false,
   "error": {
-    "type": "VALIDATION_ERROR",
+    "type": "ValidationError",
     "message": "Invalid Stellar account ID. Must be a valid public key starting with 'G'."
   }
 }
