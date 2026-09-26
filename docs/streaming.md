@@ -726,6 +726,53 @@ The server sends close code `1011` (Internal Error) when it cannot subscribe to 
 
 ---
 
+## Demo Script
+
+The repository ships a ready-to-run CLI script at `scripts/ws-client-demo.js` that connects to the WebSocket ledger stream and prints each incoming ledger update to the console. It is the fastest way to verify that the stream is working end-to-end without writing any code.
+
+### What the script does
+
+- Opens a WebSocket connection to `ws://localhost:<PORT>/stream/ledgers`
+- Prints the `sequence`, `closedAt`, `baseFee`, and `transactionCount` fields for every ledger received
+- Automatically closes the connection and exits after 3 minutes to prevent orphaned processes
+- Reads `PORT` from the environment (defaults to `3000`) so it works with any server configuration
+
+### How to run it
+
+1. Start the API server in one terminal:
+
+```bash
+npm run dev
+```
+
+2. Open a second terminal and run the demo script:
+
+```bash
+node scripts/ws-client-demo.js
+```
+
+You will see output similar to the following as ledgers close on the Stellar network (approximately every 5 seconds):
+
+```
+Connecting to StellarKit WebSocket ledger stream at: ws://localhost:3000/stream/ledgers
+✅ Connected successfully! Listening for real-time ledger updates...
+
+🔔 [Live Ledger Received]
+   Sequence         : 52430101
+   Closed At        : 2026-07-28T10:02:05.000Z
+   Base Fee         : 100 stroops
+   Transaction Count: 12
+   -------------------------------------------------
+```
+
+To use a non-default port, set the `PORT` environment variable before running the script:
+
+```bash
+PORT=4000 node scripts/ws-client-demo.js
+```
+
+---
+
 ## Related Documentation
 
 - [Getting Started Guide](getting-started.md) — Initial setup and environment variables

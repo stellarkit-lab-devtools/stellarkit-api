@@ -1,3 +1,25 @@
+// Registered route files (alphabetical order):
+//   account.counterparties  → /account/:id/counterparties
+//   account                 → /account/:id/*
+//   accounts                → /accounts/*
+//   asset                   → /asset/*
+//   cacheStats              → /cache/*
+//   claimableBalances       → /claimable-balances/*
+//   dex                     → /dex/*
+//   feeEstimate             → /fee-estimate/*
+//   liquidityPool           → /liquidity-pools/*
+//   metrics                 → /metrics
+//   network                 → /network/*
+//   networkStatus           → /network-status
+//   soroban                 → /soroban/*
+//   stellarToml             → /stellar-toml/*
+//   stream                  → /stream/*
+//   transaction.effects     → /transaction/:hash/effects
+//   transactions            → /transactions/*
+//   utils                   → /utils/*
+//   webhooks                → /webhooks/*
+//   assetsOverview          → /assets-overview
+
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
