@@ -17,8 +17,12 @@ const {
 const { validateEffectType } = require("../utils/effectTypes");
 const { accountSummaryRateLimiter } = require("../middleware/rateLimiter");
 const registerParamValidation = require("../middleware/validateRouteParams");
+const minResponseTime = require("../middleware/minResponseTime");
 const { startHorizonTimer, stopHorizonTimer } = require("../middleware/requestLogger");
 registerParamValidation(router);
+// Pad synchronous format-validation 400s so they cannot be distinguished from
+// Horizon-backed rejections by response time (account-enumeration hardening).
+router.use(minResponseTime);
 
 /**
  * Calls a Horizon-backed async function and records the duration on req

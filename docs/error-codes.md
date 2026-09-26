@@ -80,6 +80,14 @@ This document lists all HTTP status codes returned by the StellarKit API, along 
 }
 ```
 
+**Timing note:** To prevent account enumeration, format-validation 400s on account
+routes (`InvalidAccountId`, `ValidationError`, `MissingParameter`) are padded to
+take at least `MIN_RESPONSE_TIME_MS` (default: 200 ms). This makes them
+indistinguishable by timing from an `AccountNotFound` 404, which requires a
+Horizon round trip. See
+[Environment Configuration](./environment-configuration.md#min_response_time_ms)
+for details.
+
 ---
 
 ## 401 Unauthorized
