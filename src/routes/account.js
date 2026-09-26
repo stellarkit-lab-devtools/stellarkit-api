@@ -2492,7 +2492,32 @@ router.get("/:id/reserve-breakdown", async (req, res, next) => {
 /**
  * GET /account/:id/sponsorship
  */
-router.get("/:id/sponsorship", async (req, res, next) => {
+/**
+ * GET /account/:id/sponsorship (DEPRECATED)
+ *
+ * This endpoint has been consolidated into GET /account/:id/sponsorships.
+ * Please use that endpoint instead.
+ */
+router.get("/:id/sponsorship", (req, res) => {
+  res.status(410).json({
+    success: false,
+    error: {
+      type: "Gone",
+      message: "GET /account/:id/sponsorship has been deprecated and consolidated into GET /account/:id/sponsorships. Please use that endpoint instead.",
+      deprecated: true,
+      replacementEndpoint: "/account/:id/sponsorships",
+    },
+  });
+});
+
+/**
+ * GET /account/:id/sponsorships
+ *
+ * Returns comprehensive sponsorship information for an account including:
+ * - Entries the account is sponsoring for (balances, signers, data entries, offers)
+ * - Accounts this account is sponsoring
+ */
+router.get("/:id/sponsorships", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -2507,6 +2532,7 @@ router.get("/:id/sponsorship", async (req, res, next) => {
     const reserveAmount = BASE_RESERVE_XLM.toFixed(7);
     const sponsoredEntries = [];
 
+    // Collect trustlines sponsored by this account
     (account.balances || []).forEach((b) => {
       if (b.sponsor) {
         sponsoredEntries.push({
@@ -2518,6 +2544,7 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       }
     });
 
+    // Collect signers sponsored by this account
     (account.signers || []).forEach((s) => {
       if (s.sponsor) {
         sponsoredEntries.push({
@@ -2529,6 +2556,7 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       }
     });
 
+    // Collect data entries sponsored by this account
     if (account.data_attr) {
       const dataSponsors = account.data_sponsors || {};
       Object.keys(account.data_attr).forEach((key) => {
@@ -2543,6 +2571,7 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       });
     }
 
+    // Collect offers sponsored by this account
     (offersResponse.records || []).forEach((offer) => {
       if (offer.sponsor) {
         sponsoredEntries.push({
@@ -2563,34 +2592,8 @@ router.get("/:id/sponsorship", async (req, res, next) => {
       accountSponsor: account.sponsor || null,
       sponsoredEntries,
       accountsSponsoring,
-      sponsoredEntries,
-      accountsSponsoring,
-      count: sponsoredEntries.length,
+      total: sponsoredEntries.length,
     });
-  } catch (err) {
-    handleAccountNotFound(err, next, req.params.id);
-  }
-});
-
-/**
- * GET /account/:id/sponsorships
- */
-router.get("/:id/sponsorships", async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    validateAccountId(id);
-
-    const [account, sponsoringResponse] = await Promise.all([
-      server.loadAccount(id),
-      server.accounts().sponsor(id).call(),
-    ]);
-
-    const sponsoredBy = buildSponsoredByEntries(account);
-    const sponsoring = (sponsoringResponse.records || []).flatMap((sponsoredAccount) =>
-      buildSponsoringEntries(sponsoredAccount, id),
-    );
-
-    return success(res, { sponsoring, sponsoredBy });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }

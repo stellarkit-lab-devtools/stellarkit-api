@@ -4,3 +4,33 @@ coverage/
 *.log
 .DS_Store
 dist/
+
+# ── Editor settings ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Test output artefacts ──────────────────────────────────────────────────────
+test-out*.txt
+test-output*.txt
+test-result*.txt
+test_*.txt
+*-output.txt
+*-handler-output.txt
+
+# ── Ad-hoc verification and test scripts in root ────────────────────────────────
+verify-*.js
+run-test.js
+manual-*.sh
+test-*.js
+
+# ── Implementation artefact docs ───────────────────────────────────────────────
+IMPLEMENTATION_*.md
+*_SUMMARY.md
+*_REPORT.md
+FIX_SUMMARY.md
+CHANGES_MADE.txt
+PR.md
+QUICK_START_DOCS.md
+TODO.md
+GITHUB_ISSUES.md
+README.me
