@@ -22,6 +22,9 @@ function makeInvalidAccountIdError(accountId) {
     `""${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
   );
   err.isInvalidAccountId = true;
+  // Stable marker used by the minResponseTime middleware to identify
+  // synchronous format rejections (which never touch Horizon).
+  err.type = "InvalidAccountId";
   err.accountId = accountId;
   err.suggestion = "Account addresses start with G and are 56 characters long.";
   err.status = 400;

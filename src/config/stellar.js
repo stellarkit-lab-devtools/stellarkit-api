@@ -33,6 +33,15 @@ const SOROBAN_RPC_URLS = {
 };
 
 const sorobanRpcUrl = process.env.SOROBAN_RPC_URL || SOROBAN_RPC_URLS[NETWORK];
+
+if (NETWORK === "mainnet" && !sorobanRpcUrl) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[StellarKit] WARNING: STELLAR_NETWORK is set to 'mainnet' but SOROBAN_RPC_URL is not configured. " +
+    "The /soroban/* endpoints will be unavailable until SOROBAN_RPC_URL is set to a valid Soroban RPC server URL."
+  );
+}
+
 const sorobanServer = sorobanRpcUrl ? new rpc.Server(sorobanRpcUrl) : null;
 
 /**

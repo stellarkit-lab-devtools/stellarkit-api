@@ -52,6 +52,7 @@ This project is ideal for:
 - [Webhooks Guide](docs/webhooks.md) - Register webhooks, available events, payload shapes, signature verification, retries, and unregistration
 - [Webhook Security Guide](docs/webhook-security.md) - Verify HMAC-SHA256 delivery signatures in Node.js/Python/Go, handle invalid signatures, store secrets safely, and rotate with the dual-secret pattern
 - [Batch Endpoints Guide](docs/batch-endpoints.md) - Batch trust-status, freeze-status, and transaction status APIs, limits, and when to use batch vs individual
+- [DEX Endpoints Guide](docs/dex-endpoints.md) - All six DEX endpoints with curl examples, sample responses, and guidance on spread vs depth vs imbalance vs arbitrage
 - [Caching Strategy](docs/caching-strategy.md) - Per-endpoint cache TTLs and configuration
 - [Logging Guide](docs/logging.md) - Log levels, configuration, structured log entry fields, JSON parsing, and production monitoring
 - [Monitoring Guide](docs/monitoring.md) - Key metrics, alert thresholds, health check polling strategy, and integration patterns for Prometheus, Datadog, CloudWatch, and uptime tools
@@ -59,8 +60,10 @@ This project is ideal for:
 - [Performance Guide](docs/performance.md) - Latency expectations, cache TTL tuning, Horizon optimization, and scaling recommendations
 - [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
 - [Error Codes](docs/error-codes.md) - HTTP status code reference with descriptions, scenarios, and sample responses
+- [Account Endpoints Guide](docs/account-endpoints.md) - Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint
 - [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
 - [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
+- [Utilities Guide](docs/utilities.md) - All utility endpoints with use cases, curl examples, and sample responses
 
 ---
 
@@ -84,6 +87,7 @@ This project is ideal for:
 | ------ | ---- | ----------- | ------------ |
 | GET | `/fee-estimate` | Fee tiers for transaction submission | `operations`, `fresh` |
 | GET | `/fee-estimate/surge-status` | Fee surge detection and recommendations | `fresh` |
+| GET | `/fee-estimate/trends` | Fee trend analysis across the last 50 ledgers (avg, min, max, trend direction, and recommendation) | `fresh` |
 
 ### Account
 
@@ -100,13 +104,14 @@ This project is ideal for:
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
 | GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
 | GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
-| GET | `/account/:id/analytics` | Basic account activity analytics | — |
+| GET | `/account/:id/analytics` | Account activity analytics: transaction frequency, first/last seen timestamps, and average transactions per day | — |
 | GET | `/account/:id/transaction-count` | Total transaction count, first and last transaction timestamps | — |
 | GET | `/account/:id/inactivity` | Days since last transaction and status | — |
 | GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
 | GET | `/account/:id/risk-score` | Computed risk score and contributing factors | — |
 | GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
 | GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
+| GET | `/account/:id/signers` | Account signers, their weights, and threshold configuration | — |
 | GET | `/account/:id/subentry-health` | Subentry usage and remaining capacity | — |
 | GET | `/account/:id/sponsorship` | Sponsorship relationships for the account — returns raw sponsored entries and accounts this account is sponsoring. **Prefer `/sponsorships` for new integrations.** Note: both endpoints will be consolidated in a future release (see issue #19). | — |
 | GET | `/account/:id/sponsorships` | **Preferred.** Typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays; each entry includes `type`, `address`, `sponsor`, and `reserveAmount`. More structured than `/sponsorship`. Note: will be consolidated with `/sponsorship` in a future release (see issue #19). | — |
@@ -145,6 +150,7 @@ This project is ideal for:
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
 | GET | `/dex/top-markets` | Top markets ranked by recent trade activity | `limit` |
+| GET | `/dex/pool-share-value/:poolId/:shares` | Calculate the equivalent value of pool shares in both reserve assets | — |
 
 ### Liquidity Pools
 
@@ -211,6 +217,7 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 ## Documentation
 
 - [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`.
+- [docs/account-endpoints.md](docs/account-endpoints.md) — Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint.
 - [docs/webhooks.md](docs/webhooks.md) — Webhook registration, events, payloads, signature verification, retries, and unregistration.
 - [docs/webhook-security.md](docs/webhook-security.md) — Verifying HMAC-SHA256 delivery signatures (Node.js/Python/Go), handling invalid signatures, secret storage, and dual-secret rotation.
 - [docs/batch-endpoints.md](docs/batch-endpoints.md) — Batch API endpoints, address/hash limits, per-entry errors, and when to use batch vs individual.
@@ -218,6 +225,8 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 ---
 
 ## Project Structure
+
+### Core Files
 
 - `src/index.js` — application entry point
 - `src/websocket.js` — WebSocket helper for Stellar streaming data
@@ -228,6 +237,77 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 - `src/middleware/` — API key auth, validation, error handling, rate limiting, sanitisation, and request logging
 - `tests/` — 170+ test files organised into root-level unit tests, plus `integration/`, `middleware/`, `routes/`, `stream/`, and `utils/` subdirectories
 - `types/index.d.ts` — exported TypeScript type definitions
+- `docs/` — in-depth guides for deployment, webhooks, Soroban, streaming, rate limiting, observability, and more
+- `examples/` — runnable demo scripts for multisig, pool positions, spread calculation, and transaction search
+- `scripts/` — developer utility scripts including testnet account seeding and WebSocket client demo
+- `sdk/` — TypeScript SDK client with typed methods for accounts, assets, DEX, fees, network, and Soroban
+- `types/` — bundled TypeScript type declarations for use in TypeScript projects
+- `.github/` — GitHub Actions CI workflow and pull request template
+
+### src/routes/ — Express Route Handlers
+
+Contains endpoint implementations (21 route files). All routes import the shared Horizon server instance from `src/config/stellar.js` to ensure consistent SDK configuration across the application.
+
+### src/utils/ — Utility Helpers (30 Files)
+
+Shared helpers for formatting, validation, caching, and response shaping:
+
+| File | Purpose |
+|------|---------|
+| `response.js` | Wraps data in consistent JSON success response envelopes with metadata. |
+| `validators.js` | Query parameter and account ID validators for pagination, asset codes, and Stellar addresses. |
+| `errors.js` | Detects and translates Horizon timeout errors and provides user-friendly messages. |
+| `StellarKitError.js` | Custom error class for consistent error handling with HTTP status, type, detail, and suggestions. |
+| `cache.js` | Creates shared NodeCache instances for network status, fee estimates, and contract dependencies. |
+| `logger.js` | Structured Pino-based logger with automatic redaction of sensitive fields and environment-based verbosity. |
+| `horizonErrors.js` | Provides plain-English translations for common Horizon error codes (tx_bad_seq, op_no_trust, etc.). |
+| `horizonHealth.js` | Pings Horizon and returns connectivity status (ok/degraded/unreachable) for health checks. |
+| `horizonStatusMapper.js` | Maps Horizon result codes to corresponding HTTP status codes (e.g., tx_bad_seq → 409). |
+| `formatAmount.js` | Normalizes Stellar amounts to fixed seven-decimal string format across types. |
+| `formatBalance.js` | Formats Stellar balance strings with thousand separators (e.g., "10,000.1234567"). |
+| `formatLedgerSequence.js` | Converts ledger sequence numbers to consistent integer format from string or number inputs. |
+| `formatTransaction.js` | Formats Horizon transaction records into clean SSE payload structure. |
+| `parseStellarAmount.js` | Converts stroops (Stellar's smallest unit) to seven-decimal XLM strings. |
+| `operationFormatter.js` | Normalizes Horizon operation records into consistent API operation shape. |
+| `toCamelCase.js` | Recursively converts snake_case object keys to camelCase throughout nested structures. |
+| `memo.js` | Decodes Stellar memos from base64 to UTF-8 text or hexadecimal hashes. |
+| `asset.js` | Parses Stellar asset strings in "CODE:ISSUER" format into SDK Asset objects. |
+| `assetHelpers.js` | Utility helpers for detecting native XLM assets across different object shapes. |
+| `assetToml.js` | Fetches and normalizes asset metadata from TOML files (home domain resolution). |
+| `tomlResolver.js` | Resolves and caches TOML files from asset home domains with inline comment stripping. |
+| `accountAge.js` | Calculates account age and longevity metrics with maturity classification (new, established). |
+| `contractDeployment.js` | Finds Soroban contract deployment metadata (deployer, timestamp, ledger) from Horizon operations. |
+| `contractSpec.js` | Parses and maps Soroban contract specification XDR data to human-readable type information. |
+| `crypto.js` | Generates SHA-256 proof hashes with salt for cryptographic verification and security features. |
+| `effectTypes.js` | Defines the canonical list of valid Horizon effect type strings for validation. |
+| `mapAccountTrade.js` | Maps raw Horizon trade records to normalized StellarKit shape with formatted prices. |
+| `mapFeeEstimate.js` | Maps Horizon fee statistics to StellarKit fee estimate response with surge capacity detection. |
+| `mapNetworkStatus.js` | Maps Horizon server info and latest ledger into normalized network status payload. |
+| `pagination.js` | Resolves page numbers to Horizon paging cursors using async token lookups. |
+
+### src/middleware/ — Request Processing (17 Files)
+
+Middleware functions that validate, transform, and handle requests. Middleware execution order is important — see [docs/project-structure.md](docs/project-structure.md) for details.
+
+| File | Purpose |
+|------|---------|
+| `errorHandler.js` | Centralized error handler that formats Horizon/SDK errors into consistent JSON responses. |
+| `rateLimiter.js` | Express rate limiter with configurable per-endpoint limits (global, account, asset endpoints). |
+| `requestLogger.js` | Logs completed requests with method, path, status, request ID, and response time via Pino. |
+| `requestId.js` | Generates or validates incoming request IDs with UUID fallback and injection pattern checking. |
+| `sanitize.js` | Trims whitespace and strips null bytes from params/query; validates length and injection patterns. |
+| `apiKeyAuth.js` | Optional API key authentication middleware that validates X-API-Key header against hashed keys from env. |
+| `restrictHttpMethods.js` | Rejects unsupported HTTP methods (only GET, POST, DELETE, PATCH allowed; returns 405). |
+| `contentTypeValidator.js` | Requires "application/json" Content-Type header for POST and PATCH requests (415 rejection). |
+| `bodySizeLimit.js` | Enforces maximum request body size (default 10 KB) with configurable KB or legacy size strings. |
+| `coerceQueryParams.js` | Converts query parameters (limit, operations, fresh) from strings to integers/booleans. |
+| `normalizeAssetCode.js` | Uppercases asset code in route params and query params for consistent handling. |
+| `rejectDuplicateQueryParams.js` | Prevents HTTP parameter pollution by rejecting requests with duplicate query keys. |
+| `validateRouteParams.js` | Validates required route parameters are not empty and registers param validation handlers. |
+| `etag.js` | Generates ETags from response bodies and returns 304 Not Modified if client If-None-Match matches. |
+| `metricsCollector.js` | Intercepts responses and forwards status code, response time, and cache headers to metrics service. |
+| `routeCounter.js` | Per-route request counter middleware that tracks totals by "METHOD /path" pattern. |
+| `webhookSignatureAuth.js` | Validates HMAC-SHA256 webhook signatures with optional secret rotation support. |
 
 ---
 
@@ -694,6 +774,14 @@ Returns days since the account's last transaction and a status label (`active`, 
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/inactivity"
 ```
 
+### `GET /account/:id/analytics`
+
+Returns basic account activity analytics derived from the account's transaction history. Includes the total number of successful transactions, average transactions per day over the account's active period, and first/last seen timestamps.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/analytics"
+```
+
 ### `GET /account/:id/subentry-health`
 
 Returns subentry usage, remaining capacity, and a warning level when approaching the protocol limit.
@@ -800,6 +888,65 @@ Retrieves transaction history for an account, with pagination.
 
 Retrieves operation history for an account, with pagination.
 
+### `POST /transactions/batch-status`
+
+Checks the confirmation status of up to 20 transaction hashes in a single request. All Horizon lookups are performed in parallel. Each hash in the response includes a `found` flag; when `found` is `true` the entry also carries `successful`, `ledger`, `createdAt`, and `fee`.
+
+**Request body:**
+
+```json
+{
+  "hashes": [
+    "6bc97b244e4eff6e3a1c82e4bab89f6e6b6a3a1e5e6b7e8f9a0b1c2d3e4f5a6b",
+    "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+  ]
+}
+```
+
+**curl example:**
+
+```bash
+curl -X POST "http://localhost:3000/transactions/batch-status" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hashes": [
+      "6bc97b244e4eff6e3a1c82e4bab89f6e6b6a3a1e5e6b7e8f9a0b1c2d3e4f5a6b",
+      "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+    ]
+  }'
+```
+
+**Sample response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "hash": "6bc97b244e4eff6e3a1c82e4bab89f6e6b6a3a1e5e6b7e8f9a0b1c2d3e4f5a6b",
+        "found": true,
+        "successful": true,
+        "ledger": 52834901,
+        "createdAt": "2026-09-20T14:32:11Z",
+        "fee": "100"
+      },
+      {
+        "hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+        "found": false
+      }
+    ],
+    "total": 2
+  }
+}
+```
+
+**Key points:**
+- Body: `hashes` — array of 64-character hex transaction hashes, maximum 20 per request.
+- Returns `400` if more than 20 hashes are supplied or any hash is not a valid 64-character hex string.
+- When `found: false` the hash was not found on the network (unconfirmed or invalid).
+- Per-hash `fee` is in stroops (100 stroops = 0.0000100 XLM).
+
 ### `GET /asset/:code/:issuer`
 
 Returns metadata and statistics for a specific Stellar asset.
@@ -902,7 +1049,7 @@ When an error occurs, the response structure differs:
 {
   "success": false,
   "error": {
-    "type": "ACCOUNT_NOT_FOUND",
+    "type": "AccountNotFound",
     "message": "Account does not exist on the Stellar network"
   }
 }
@@ -911,7 +1058,7 @@ When an error occurs, the response structure differs:
 **Fields:**
 
 - `success` **(boolean)**: Always `false` for error responses.
-- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `ACCOUNT_NOT_FOUND`, `INVALID_REQUEST`, `RATE_LIMITED`).
+- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `AccountNotFound`, `InvalidAccountId`, `ValidationError`).
 - `error.message` **(string)**: A human-readable error message describing what went wrong.
 
 #### Error Response Example
@@ -920,7 +1067,7 @@ When an error occurs, the response structure differs:
 {
   "success": false,
   "error": {
-    "type": "VALIDATION_ERROR",
+    "type": "ValidationError",
     "message": "Invalid Stellar account ID. Must be a valid public key starting with 'G'."
   }
 }
@@ -1241,11 +1388,13 @@ yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
 ### Using Asset Formats in API Requests
 
 **DEX Endpoints:**
-When querying DEX endpoints like `/dex/orderbook`, `/dex/depth`, or `/dex/spread`, always use the CODE:ISSUER format:
+When querying DEX endpoints like `/dex/depth`, `/dex/spread`, `/dex/price`, or `/dex/imbalance`, use the CODE:ISSUER format as path parameters:
 
 ```
-GET /dex/orderbook?buyingAsset=USDC:GBBD47IF...&sellingAsset=XLM:native
-GET /dex/spread?buyingAsset=yXLM:GARDN...&sellingAsset=USDC:GBBD...
+GET /dex/depth/XLM:native/USDC:GBBD47IF...
+GET /dex/spread/XLM:native/USDC:GBBD47IF...
+GET /dex/spread/yXLM:GARDN.../USDC:GBBD...
+GET /dex/price/XLM:native/USDC:GBBD47IF...?amount=100
 ```
 
 **Asset Lookup Endpoints:**
@@ -1368,10 +1517,21 @@ GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
     "status": "ok",
     "service": "StellarKit API",
     "version": "1.0.0",
-    "network": "testnet"
+    "timestamp": "2024-07-01T12:00:00.000Z",
+    "network": "testnet",
+    "uptimeSeconds": 42,
+    "nodeVersion": "v20.11.0",
+    "startedAt": "2024-07-01T11:59:18.000Z",
+    "horizon": {
+      "status": "ok",
+      "responseTimeMs": 45,
+      "network": "testnet"
+    }
   }
 }
 ```
+
+> **Note:** The `version` field is read dynamically from `package.json` at runtime. The value shown above reflects the current release and will update automatically with each new version.
 
 ### Network Status
 

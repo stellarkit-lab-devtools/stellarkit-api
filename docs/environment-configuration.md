@@ -260,6 +260,50 @@ See [Logging Guide](./logging.md) for more on how `NODE_ENV` affects logging beh
 
 ---
 
+## MIN_RESPONSE_TIME_MS
+
+**Variable:** `MIN_RESPONSE_TIME_MS`  
+**Default:** `200`  
+**Accepted values:** Any non-negative integer (milliseconds). Invalid, negative, or non-numeric values fall back to the default.  
+**Required:** No
+
+### What Does It Do?
+
+This variable sets a floor on how quickly **format-validation rejections** (HTTP 400) are returned by account routes, to prevent account enumeration through response timing.
+
+A malformed account ID fails synchronously during format validation, before any Horizon request is made. A well-formed but non-existent account, by contrast, requires a full Horizon round trip before the API can return its 404. Without padding, an attacker can measure the difference: a fast 400 means the address was structurally invalid, while a slow response means the address was well formed and therefore potentially real.
+
+When set, `MIN_RESPONSE_TIME_MS` delays the targeted validation 400 responses until at least this many milliseconds have elapsed since the request entered the account router. The delay applies only to these validation errors:
+
+- `InvalidAccountId` — malformed account address
+- `ValidationError` — invalid query/route parameters (e.g. bad asset code or date)
+- `MissingParameter` — required route parameter is empty
+
+Successful responses (2xx) and Horizon-backed responses (including 404 `AccountNotFound`) are **never** delayed.
+
+### Configuration Examples
+
+```env
+# Production: match typical Horizon round-trip latency
+MIN_RESPONSE_TIME_MS=200
+
+# Lower the floor (e.g. in fast internal environments)
+MIN_RESPONSE_TIME_MS=100
+
+# Disable padding entirely (not recommended in production)
+MIN_RESPONSE_TIME_MS=0
+```
+
+### Performance Considerations
+
+- A larger value increases the latency of invalid requests only; valid requests are unaffected.
+- The default of 200 ms approximates a real Horizon round trip and keeps the two rejection kinds indistinguishable.
+- Setting the value to `0` disables padding and reintroduces the timing difference.
+
+See [Error Codes](./error-codes.md) for the `InvalidAccountId` response shape.
+
+---
+
 ## Network Passphrases
 
 Network passphrases are used internally by the Stellar SDK for transaction signing. You typically don't need to configure these directly, but it's good to understand them:
@@ -495,6 +539,7 @@ Error: Account GBXX... does not exist on the network
 | `STELLAR_NETWORK` | `testnet` | `mainnet` |
 | `HORIZON_URL` | (empty) | (empty) |
 | `NODE_ENV` | `development` | `production` |
+| `MIN_RESPONSE_TIME_MS` | `200` | `200` |
 | Data persistence | ❌ Resets periodically | ✅ Permanent |
 | Real value at risk | ❌ No | ✅ Yes |
 | Friendbot available | ✅ Yes | ❌ No |

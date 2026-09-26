@@ -121,5 +121,121 @@ describe("Account Subentry Health API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("InvalidAccountId");
     });
+
+    // --- Warning threshold scenarios ---
+
+    it("returns warning: null for an account with 0 subentries", async () => {
+      // 0 subentries = 0% usage — well below all warning thresholds
+      const mockAccount = {
+        id: accountId,
+        subentry_count: 0,
+        balances: [{ asset_type: "native", balance: "100.0" }],
+        signers: [{ key: accountId, weight: 1 }],
+        data_attr: {},
+      };
+
+      server.loadAccount.mockResolvedValue(mockAccount);
+
+      const res = await request(app).get(`/account/${accountId}/subentry-health`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.totalSubentries).toBe(0);
+      expect(res.body.data.usagePercent).toBe(0);
+      expect(res.body.data.remainingSlots).toBe(1000);
+      // No warning at 0% usage
+      expect(res.body.data.warning).toBeNull();
+    });
+
+    it("returns warning: null for an account with moderate subentries (below 80% threshold)", async () => {
+      // 500 subentries = 50% usage — moderate load, no warning triggered
+      const mockAccount = {
+        id: accountId,
+        subentry_count: 500,
+        balances: [
+          { asset_type: "native", balance: "100.0" },
+          ...Array.from({ length: 10 }, (_, i) => ({
+            asset_type: "credit_alphanum4",
+            asset_code: `AS${i}`,
+            asset_issuer: `GISSUER${i}`,
+            balance: "10.0",
+          })),
+        ],
+        signers: [{ key: accountId, weight: 1 }],
+        data_attr: {},
+      };
+
+      server.loadAccount.mockResolvedValue(mockAccount);
+
+      const res = await request(app).get(`/account/${accountId}/subentry-health`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.totalSubentries).toBe(500);
+      expect(res.body.data.usagePercent).toBe(50);
+      // Moderate usage — below the 80% approaching_limit threshold
+      expect(res.body.data.warning).toBeNull();
+      expect(res.body.data.remainingSlots).toBe(500);
+    });
+
+    it("returns warning: critical for an account approaching the protocol limit of 1000 subentries", async () => {
+      // 960 subentries = 96% usage — above the 95% critical threshold
+      const mockAccount = {
+        id: accountId,
+        subentry_count: 960,
+        balances: [{ asset_type: "native", balance: "100.0" }],
+        signers: [{ key: accountId, weight: 1 }],
+        data_attr: {},
+      };
+
+      server.loadAccount.mockResolvedValue(mockAccount);
+
+      const res = await request(app).get(`/account/${accountId}/subentry-health`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.totalSubentries).toBe(960);
+      expect(res.body.data.maxSubentries).toBe(1000);
+      expect(res.body.data.usagePercent).toBe(96);
+      expect(res.body.data.remainingSlots).toBe(40);
+      // 96% usage is above the 95% threshold → critical warning
+      expect(res.body.data.warning).toBe("critical");
+    });
+
+    it("returns warning: approaching_limit at exactly the 80% boundary (801 subentries)", async () => {
+      // 801 subentries = 80.1% — just above the approaching_limit threshold
+      const mockAccount = {
+        id: accountId,
+        subentry_count: 801,
+        balances: [{ asset_type: "native", balance: "100.0" }],
+        signers: [{ key: accountId, weight: 1 }],
+        data_attr: {},
+      };
+
+      server.loadAccount.mockResolvedValue(mockAccount);
+
+      const res = await request(app).get(`/account/${accountId}/subentry-health`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.warning).toBe("approaching_limit");
+    });
+
+    it("returns warning: null at exactly 800 subentries (80% usage — at threshold, not above)", async () => {
+      // 800 subentries = exactly 80% — the condition is > 80%, so this should not trigger
+      const mockAccount = {
+        id: accountId,
+        subentry_count: 800,
+        balances: [{ asset_type: "native", balance: "100.0" }],
+        signers: [{ key: accountId, weight: 1 }],
+        data_attr: {},
+      };
+
+      server.loadAccount.mockResolvedValue(mockAccount);
+
+      const res = await request(app).get(`/account/${accountId}/subentry-health`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.usagePercent).toBe(80);
+      // Exactly 80% does not exceed the > 80% threshold
+      expect(res.body.data.warning).toBeNull();
+    });
   });
 });

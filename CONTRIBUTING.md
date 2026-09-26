@@ -46,6 +46,8 @@ cp .env.example .env
 npm run dev
 ```
 
+For a detailed overview of the project structure, conventions, and where to add new code, see [docs/project-structure.md](docs/project-structure.md).
+
 ---
 
 ## 📋 How to Contribute
@@ -64,6 +66,7 @@ npm run dev
 - [ ] `npm test` passes
 - [ ] New functionality has tests
 - [ ] Code follows existing patterns (async/await, centralised error handling)
+- [ ] If adding new middleware, routes, or utilities, they follow the conventions in [docs/project-structure.md](docs/project-structure.md)
 - [ ] PR description explains what was changed and why
 - [ ] Issue number is referenced in the PR description
 
