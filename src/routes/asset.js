@@ -317,6 +317,7 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
     validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
+    const topLimit = req.query.limit !== undefined ? validateLimit(req.query.limit, 200) : 10;
 
     // 1. Verify asset exists and get total holder count
     const assetsResponse = await server
@@ -333,8 +334,6 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
     const totalHolders = asset.num_accounts;
 
     // 2. Fetch top holders (up to 200)
-    // Note: Horizon doesn't allow sorting /accounts by balance.
-    // We fetch a page of accounts holding the asset.
     const accountsResponse = await server
       .accounts()
       .forAsset(new Asset(assetCode, issuer))
@@ -345,22 +344,31 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
     if (records.length === 0) {
       return success(res, {
         totalHolders: 0,
+        topHolders: [],
+        distributionStats: { top10HoldersPercent: 0, top25HoldersPercent: 0, largestHolder: null, smallestHolder: null },
+        giniCoefficient: 0,
         top10HoldersPercent: 0,
         top25HoldersPercent: 0,
-        giniCoefficient: 0,
         largestHolder: null,
         smallestHolder: null,
       });
     }
 
-    // Extract balances and sort descending
-    const balances = records.map(r => {
+    // Extract holders with balance, sort descending
+    const holdersData = records.map(r => {
       const b = r.balances.find(bal => bal.asset_code === assetCode && bal.asset_issuer === issuer);
-      return parseFloat(b ? b.balance : "0");
-    }).sort((a, b) => b - a);
+      return { address: r.id, balanceNum: parseFloat(b ? b.balance : "0") };
+    }).sort((a, b) => b.balanceNum - a.balanceNum);
 
+    const balances = holdersData.map(h => h.balanceNum);
     const totalInFetched = balances.reduce((sum, b) => sum + b, 0);
     const totalAssetSupply = parseFloat(asset.amount || "0");
+
+    // topHolders array limited by ?limit=
+    const topHolders = holdersData.slice(0, topLimit).map(h => ({
+      address: h.address,
+      balance: toSevenDecimalString(h.balanceNum),
+    }));
 
     // Concentration metrics relative to total supply
     const top10Sum = balances.slice(0, 10).reduce((sum, b) => sum + b, 0);
@@ -373,9 +381,10 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
       ? parseFloat(((top25Sum / totalAssetSupply) * 100).toFixed(2))
       : 0;
 
-    // Gini Coefficient Calculation (using the fetched set)
-    // G = (2 * sum(i * x_i) / (n * sum(x_i))) - ((n + 1) / n)
-    // where x_i is sorted ASCENDING
+    const largestHolder = holdersData[0]?.address || null;
+    const smallestHolder = holdersData[holdersData.length - 1]?.address || null;
+
+    // Gini Coefficient
     const n = balances.length;
     const sortedAsc = [...balances].sort((a, b) => a - b);
     let cumulativeSum = 0;
@@ -390,17 +399,13 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
 
     return success(res, {
       totalHolders,
+      topHolders,
+      distributionStats: { top10HoldersPercent, top25HoldersPercent, largestHolder, smallestHolder },
+      giniCoefficient,
       top10HoldersPercent,
       top25HoldersPercent,
-      giniCoefficient,
-      largestHolder: records.find(r => {
-        const b = r.balances.find(bal => bal.asset_code === assetCode && bal.asset_issuer === issuer);
-        return parseFloat(b ? b.balance : "0") === balances[0];
-      })?.id || null,
-      smallestHolder: records.find(r => {
-        const b = r.balances.find(bal => bal.asset_code === assetCode && bal.asset_issuer === issuer);
-        return parseFloat(b ? b.balance : "0") === balances[balances.length - 1];
-      })?.id || null,
+      largestHolder,
+      smallestHolder,
     });
   } catch (err) {
     next(err);

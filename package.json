@@ -44,6 +44,10 @@
     "toml": "^3.0.0",
     "ws": "^8.21.0"
   },
+  "jest": {
+    "testEnvironment": "node",
+    "testPathIgnorePatterns": ["/node_modules/", "/.kilo/"]
+  },
   "devDependencies": {
     "@types/compression": "^1.7.5",
     "@types/node": "^26.0.1",

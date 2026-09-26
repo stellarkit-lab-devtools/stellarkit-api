@@ -1997,6 +1997,214 @@ router.get("/:id/analytics", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/stale-offers
+ *
+ * Returns all open DEX offers for an account with staleness analysis.
+ * Each offer's price is compared against the current mid-market price from
+ * the Horizon order book. Offers where the price deviation exceeds the
+ * configured threshold are flagged as stale.
+ *
+ * Query params:
+ *   - threshold (number, default: 5) — deviation % above which an offer is stale
+ *
+ * Returns 404 when the account does not exist.
+ */
+router.get("/:id/stale-offers", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const rawThreshold = req.query.threshold !== undefined ? parseFloat(req.query.threshold) : 5;
+    const threshold = Number.isFinite(rawThreshold) && rawThreshold >= 0 ? rawThreshold : 5;
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const offersResponse = await server.offers().forAccount(id).limit(200).order("desc").call();
+    const offerRecords = offersResponse.records || [];
+
+    const offers = await Promise.all(offerRecords.map(async (offer) => {
+      const sellingAsset = offer.selling_asset_type === "native"
+        ? Asset.native()
+        : new Asset(offer.selling_asset_code, offer.selling_asset_issuer);
+      const buyingAsset = offer.buying_asset_type === "native"
+        ? Asset.native()
+        : new Asset(offer.buying_asset_code, offer.buying_asset_issuer);
+
+      let offerPrice;
+      if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+        offerPrice = Number(offer.price_r.n) / Number(offer.price_r.d);
+      } else {
+        offerPrice = parseFloat(offer.price || "0");
+      }
+
+      let marketPrice = null;
+      let priceDeviation = 0;
+      let stale = false;
+
+      try {
+        const ob = await server.orderbook(sellingAsset, buyingAsset).limit(1).call();
+        const bids = ob.bids || [];
+        const asks = ob.asks || [];
+        const bid = bids.length > 0 ? parseFloat(bids[0].price) : null;
+        const ask = asks.length > 0 ? parseFloat(asks[0].price) : null;
+
+        if (bid !== null && ask !== null) {
+          marketPrice = (bid + ask) / 2;
+        } else if (bid !== null) {
+          marketPrice = bid;
+        } else if (ask !== null) {
+          marketPrice = ask;
+        }
+
+        if (marketPrice !== null && marketPrice > 0) {
+          priceDeviation = Math.abs(offerPrice - marketPrice) / marketPrice * 100;
+          stale = priceDeviation > threshold;
+        }
+      } catch (_) {
+        // order book unavailable — staleness undetermined
+      }
+
+      return {
+        offerId: offer.id,
+        selling: normalizeAsset(offer.selling_asset_code, offer.selling_asset_issuer, offer.selling_asset_type),
+        buying: normalizeAsset(offer.buying_asset_code, offer.buying_asset_issuer, offer.buying_asset_type),
+        offerPrice: offerPrice.toFixed(7),
+        marketPrice: marketPrice !== null ? marketPrice.toFixed(7) : null,
+        priceDeviation: parseFloat(priceDeviation.toFixed(2)),
+        stale,
+      };
+    }));
+
+    return success(res, {
+      offers,
+      staleCount: offers.filter(o => o.stale).length,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/portfolio
+ *
+ * Returns a full financial snapshot for an account: native XLM balance,
+ * all asset balances with current DEX prices, total portfolio value in XLM,
+ * open DEX offers, and liquidity pool positions.
+ *
+ * Returns 404 when the account does not exist.
+ */
+router.get("/:id/portfolio", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const nativeEntry = (account.balances || []).find(b => isNativeAsset(b));
+    const nativeBalance = toSevenDecimalString(nativeEntry ? nativeEntry.balance : "0");
+    let totalValueXLM = parseFloat(nativeEntry ? nativeEntry.balance : "0");
+
+    // Asset balances with prices from DEX order book
+    const assetEntries = (account.balances || []).filter(b => isNonNativeAsset(b));
+    const assetBalances = await Promise.all(assetEntries.map(async (b) => {
+      const balance = parseFloat(b.balance);
+      let priceInXLM = null;
+      try {
+        const asset = new Asset(b.asset_code, b.asset_issuer);
+        const ob = await server.orderbook(asset, Asset.native()).limit(1).call();
+        const bids = ob.bids || [];
+        const asks = ob.asks || [];
+        const bid = bids.length > 0 ? parseFloat(bids[0].price) : null;
+        const ask = asks.length > 0 ? parseFloat(asks[0].price) : null;
+        if (bid !== null && ask !== null) priceInXLM = (bid + ask) / 2;
+        else if (bid !== null) priceInXLM = bid;
+        else if (ask !== null) priceInXLM = ask;
+      } catch (_) {
+        // order book unavailable
+      }
+      const valueInXLM = priceInXLM !== null ? balance * priceInXLM : null;
+      if (valueInXLM !== null) totalValueXLM += valueInXLM;
+
+      return {
+        asset: normalizeAsset(b.asset_code, b.asset_issuer, b.asset_type),
+        balance: toSevenDecimalString(b.balance),
+        priceInXLM: priceInXLM !== null ? priceInXLM.toFixed(7) : null,
+        valueInXLM: valueInXLM !== null ? valueInXLM.toFixed(7) : null,
+      };
+    }));
+
+    // Open DEX offers
+    const offersResponse = await server.offers().forAccount(id).limit(200).order("desc").call();
+    const openOffers = (offersResponse.records || []).map(offer => {
+      let priceDecimal;
+      if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+        priceDecimal = (Number(offer.price_r.n) / Number(offer.price_r.d)).toFixed(7);
+      } else {
+        priceDecimal = parseFloat(offer.price || "0").toFixed(7);
+      }
+      return {
+        offerId: offer.id,
+        selling: {
+          asset: normalizeAsset(offer.selling_asset_code, offer.selling_asset_issuer, offer.selling_asset_type),
+          amount: parseFloat(offer.amount || "0").toFixed(7),
+        },
+        buying: {
+          asset: normalizeAsset(offer.buying_asset_code, offer.buying_asset_issuer, offer.buying_asset_type),
+        },
+        price: priceDecimal,
+      };
+    });
+
+    // Liquidity pool positions
+    const poolShareTrustlines = (account.balances || []).filter(
+      b => b.asset_type === "liquidity_pool_shares"
+    );
+    const poolPositions = [];
+    if (poolShareTrustlines.length > 0) {
+      const poolDetails = await Promise.all(
+        poolShareTrustlines.map(tl =>
+          server.liquidityPools().liquidityPoolId(tl.liquidity_pool_id).call()
+            .catch(err => (err && err.response && err.response.status === 404 ? null : Promise.reject(err)))
+        )
+      );
+      for (let i = 0; i < poolShareTrustlines.length; i++) {
+        const tl = poolShareTrustlines[i];
+        const pool = poolDetails[i];
+        if (!pool) continue;
+        const accountShares = parseFloat(tl.balance);
+        const totalShares = parseFloat(pool.total_shares);
+        const sharePercent = totalShares > 0 ? (accountShares / totalShares) * 100 : 0;
+        const reserveA = pool.reserves[0];
+        const reserveB = pool.reserves[1];
+        poolPositions.push({
+          poolId: pool.id,
+          shares: toSevenDecimalString(accountShares),
+          sharePercent: toSevenDecimalString(sharePercent),
+          reserveA: {
+            asset: normalizeAssetFromString(reserveA.asset),
+            equivalentAmount: ((parseFloat(reserveA.amount) * accountShares) / totalShares).toFixed(7),
+          },
+          reserveB: {
+            asset: normalizeAssetFromString(reserveB.asset),
+            equivalentAmount: ((parseFloat(reserveB.amount) * accountShares) / totalShares).toFixed(7),
+          },
+        });
+      }
+    }
+
+    return success(res, {
+      nativeBalance,
+      assetBalances,
+      totalValueXLM: totalValueXLM.toFixed(7),
+      openOffers,
+      poolPositions,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id — full account details
  *
  * Fetches live account data from Horizon via server.loadAccount(id) and maps
