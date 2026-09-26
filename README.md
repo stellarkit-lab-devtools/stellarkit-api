@@ -45,6 +45,7 @@ This project is ideal for:
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
 - [Soroban Integration Guide](docs/soroban-integration.md) - End-to-end workflow for querying contract state, monitoring events, checking expiry, and simulating invocations
+- [Soroban Endpoints Guide](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`
 - [Production Deployment Guide](docs/deployment.md) - Deploy to production with Node.js, Docker, Railway, Render, or Fly.io
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
 - [Response Format Guide](docs/response-format.md) - Standard response envelopes, pagination, and data formats
@@ -209,16 +210,6 @@ A Soroban contract is referenced by a **contract ID**, which is the address used
 StellarKit API supports Soroban contract inspection through three endpoints: `GET /soroban/contract/:id` looks up contract details by contract ID, including the associated WASM hash and ledger metadata, `GET /soroban/contract/:id/storage` returns the contract's instance-storage entries, and `GET /soroban/contract/:id/functions` returns exported function names, parameter types, and return types parsed from the contract ABI. Together they make it easier to combine traditional Stellar account workflows with Soroban contract interactions.
 
 See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples and sample responses.
-
----
-
-## Documentation
-
-- [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`.
-- [docs/account-endpoints.md](docs/account-endpoints.md) — Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint.
-- [docs/webhooks.md](docs/webhooks.md) — Webhook registration, events, payloads, signature verification, retries, and unregistration.
-- [docs/webhook-security.md](docs/webhook-security.md) — Verifying HMAC-SHA256 delivery signatures (Node.js/Python/Go), handling invalid signatures, secret storage, and dual-secret rotation.
-- [docs/batch-endpoints.md](docs/batch-endpoints.md) — Batch API endpoints, address/hash limits, per-entry errors, and when to use batch vs individual.
 
 ---
 
