@@ -270,7 +270,271 @@ stellarkit-api/
 └── README.md
 ```
 
+---# README.md: Asset Exposure Endpoint & Integration Tests
+
+An implementation and testing guide for the `GET /account/:id/asset-exposure` endpoint. This service categorizes account balances into four distinct asset classes—**Native**, **Stablecoins**, **Wrapped**, and **Community**—and calculates the exact percentage exposure per category.
+
 ---
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Asset Categorization Strategy](#asset-categorization-strategy)
+3. [Endpoint Specification](#endpoint-specification)
+4. [Project Structure](#project-structure)
+5. [Implementation Details](#implementation-details)
+   - [Route Handler](#route-handler)
+   - [TOML Metadata Fetcher](#toml-metadata-fetcher)
+6. [Testing Framework & Strategy](#testing-framework--strategy)
+7. [Comprehensive Test Suite](#comprehensive-test-suite)
+8. [Setup & Execution Guide](#setup--execution-guide)
+9. [Acceptance Criteria Verification](#acceptance-criteria-verification)
+
+---
+
+## Overview
+
+The Stellar ecosystem hosts diverse asset types, including native XLM, fiat-backed stablecoins (e.g., USDC, EURC), cross-chain wrapped assets (e.g., wBTC, wETH), and community-issued tokens.
+
+The `GET /account/:id/asset-exposure` endpoint aggregates an account's balances from the Horizon network, fetches asset metadata via `stellar.toml`, categorizes each holding, and computes relative balance percentages.
+
+---
+
+## Asset Categorization Strategy
+
+Categorization relies on Horizon balance payload structure and well-known stellar.toml metadata:
+
+1. **Native (`native`)**
+   - Assets where `asset_type` is `native` (XLM).
+2. **Stablecoins (`stablecoins`)**
+   - Issued assets anchoring fiat or pegged values (e.g., USDC, EURC, PYUSD, AUDD).
+   - Identified via issuer public keys or explicit `.toml` currency metadata (`is_asset_anchored = true` or matching known stable anchors).
+3. **Wrapped (`wrapped`)**
+   - Assets backed by non-Stellar blockchain tokens (e.g., wBTC, wETH, wSOL).
+   - Identified via issuer domain metadata or code patterns.
+4. **Community (`community`)**
+   - Any issued token (`credit_alphanum4` or `credit_alphanum12`) not falling into Stablecoins or Wrapped categories.
+
+Percentage values are rounded to two decimal places, ensuring that non-zero totals strictly aggregate to **100%**.
+
+---
+
+## Endpoint Specification
+
+### `GET /account/:id/asset-exposure`
+
+#### Path Parameters
+- `id` *(string, required)*: Valid Stellar Public Key (`G...`).
+
+#### Success Response (`200 OK`)
+```json
+{
+  "account_id": "GC3KG2S4L2S5XZ...",
+  "exposure": {
+    "native": 40.00,
+    "stablecoins": 30.00,
+    "wrapped": 20.00,
+    "community": 10.00
+  }
+}
+# README.md: Asset Exposure Endpoint & Integration Tests
+
+An implementation and testing guide for the `GET /account/:id/asset-exposure` endpoint. This service categorizes account balances into four distinct asset classes—**Native**, **Stablecoins**, **Wrapped**, and **Community**—and calculates the exact percentage exposure per category.
+
+---
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Asset Categorization Strategy](#asset-categorization-strategy)
+3. [Endpoint Specification](#endpoint-specification)
+4. [Project Structure](#project-structure)
+5. [Implementation Details](#implementation-details)
+   - [Route Handler](#route-handler)
+   - [TOML Metadata Fetcher](#toml-metadata-fetcher)
+6. [Testing Framework & Strategy](#testing-framework--strategy)
+7. [Comprehensive Test Suite](#comprehensive-test-suite)
+8. [Setup & Execution Guide](#setup--execution-guide)
+9. [Acceptance Criteria Verification](#acceptance-criteria-verification)
+
+---
+
+## Overview
+
+The Stellar ecosystem hosts diverse asset types, including native XLM, fiat-backed stablecoins (e.g., USDC, EURC), cross-chain wrapped assets (e.g., wBTC, wETH), and community-issued tokens.
+
+The `GET /account/:id/asset-exposure` endpoint aggregates an account's balances from the Horizon network, fetches asset metadata via `stellar.toml`, categorizes each holding, and computes relative balance percentages.
+
+---
+
+## Asset Categorization Strategy
+
+Categorization relies on Horizon balance payload structure and well-known stellar.toml metadata:
+
+1. **Native (`native`)**
+   - Assets where `asset_type` is `native` (XLM).
+2. **Stablecoins (`stablecoins`)**
+   - Issued assets anchoring fiat or pegged values (e.g., USDC, EURC, PYUSD, AUDD).
+   - Identified via issuer public keys or explicit `.toml` currency metadata (`is_asset_anchored = true` or matching known stable anchors).
+3. **Wrapped (`wrapped`)**
+   - Assets backed by non-Stellar blockchain tokens (e.g., wBTC, wETH, wSOL).
+   - Identified via issuer domain metadata or code patterns.
+4. **Community (`community`)**
+   - Any issued token (`credit_alphanum4` or `credit_alphanum12`) not falling into Stablecoins or Wrapped categories.
+
+Percentage values are rounded to two decimal places, ensuring that non-zero totals strictly aggregate to **100%**.
+
+---
+
+## Endpoint Specification
+
+### `GET /account/:id/asset-exposure`
+
+#### Path Parameters
+- `id` *(string, required)*: Valid Stellar Public Key (`G...`).
+
+#### Success Response (`200 OK`)
+```json
+{
+  "account_id": "GC3KG2S4L2S5XZ...",
+  "exposure": {
+    "native": 40.00,
+    "stablecoins": 30.00,
+    "wrapped": 20.00,
+    "community": 10.00
+  }
+}
+# README.md: Asset Exposure Endpoint & Integration Tests
+
+An implementation and testing guide for the `GET /account/:id/asset-exposure` endpoint. This service categorizes account balances into four distinct asset classes—**Native**, **Stablecoins**, **Wrapped**, and **Community**—and calculates the exact percentage exposure per category.
+
+---
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Asset Categorization Strategy](#asset-categorization-strategy)
+3. [Endpoint Specification](#endpoint-specification)
+4. [Project Structure](#project-structure)
+5. [Implementation Details](#implementation-details)
+   - [Route Handler](#route-handler)
+   - [TOML Metadata Fetcher](#toml-metadata-fetcher)
+6. [Testing Framework & Strategy](#testing-framework--strategy)
+7. [Comprehensive Test Suite](#comprehensive-test-suite)
+8. [Setup & Execution Guide](#setup--execution-guide)
+9. [Acceptance Criteria Verification](#acceptance-criteria-verification)
+
+---
+
+## Overview
+
+The Stellar ecosystem hosts diverse asset types, including native XLM, fiat-backed stablecoins (e.g., USDC, EURC), cross-chain wrapped assets (e.g., wBTC, wETH), and community-issued tokens.
+
+The `GET /account/:id/asset-exposure` endpoint aggregates an account's balances from the Horizon network, fetches asset metadata via `stellar.toml`, categorizes each holding, and computes relative balance percentages.
+
+---
+
+## Asset Categorization Strategy
+
+Categorization relies on Horizon balance payload structure and well-known stellar.toml metadata:
+
+1. **Native (`native`)**
+   - Assets where `asset_type` is `native` (XLM).
+2. **Stablecoins (`stablecoins`)**
+   - Issued assets anchoring fiat or pegged values (e.g., USDC, EURC, PYUSD, AUDD).
+   - Identified via issuer public keys or explicit `.toml` currency metadata (`is_asset_anchored = true` or matching known stable anchors).
+3. **Wrapped (`wrapped`)**
+   - Assets backed by non-Stellar blockchain tokens (e.g., wBTC, wETH, wSOL).
+   - Identified via issuer domain metadata or code patterns.
+4. **Community (`community`)**
+   - Any issued token (`credit_alphanum4` or `credit_alphanum12`) not falling into Stablecoins or Wrapped categories.
+
+Percentage values are rounded to two decimal places, ensuring that non-zero totals strictly aggregate to **100%**.
+
+---
+
+## Endpoint Specification
+
+### `GET /account/:id/asset-exposure`
+
+#### Path Parameters
+- `id` *(string, required)*: Valid Stellar Public Key (`G...`).
+
+#### Success Response (`200 OK`)
+```json
+{
+  "account_id": "GC3KG2S4L2S5XZ...",
+  "exposure": {
+    "native": 40.00,
+    "stablecoins": 30.00,
+    "wrapped": 20.00,
+    "community": 10.00
+  }
+}
+# README.md: Asset Exposure Endpoint & Integration Tests
+
+An implementation and testing guide for the `GET /account/:id/asset-exposure` endpoint. This service categorizes account balances into four distinct asset classes—**Native**, **Stablecoins**, **Wrapped**, and **Community**—and calculates the exact percentage exposure per category.
+
+---
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Asset Categorization Strategy](#asset-categorization-strategy)
+3. [Endpoint Specification](#endpoint-specification)
+4. [Project Structure](#project-structure)
+5. [Implementation Details](#implementation-details)
+   - [Route Handler](#route-handler)
+   - [TOML Metadata Fetcher](#toml-metadata-fetcher)
+6. [Testing Framework & Strategy](#testing-framework--strategy)
+7. [Comprehensive Test Suite](#comprehensive-test-suite)
+8. [Setup & Execution Guide](#setup--execution-guide)
+9. [Acceptance Criteria Verification](#acceptance-criteria-verification)
+
+---
+
+## Overview
+
+The Stellar ecosystem hosts diverse asset types, including native XLM, fiat-backed stablecoins (e.g., USDC, EURC), cross-chain wrapped assets (e.g., wBTC, wETH), and community-issued tokens.
+
+The `GET /account/:id/asset-exposure` endpoint aggregates an account's balances from the Horizon network, fetches asset metadata via `stellar.toml`, categorizes each holding, and computes relative balance percentages.
+
+---
+
+## Asset Categorization Strategy
+
+Categorization relies on Horizon balance payload structure and well-known stellar.toml metadata:
+
+1. **Native (`native`)**
+   - Assets where `asset_type` is `native` (XLM).
+2. **Stablecoins (`stablecoins`)**
+   - Issued assets anchoring fiat or pegged values (e.g., USDC, EURC, PYUSD, AUDD).
+   - Identified via issuer public keys or explicit `.toml` currency metadata (`is_asset_anchored = true` or matching known stable anchors).
+3. **Wrapped (`wrapped`)**
+   - Assets backed by non-Stellar blockchain tokens (e.g., wBTC, wETH, wSOL).
+   - Identified via issuer domain metadata or code patterns.
+4. **Community (`community`)**
+   - Any issued token (`credit_alphanum4` or `credit_alphanum12`) not falling into Stablecoins or Wrapped categories.
+
+Percentage values are rounded to two decimal places, ensuring that non-zero totals strictly aggregate to **100%**.
+
+---
+
+## Endpoint Specification
+
+### `GET /account/:id/asset-exposure`
+
+#### Path Parameters
+- `id` *(string, required)*: Valid Stellar Public Key (`G...`).
+
+#### Success Response (`200 OK`)
+```json
+{
+  "account_id": "GC3KG2S4L2S5XZ...",
+  "exposure": {
+    "native": 40.00,
+    "stablecoins": 30.00,
+    "wrapped": 20.00,
+    "community": 10.00
+  }
+}
+
 
 ## 🌐 Ressources Stellar
 

@@ -1057,7 +1057,91 @@ StellarKit API is a developer-focused API wrapper for the Stellar Horizon blockc
 The project is built for rapid development and production readiness. It is an ideal starting point for teams building wallets, explorers, dashboards, token issuers, or financial applications on Stellar.
 
 By providing a clear route structure, robust middleware, and a modular codebase, StellarKit API helps developers move faster while retaining control over Stellar-specific behavior.
+Here’s a 500-line README-style implementation guide you can use for the issue. It focuses on exactly what needs to be tested and how to structure the mocks.
 
+GET /account/:id/asset-exposure — Test Implementation Guide
+
+1. Overview
+
+This document describes the work required to add automated tests for the account asset exposure endpoint.
+
+The endpoint under test is:
+
+GET /account/:id/asset-exposure
+
+The endpoint categorises assets held by an account into four categories:
+
+native
+stablecoins
+wrapped
+community
+
+It then calculates the percentage of the account's total asset exposure represented by each category.
+
+At the moment, the endpoint does not have adequate automated test coverage.
+
+The objective of this task is to add a dedicated test suite covering the endpoint's expected behaviour.
+
+---
+
+2. Issue
+
+The endpoint:
+
+GET /account/:id/asset-exposure
+
+currently lacks tests.
+
+This creates a risk that changes to asset classification, Stellar balance handling, percentage calculations, metadata retrieval, or account validation could introduce regressions without being detected.
+
+The test suite should verify both successful responses and error handling.
+
+---
+
+3. Required Test File
+
+Create:
+
+tests/routes/account.assetExposure.test.js
+
+All asset-exposure endpoint tests should be contained in this file.
+
+Do not place the tests in unrelated route test files.
+
+The dedicated file makes the purpose of the suite immediately clear and allows future asset-exposure cases to be added without making existing test files unnecessarily large.
+
+---
+
+4. Endpoint
+
+The endpoint being tested is:
+
+GET /account/:id/asset-exposure
+
+The ":id" parameter represents the Stellar account identifier.
+
+Example:
+
+GET /account/GACCOUNT123/asset-exposure
+
+The exact valid account fixture should follow the conventions already used by the repository.
+
+Do not invent a new account format if existing tests already provide account fixtures.
+
+---
+
+5. Expected Response Categories
+
+The endpoint should return exposure percentages for four categories.
+
+The categories are:
+
+{
+  "native": 0,
+  "stablecoins": 0,
+  "wrapped": 0,
+  "community": 0
+}
 Whether you are testing on Stellar testnet or deploying to mainnet, this repository supports both networks and provides the tools needed to build reliable Stellar integrations.
 
 If you want to contribute, add new functionality, or customize the behavior, the codebase is structured to make it easy to extend while maintaining a consistent API contract.
