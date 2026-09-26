@@ -3106,6 +3106,162 @@ router.get("/:id/payment-summary", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/summary
+ *
+ * Returns a compact, aggregated account summary suitable for dashboards
+ * and quick views. Combines four parallel Horizon calls into a single
+ * response:
+ *
+ *   - accountInfo   — from server.loadAccount (id, sequence, flags, thresholds)
+ *   - balances      — XLM and non-native asset balances
+ *   - recentTransactions — up to 10 most recent transactions (newest first)
+ *   - openOffers    — up to 20 open DEX offers
+ *   - claimableBalances — claimable balances where the account is a claimant
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses the cache when set to "true"
+ *
+ * Response headers:
+ *   - X-Cache: HIT  — served from cache
+ *   - X-Cache: MISS — fetched live from Horizon and cached
+ *
+ * Returns:
+ *   - 200: { success: true, data: { accountInfo, balances, recentTransactions, openOffers, claimableBalances } }
+ *   - 400: InvalidAccountId — malformed account address
+ *   - 404: AccountNotFound — account does not exist on the network
+ */
+router.get("/:id/summary", accountSummaryRateLimiter, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `account-summary:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Fetch all four data sources in parallel for minimum latency.
+    // loadAccount must succeed first; if it throws 404 we short-circuit.
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const [txResponse, offersResponse, claimableResponse] = await Promise.all([
+      server
+        .transactions()
+        .forAccount(id)
+        .limit(10)
+        .order("desc")
+        .call()
+        .catch(() => ({ records: [] })),
+      server
+        .offers()
+        .forAccount(id)
+        .limit(20)
+        .order("desc")
+        .call()
+        .catch(() => ({ records: [] })),
+      server
+        .claimableBalances()
+        .claimant(id)
+        .limit(20)
+        .order("desc")
+        .call()
+        .catch(() => ({ records: [] })),
+    ]);
+
+    // ── accountInfo ────────────────────────────────────────────────────────
+    const rawFlags = account.flags || {};
+    const accountInfo = {
+      accountId: account.id,
+      sequence: account.sequence,
+      subentryCount: account.subentry_count || 0,
+      homeDomain: account.home_domain || null,
+      lastModifiedLedger: account.last_modified_ledger,
+      thresholds: {
+        lowThreshold: account.thresholds?.low_threshold ?? 0,
+        medThreshold: account.thresholds?.med_threshold ?? 0,
+        highThreshold: account.thresholds?.high_threshold ?? 0,
+      },
+      flags: {
+        authRequired: rawFlags.auth_required === true,
+        authRevocable: rawFlags.auth_revocable === true,
+        authImmutable: rawFlags.auth_immutable === true,
+        clawbackEnabled: rawFlags.auth_clawback_enabled === true,
+      },
+    };
+
+    // ── balances ───────────────────────────────────────────────────────────
+    const { xlm, assets } = formatAccountBalances(account);
+    const balances = { xlm, assets };
+
+    // ── recentTransactions ─────────────────────────────────────────────────
+    const recentTransactions = (txResponse.records || []).map((tx) => ({
+      hash: tx.hash,
+      ledger: tx.ledger_attr ?? tx.ledger,
+      createdAt: toISOTimestamp(tx.created_at),
+      operationCount: tx.operation_count,
+      successful: tx.successful,
+      memoType: tx.memo_type || null,
+      memo: tx.memo || null,
+    }));
+
+    // ── openOffers ─────────────────────────────────────────────────────────
+    const openOffers = (offersResponse.records || []).map((offer) => {
+      let priceDecimal;
+      if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+        priceDecimal = (Number(offer.price_r.n) / Number(offer.price_r.d)).toFixed(7);
+      } else {
+        priceDecimal = parseFloat(offer.price || "0").toFixed(7);
+      }
+      return {
+        offerId: offer.id,
+        selling: {
+          asset: normalizeAsset(
+            offer.selling_asset_code,
+            offer.selling_asset_issuer,
+            offer.selling_asset_type,
+          ),
+          amount: parseFloat(offer.amount || "0").toFixed(7),
+        },
+        buying: {
+          asset: normalizeAsset(
+            offer.buying_asset_code,
+            offer.buying_asset_issuer,
+            offer.buying_asset_type,
+          ),
+        },
+        price: priceDecimal,
+        lastModifiedLedger: offer.last_modified_ledger,
+      };
+    });
+
+    // ── claimableBalances ──────────────────────────────────────────────────
+    const claimableBalances = (claimableResponse.records || []).map(
+      normalizeClaimableBalance,
+    );
+
+    const data = {
+      accountInfo,
+      balances,
+      recentTransactions,
+      openOffers,
+      claimableBalances,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.accountSummary || 15);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/offer-history
  */
 router.get("/:id/offer-history", async (req, res, next) => {
