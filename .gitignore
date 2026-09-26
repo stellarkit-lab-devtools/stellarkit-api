@@ -4,3 +4,23 @@ coverage/
 *.log
 .DS_Store
 dist/
+
+# Test output artefacts
+test-out*.txt
+test-output*.txt
+test-result*.txt
+test_*.txt
+*-output.txt
+*-handler-output.txt
+
+# Ad-hoc verification scripts
+verify-*.js
+run-test.js
+manual-*.sh
+
+# Implementation artefact docs
+IMPLEMENTATION_*.md
+*_SUMMARY.md
+*_REPORT.md
+*_FIX_SUMMARY.md
+CHANGES_MADE.txt
