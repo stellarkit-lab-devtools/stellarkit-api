@@ -34,8 +34,14 @@ describe("GET /dex/imbalance/:sellAsset/:buyAsset", () => {
     server.orderbook.mockReturnValue({
       limit: jest.fn().mockReturnThis(),
       call: jest.fn().mockResolvedValue({
-        bids: [{ price: "0.1", amount: "100.0000000" }],
-        asks: [{ price: "0.11", amount: "50.0000000" }],
+        bids: [
+          { price: "0.1", amount: "100.0000001" },
+          { price: "0.09", amount: "75.1234567" },
+        ],
+        asks: [
+          { price: "0.11", amount: "50.0000002" },
+          { price: "0.12", amount: "25.0000003" },
+        ],
       }),
     });
 
@@ -49,6 +55,9 @@ describe("GET /dex/imbalance/:sellAsset/:buyAsset", () => {
     expect(response.body.data).toHaveProperty("pressure");
     expect(response.body.data).toHaveProperty("signal");
     expect(["buy", "sell", "neutral"]).toContain(response.body.data.pressure);
+    expect(response.body.data.bidVolume).toBe("175.1234568");
+    expect(response.body.data.askVolume).toBe("75.0000005");
+    expect(response.body.data.imbalanceRatio).toBe("2.3350");
     expect(response.body.data.pressure).toBe("buy");
   });
 

@@ -8,6 +8,7 @@ const { success } = require("../utils/response");
 const { validateAssetCode, validateAccountId, validateAsset, validateLimit } = require("../utils/validators");
 const { parseStellarAsset, normalizeAsset } = require("../utils/asset");
 const { isNativeAsset } = require("../utils/assetHelpers");
+const { formatAmount } = require("../utils/formatAmount");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { makeOrderBookEmptyError } = require("../utils/errors");
@@ -268,18 +269,28 @@ router.get("/imbalance/:sellAsset/:buyAsset", async (req, res, next) => {
 
     const orderBook = await server.orderbook(selling, buying).limit(200).call();
 
-    const bidVolume = (orderBook.bids || []).reduce((sum, b) => sum + parseFloat(b.amount), 0);
-    const askVolume = (orderBook.asks || []).reduce((sum, a) => sum + parseFloat(a.amount), 0);
+    const amountScale = 10_000_000n;
+    const sumVolume = (levels) =>
+      (levels || []).reduce((total, level) => {
+        const [whole, fraction] = formatAmount(level.amount).split(".");
+        return total + BigInt(whole) * amountScale + BigInt(fraction);
+      }, 0n);
+    const bidVolume = sumVolume(orderBook.bids);
+    const askVolume = sumVolume(orderBook.asks);
 
-    if (bidVolume === 0 && askVolume === 0) {
+    if (bidVolume === 0n && askVolume === 0n) {
       return res.status(404).json({
         success: false,
         error: makeOrderBookEmptyError(selling.getCode(), buying.getCode()),
       });
     }
 
-    const imbalanceRatio = askVolume > 0 ? bidVolume / askVolume : (bidVolume > 0 ? 100 : 1);
-    
+    const imbalanceRatio = askVolume > 0n
+      ? Number(bidVolume) / Number(askVolume)
+      : (bidVolume > 0n ? 100 : 1);
+    const formatVolume = (volume) =>
+      `${volume / amountScale}.${(volume % amountScale).toString().padStart(7, "0")}`;
+
     let pressure = "neutral";
     let signal = "The market is currently balanced between buyers and sellers.";
 
@@ -292,8 +303,8 @@ router.get("/imbalance/:sellAsset/:buyAsset", async (req, res, next) => {
     }
 
     return success(res, {
-      bidVolume: bidVolume.toFixed(7),
-      askVolume: askVolume.toFixed(7),
+      bidVolume: formatVolume(bidVolume),
+      askVolume: formatVolume(askVolume),
       imbalanceRatio: imbalanceRatio.toFixed(4),
       pressure,
       signal,
