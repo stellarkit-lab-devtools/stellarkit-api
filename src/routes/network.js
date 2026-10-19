@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { xdr, scValToNative } = require("@stellar/stellar-sdk");
 const { server, horizonUrl } = require("../config/stellar");
 const { success } = require("../utils/response");
 const StellarKitError = require("../utils/StellarKitError");
@@ -570,39 +571,6 @@ const ECOSYSTEM_STATS_CACHE_TTL = 300; // 5 minutes
 router.get("/ecosystem-stats", async (req, res, next) => {
   try {
     const cacheKey = "network-ecosystem-stats";
-const VALIDATOR_QUORUM_CACHE_TTL = 30;
-
-/**
- * GET /network/validator-quorum
- *
- * Returns the current validator quorum health status including total validators,
- * agreeing validators, quorum percentage, and health indicator.
- *
- * Query params:
- *   - fresh (boolean, default: false) — bypasses cache when set to "true"
- *
- * Response shape:
- *   {
- *     success: true,
- *     data: {
- *       totalValidators: <number>,
- *       agreeingValidators: <number>,
- *       quorumPercent: <number>,
- *       isHealthy: <boolean>,
- *       lastLedger: <number>
- *     }
- *   }
- *
- * isHealthy is true when quorumPercent exceeds 66%.
- * Response is cached with a 30 second TTL.
- *
- * @example
- * GET /network/validator-quorum
- * GET /network/validator-quorum?fresh=true
- */
-router.get("/validator-quorum", async (req, res, next) => {
-  try {
-    const cacheKey = "network-validator-quorum";
     const fresh = isFreshRequest(req.query);
 
     if (!fresh) {
@@ -734,6 +702,52 @@ router.get("/validator-quorum", async (req, res, next) => {
       );
     }
     next(err);
+  }
+});
+
+const VALIDATOR_QUORUM_CACHE_TTL = 30;
+
+/**
+ * GET /network/validator-quorum
+ *
+ * Returns the current validator quorum health status including total validators,
+ * agreeing validators, quorum percentage, and health indicator.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       totalValidators: <number>,
+ *       agreeingValidators: <number>,
+ *       quorumPercent: <number>,
+ *       isHealthy: <boolean>,
+ *       lastLedger: <number>
+ *     }
+ *   }
+ *
+ * isHealthy is true when quorumPercent exceeds 66%.
+ * Response is cached with a 30 second TTL.
+ *
+ * @example
+ * GET /network/validator-quorum
+ * GET /network/validator-quorum?fresh=true
+ */
+router.get("/validator-quorum", async (req, res, next) => {
+  try {
+    const cacheKey = "network-validator-quorum";
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
     // Fetch latest ledger to get quorum information
     const ledgerResponse = await withHorizonTiming(req, () =>
       server.ledgers().order("desc").limit(1).call()
@@ -782,6 +796,164 @@ router.get("/validator-quorum", async (req, res, next) => {
       "Verify the Horizon server is reachable and try again."
     );
     next(quorumErr);
+  }
+});
+
+const SOROBAN_STATS_CACHE_TTL = 300; // 5 minutes
+const SOROBAN_STATS_PERIOD_HOURS = 24;
+const SOROBAN_STATS_PAGE_SIZE = 200;
+// Upper bound on Horizon round-trips per refresh. On busy networks the
+// 24h window can exceed this, in which case the stats are computed over the
+// most recent operations scanned and period.complete is false.
+const SOROBAN_STATS_MAX_PAGES = 25;
+const SOROBAN_OPERATION_TYPES = new Set([
+  "invoke_host_function",
+  "extend_footprint_ttl",
+  "restore_footprint",
+  "bump_footprint_expiration",
+]);
+
+function extractInvokedContractId(op) {
+  if (!String(op.function || "").includes("InvokeContract")) {
+    return op.address || null;
+  }
+  const param = Array.isArray(op.parameters) ? op.parameters[0] : null;
+  if (!param || typeof param.value !== "string") return null;
+  try {
+    const decoded = scValToNative(xdr.ScVal.fromXDR(param.value, "base64"));
+    return decoded ? String(decoded) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function makeHorizonUnavailableError() {
+  return new StellarKitError(
+    "Unable to fetch Soroban statistics from Stellar Horizon.",
+    503,
+    "HorizonUnavailable",
+    null,
+    "Verify the configured Horizon node is reachable and try again.",
+  );
+}
+
+/**
+ * GET /network/soroban-stats
+ *
+ * Returns Soroban usage over the last 24 hours:
+ *   - invocations24h: number of invoke_host_function operations
+ *   - uniqueContracts24h: number of distinct contracts invoked
+ *   - sorobanFeeRevenueXLM: total fees charged by transactions containing
+ *     Soroban operations (seven-decimal string, XLM)
+ *   - sorobanOperationPercent: share of all operations that were Soroban
+ *     operations (invoke, extend TTL, restore), rounded to 2 dp
+ *   - period: { hours, from, to, operationsScanned, complete }
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
+ * Response is cached for 5 minutes.
+ *
+ * @example
+ * GET /network/soroban-stats
+ */
+router.get("/soroban-stats", async (req, res, next) => {
+  try {
+    const cacheKey = "network-soroban-stats";
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const now = Date.now();
+    const since = now - SOROBAN_STATS_PERIOD_HOURS * 60 * 60 * 1000;
+
+    let invocations24h = 0;
+    let sorobanOperations = 0;
+    let totalOperations = 0;
+    let feeStroops = 0n;
+    let complete = false;
+    const contracts = new Set();
+    const sorobanTransactions = new Set();
+    let cursor = null;
+
+    for (let page = 0; page < SOROBAN_STATS_MAX_PAGES; page++) {
+      let query = server
+        .operations()
+        .order("desc")
+        .limit(SOROBAN_STATS_PAGE_SIZE)
+        .join("transactions");
+      if (cursor) query = query.cursor(cursor);
+
+      const response = await withHorizonTiming(req, () => query.call());
+      const records = response.records || [];
+
+      let reachedWindowStart = false;
+      for (const op of records) {
+        if (new Date(op.created_at).getTime() < since) {
+          reachedWindowStart = true;
+          break;
+        }
+
+        totalOperations += 1;
+        if (!SOROBAN_OPERATION_TYPES.has(op.type)) continue;
+
+        sorobanOperations += 1;
+        if (op.type === "invoke_host_function") {
+          invocations24h += 1;
+          const contractId = extractInvokedContractId(op);
+          if (contractId) contracts.add(contractId);
+        }
+
+        const txHash = op.transaction_hash;
+        if (txHash && !sorobanTransactions.has(txHash)) {
+          sorobanTransactions.add(txHash);
+          const feeCharged = op.transaction?.fee_charged;
+          if (feeCharged !== undefined && feeCharged !== null) {
+            feeStroops += BigInt(String(feeCharged));
+          }
+        }
+      }
+
+      if (reachedWindowStart || records.length < SOROBAN_STATS_PAGE_SIZE) {
+        complete = true;
+        break;
+      }
+      cursor = records[records.length - 1].paging_token;
+    }
+
+    const sorobanOperationPercent =
+      totalOperations > 0
+        ? parseFloat(((sorobanOperations / totalOperations) * 100).toFixed(2))
+        : 0;
+
+    const data = {
+      invocations24h,
+      uniqueContracts24h: contracts.size,
+      sorobanFeeRevenueXLM: `${feeStroops / 10000000n}.${(feeStroops % 10000000n)
+        .toString()
+        .padStart(7, "0")}`,
+      sorobanOperationPercent,
+      period: {
+        hours: SOROBAN_STATS_PERIOD_HOURS,
+        from: new Date(since).toISOString(),
+        to: new Date(now).toISOString(),
+        operationsScanned: totalOperations,
+        complete,
+      },
+    };
+
+    cacheService.set(cacheKey, data, SOROBAN_STATS_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    if (err instanceof StellarKitError) return next(err);
+    next(makeHorizonUnavailableError());
   }
 });
 

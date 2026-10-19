@@ -1163,4 +1163,180 @@ router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
   }
 });
 
+const TRADING_VOLUME_CACHE_TTL = 300; // 5 minutes
+const TRADING_VOLUME_PAGE_SIZE = 200;
+const TRADING_VOLUME_MAX_PAGES = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Circle USDC issuers per network; USDC_ISSUER overrides for custom deployments.
+const USDC_ISSUERS = {
+  mainnet: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+  testnet: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+};
+
+function getUsdcIssuer() {
+  return process.env.USDC_ISSUER || USDC_ISSUERS[NETWORK] || USDC_ISSUERS.testnet;
+}
+
+/**
+ * Fetches trades for an asset pair newer than `since`, newest first, paging
+ * through Horizon until the window start or the page cap is reached.
+ */
+async function fetchTradesSince(asset, quote, since) {
+  const trades = [];
+  let cursor = null;
+
+  for (let page = 0; page < TRADING_VOLUME_MAX_PAGES; page++) {
+    let query = server
+      .trades()
+      .forAssetPair(asset, quote)
+      .order("desc")
+      .limit(TRADING_VOLUME_PAGE_SIZE);
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    for (const trade of records) {
+      if (new Date(trade.ledger_close_time).getTime() < since) return trades;
+      trades.push(trade);
+    }
+
+    if (records.length < TRADING_VOLUME_PAGE_SIZE) break;
+    cursor = records[records.length - 1].paging_token;
+  }
+
+  return trades;
+}
+
+function isTradeBaseAsset(trade, assetCode, issuer) {
+  return trade.base_asset_code === assetCode && trade.base_asset_issuer === issuer;
+}
+
+function formatStroops(stroops) {
+  return `${stroops / 10000000n}.${(stroops % 10000000n).toString().padStart(7, "0")}`;
+}
+
+function amountToStroops(value) {
+  const match = String(value ?? "0").trim().match(/^(\d+)(?:\.(\d{0,7}))?/);
+  if (!match) return 0n;
+  const [, whole, fraction = ""] = match;
+  return BigInt(whole) * 10000000n + BigInt(fraction.padEnd(7, "0"));
+}
+
+/**
+ * GET /asset/:code/:issuer/trading-volume
+ *
+ * Returns DEX trading volume for an asset against XLM and USDC.
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       code, issuer,
+ *       volume24h: string,        // asset units traded vs XLM + USDC, last 24h
+ *       volume7d: string,         // asset units traded vs XLM + USDC, last 7d
+ *       tradeCount24h: number,
+ *       tradeCount7d: number,
+ *       uniqueTraders24h: number,
+ *       volumeByQuote: { XLM: { volume24h, volume7d }, USDC: { volume24h, volume7d } }
+ *     }
+ *   }
+ *
+ * All volume values are seven-decimal strings. Assets with no recent trades
+ * return zero for every field. Response is cached for 5 minutes.
+ *
+ * @example
+ * GET /asset/AQUA/GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA/trading-volume
+ */
+router.get("/:code/:issuer/trading-volume", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const cacheKey = `asset-trading-volume:${assetCode}:${issuer}`;
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const asset = new Asset(assetCode, issuer);
+    const usdcIssuer = getUsdcIssuer();
+    const quotes = [{ label: "XLM", asset: Asset.native() }];
+    if (!(assetCode === "USDC" && issuer === usdcIssuer)) {
+      quotes.push({ label: "USDC", asset: new Asset("USDC", usdcIssuer) });
+    }
+
+    const now = Date.now();
+    const since24h = now - DAY_MS;
+    const since7d = now - 7 * DAY_MS;
+
+    const tradesByQuote = await Promise.all(
+      quotes.map((quote) => fetchTradesSince(asset, quote.asset, since7d)),
+    );
+
+    let volume24h = 0n;
+    let volume7d = 0n;
+    let tradeCount24h = 0;
+    let tradeCount7d = 0;
+    const traders24h = new Set();
+    const volumeByQuote = {
+      XLM: { volume24h: "0.0000000", volume7d: "0.0000000" },
+      USDC: { volume24h: "0.0000000", volume7d: "0.0000000" },
+    };
+
+    quotes.forEach((quote, index) => {
+      let quoteVolume24h = 0n;
+      let quoteVolume7d = 0n;
+
+      for (const trade of tradesByQuote[index]) {
+        const amount = amountToStroops(
+          isTradeBaseAsset(trade, assetCode, issuer) ? trade.base_amount : trade.counter_amount,
+        );
+        const is24h = new Date(trade.ledger_close_time).getTime() >= since24h;
+
+        quoteVolume7d += amount;
+        tradeCount7d += 1;
+
+        if (is24h) {
+          quoteVolume24h += amount;
+          tradeCount24h += 1;
+          if (trade.base_account) traders24h.add(trade.base_account);
+          if (trade.counter_account) traders24h.add(trade.counter_account);
+        }
+      }
+
+      volume24h += quoteVolume24h;
+      volume7d += quoteVolume7d;
+      volumeByQuote[quote.label] = {
+        volume24h: formatStroops(quoteVolume24h),
+        volume7d: formatStroops(quoteVolume7d),
+      };
+    });
+
+    const data = {
+      code: assetCode,
+      issuer,
+      volume24h: formatStroops(volume24h),
+      volume7d: formatStroops(volume7d),
+      tradeCount24h,
+      tradeCount7d,
+      uniqueTraders24h: traders24h.size,
+      volumeByQuote,
+    };
+
+    cacheService.set(cacheKey, data, TRADING_VOLUME_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
