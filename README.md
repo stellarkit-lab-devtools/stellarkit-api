@@ -58,6 +58,7 @@ This project is ideal for:
 - [DEX Endpoints Guide](docs/dex-endpoints.md) - All six DEX endpoints with curl examples, sample responses, and guidance on spread vs depth vs imbalance vs arbitrage
 - [Compliance Endpoints Guide](docs/compliance-endpoints.md) - All compliance and risk endpoints with curl examples, sample responses, and a complete compliance workflow
 - [Compliance Workflow Guide](docs/compliance-workflow.md) - Step-by-step KYC/AML workflow chaining risk score, watchlist, transaction velocity, compliance check, and freeze check into a compliance report
+- [Fee Guide](docs/fee-guide.md) — How to choose the right fee: base fee vs. percentile fees, surge pricing, and recommended strategies for low, medium, and high urgency transactions
 - [Network Endpoints Guide](docs/network-endpoints.md) - All network and fee endpoints with curl examples, cache TTLs, and sample responses
 - [Caching Strategy](docs/caching-strategy.md) - Per-endpoint cache TTLs and configuration
 - [Logging Guide](docs/logging.md) - Log levels, configuration, structured log entry fields, JSON parsing, and production monitoring

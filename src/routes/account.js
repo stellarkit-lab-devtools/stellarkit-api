@@ -1942,6 +1942,151 @@ router.get("/:id/effects", async (req, res, next) => {
 });
 
 /**
+ * Evaluates a single claimable balance predicate for the given account.
+ * Returns "eligible" when the account can claim right now, "pending" when
+ * a time-lock hasn't opened yet, or "expired" when a deadline has passed.
+ *
+ * @param {object[]} claimants  - Raw claimants array from Horizon
+ * @param {string}   accountId  - The account to evaluate for
+ * @param {number}   nowSeconds - Current Unix time in seconds
+ * @returns {"eligible"|"pending"|"expired"|null}
+ */
+function evaluateClaimantEligibility(claimants, accountId, nowSeconds) {
+  const claimant = (claimants || []).find((c) => c.destination === accountId);
+  if (!claimant) return null;
+
+  const predicate = claimant.predicate || {};
+  return evaluateSinglePredicate(predicate, nowSeconds);
+}
+
+/**
+ * Recursively evaluates a single predicate node.
+ * @returns {"eligible"|"pending"|"expired"}
+ */
+function evaluateSinglePredicate(predicate, nowSeconds) {
+  if (predicate.unconditional) return "eligible";
+
+  if (predicate.abs_before) {
+    const deadline = Math.floor(new Date(predicate.abs_before).getTime() / 1000);
+    return nowSeconds < deadline ? "eligible" : "expired";
+  }
+
+  if (predicate.abs_after) {
+    const start = Math.floor(new Date(predicate.abs_after).getTime() / 1000);
+    return nowSeconds >= start ? "eligible" : "pending";
+  }
+
+  if (predicate.not) {
+    const inner = evaluateSinglePredicate(predicate.not, nowSeconds);
+    if (inner === "eligible") return "expired";
+    if (inner === "expired") return "eligible";
+    return "pending";
+  }
+
+  if (predicate.and) {
+    // All must be eligible; first non-eligible result wins (pending > expired)
+    let result = "eligible";
+    for (const p of predicate.and) {
+      const r = evaluateSinglePredicate(p, nowSeconds);
+      if (r === "expired") return "expired";
+      if (r === "pending") result = "pending";
+    }
+    return result;
+  }
+
+  if (predicate.or) {
+    // Any eligible wins; if none eligible, prefer pending over expired
+    let hasPending = false;
+    for (const p of predicate.or) {
+      const r = evaluateSinglePredicate(p, nowSeconds);
+      if (r === "eligible") return "eligible";
+      if (r === "pending") hasPending = true;
+    }
+    return hasPending ? "pending" : "expired";
+  }
+
+  // Unknown predicate — treat as eligible (unconditional fallback)
+  return "eligible";
+}
+
+/**
+ * GET /account/:id/claimable-balance-summary
+ *
+ * Fetches all claimable balances where the account is a claimant and
+ * categorises them by current eligibility status. Returns counts per
+ * category and the total XLM value of eligible (claimable right now)
+ * balances only.
+ *
+ * Response shape:
+ *   {
+ *     accountId: string,
+ *     eligibleNow: number,
+ *     pending:     number,
+ *     expired:     number,
+ *     totalValueXLM: string   // 7-decimal, eligible balances only
+ *   }
+ *
+ * Returns 404 when the account does not exist.
+ *
+ * @example
+ *   GET /account/GABC.../claimable-balance-summary
+ */
+router.get("/:id/claimable-balance-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Ensure the account exists — produces a clean 404 for unknown accounts
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Fetch all claimable balances for this claimant (up to 200)
+    const response = await server
+      .claimableBalances()
+      .claimant(id)
+      .limit(200)
+      .order("desc")
+      .call();
+
+    const records = response.records || [];
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    let eligibleNow = 0;
+    let pending = 0;
+    let expired = 0;
+    let totalValueXLM = 0;
+
+    for (const record of records) {
+      const status = evaluateClaimantEligibility(record.claimants, id, nowSeconds);
+      if (status === "eligible") {
+        eligibleNow++;
+        // Only count XLM-denominated balances toward totalValueXLM
+        const isXlm =
+          !record.asset ||
+          record.asset === "native" ||
+          isNativeAsset(record.asset);
+        if (isXlm) {
+          totalValueXLM += parseFloat(record.amount || "0");
+        }
+      } else if (status === "pending") {
+        pending++;
+      } else if (status === "expired") {
+        expired++;
+      }
+    }
+
+    return success(res, {
+      accountId: id,
+      eligibleNow,
+      pending,
+      expired,
+      totalValueXLM: toSevenDecimalString(totalValueXLM),
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/claimable-balances
  * Returns claimable balances for an account, categorized by claimability.
  *
@@ -6540,6 +6685,139 @@ router.get("/:id/smart-contract-interactions", async (req, res, next) => {
       total: interactions.length,
       limit,
       cursor: nextCursor || null,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/offer-exposure
+ *
+ * Aggregates all open DEX offers for an account and returns:
+ *   - sellingExposure: total amount locked per asset on the selling side
+ *   - buyingCommitment: total amount committed per asset on the buying side
+ *   - liquidityRisk: "low" | "medium" | "high" based on the percentage of
+ *     the XLM balance locked in open sell offers
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId: string,
+ *       sellingExposure: [{ asset, totalAmount, offerCount }],
+ *       buyingCommitment: [{ asset, totalAmount, offerCount }],
+ *       liquidityRisk: "low" | "medium" | "high"
+ *     }
+ *   }
+ *
+ * Returns 404 when the account does not exist.
+ *
+ * @example
+ *   GET /account/GABC.../offer-exposure
+ */
+router.get("/:id/offer-exposure", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const offersResponse = await server
+      .offers()
+      .forAccount(id)
+      .limit(200)
+      .order("desc")
+      .call();
+
+    const records = offersResponse.records || [];
+
+    // Aggregate selling exposure per asset
+    const sellingMap = new Map();
+    // Aggregate buying commitment per asset
+    const buyingMap = new Map();
+
+    for (const offer of records) {
+      const sellingAsset = normalizeAsset(
+        offer.selling_asset_code,
+        offer.selling_asset_issuer,
+        offer.selling_asset_type,
+      );
+      const buyingAsset = normalizeAsset(
+        offer.buying_asset_code,
+        offer.buying_asset_issuer,
+        offer.buying_asset_type,
+      );
+
+      const amount = parseFloat(offer.amount || "0");
+
+      // Selling side — keyed by "code:issuer" or "XLM:native"
+      const sellKey = sellingAsset.issuer
+        ? `${sellingAsset.code}:${sellingAsset.issuer}`
+        : `${sellingAsset.code}:native`;
+      if (!sellingMap.has(sellKey)) {
+        sellingMap.set(sellKey, { asset: sellingAsset, totalAmount: 0, offerCount: 0 });
+      }
+      const sellEntry = sellingMap.get(sellKey);
+      sellEntry.totalAmount += amount;
+      sellEntry.offerCount += 1;
+
+      // Buying side
+      const buyKey = buyingAsset.issuer
+        ? `${buyingAsset.code}:${buyingAsset.issuer}`
+        : `${buyingAsset.code}:native`;
+      if (!buyingMap.has(buyKey)) {
+        buyingMap.set(buyKey, { asset: buyingAsset, totalAmount: 0, offerCount: 0 });
+      }
+      const buyEntry = buyingMap.get(buyKey);
+      // Buying commitment = amount * price (how much of buying asset is tied up)
+      let price;
+      if (offer.price_r && offer.price_r.d && Number(offer.price_r.d) !== 0) {
+        price = Number(offer.price_r.n) / Number(offer.price_r.d);
+      } else {
+        price = parseFloat(offer.price || "0");
+      }
+      buyEntry.totalAmount += amount * price;
+      buyEntry.offerCount += 1;
+    }
+
+    const sellingExposure = Array.from(sellingMap.values()).map((e) => ({
+      asset: e.asset,
+      totalAmount: toSevenDecimalString(e.totalAmount),
+      offerCount: e.offerCount,
+    }));
+
+    const buyingCommitment = Array.from(buyingMap.values()).map((e) => ({
+      asset: e.asset,
+      totalAmount: toSevenDecimalString(e.totalAmount),
+      offerCount: e.offerCount,
+    }));
+
+    // Determine liquidityRisk based on XLM locked in sell offers vs XLM balance
+    const xlmNativeEntry = (account.balances || []).find((b) => isNativeAsset(b));
+    const xlmBalance = parseFloat(xlmNativeEntry?.balance || "0");
+
+    const xlmSellEntry = sellingMap.get("XLM:native");
+    const xlmLocked = xlmSellEntry ? xlmSellEntry.totalAmount : 0;
+
+    let liquidityRisk = "low";
+    if (xlmBalance > 0) {
+      const lockedPercent = (xlmLocked / xlmBalance) * 100;
+      if (lockedPercent >= 75) {
+        liquidityRisk = "high";
+      } else if (lockedPercent >= 25) {
+        liquidityRisk = "medium";
+      }
+    } else if (records.length > 0) {
+      // Account has offers but no XLM balance — high risk
+      liquidityRisk = "high";
+    }
+
+    return success(res, {
+      accountId: id,
+      sellingExposure,
+      buyingCommitment,
+      liquidityRisk,
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);

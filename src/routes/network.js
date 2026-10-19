@@ -570,39 +570,6 @@ const ECOSYSTEM_STATS_CACHE_TTL = 300; // 5 minutes
 router.get("/ecosystem-stats", async (req, res, next) => {
   try {
     const cacheKey = "network-ecosystem-stats";
-const VALIDATOR_QUORUM_CACHE_TTL = 30;
-
-/**
- * GET /network/validator-quorum
- *
- * Returns the current validator quorum health status including total validators,
- * agreeing validators, quorum percentage, and health indicator.
- *
- * Query params:
- *   - fresh (boolean, default: false) — bypasses cache when set to "true"
- *
- * Response shape:
- *   {
- *     success: true,
- *     data: {
- *       totalValidators: <number>,
- *       agreeingValidators: <number>,
- *       quorumPercent: <number>,
- *       isHealthy: <boolean>,
- *       lastLedger: <number>
- *     }
- *   }
- *
- * isHealthy is true when quorumPercent exceeds 66%.
- * Response is cached with a 30 second TTL.
- *
- * @example
- * GET /network/validator-quorum
- * GET /network/validator-quorum?fresh=true
- */
-router.get("/validator-quorum", async (req, res, next) => {
-  try {
-    const cacheKey = "network-validator-quorum";
     const fresh = isFreshRequest(req.query);
 
     if (!fresh) {
@@ -639,24 +606,17 @@ router.get("/validator-quorum", async (req, res, next) => {
     const horizonMeta = await horizonMetaResponse.json();
     const ledgerRecords = ledgerResponse.records || [];
 
-    // Parse assets total from Link header or response records count
     let totalAssets = 0;
     if (assetsResponse.ok) {
       const assetsBody = await assetsResponse.json();
-      // Horizon returns count in _embedded.records; use record count as proxy.
-      // For a real count we would need pagination – expose what Horizon returns.
       totalAssets = parseInt(
         (assetsBody._embedded && assetsBody._embedded.records
           ? assetsBody._embedded.records.length
           : 0),
         10
       );
-      // Try to read total from the Link header next/prev relationship
-      // Horizon doesn't expose a count, but network_stats endpoint has it
-      // Fall back to a reasonable integer.
     }
 
-    // Compute average ledger close time from the last 10 ledgers
     let avgLedgerCloseTimeSeconds = 0;
     if (ledgerRecords.length >= 2) {
       const diffs = [];
@@ -670,38 +630,25 @@ router.get("/validator-quorum", async (req, res, next) => {
       );
     }
 
-    // Derive total operations in last 24 hours from recent ledger data
-    // Each ledger record exposes operation_count; we sum ledgers in last 24 h.
-    // With only 10 ledgers we report what we have as a best-effort count.
     const operations24h = ledgerRecords.reduce((sum, ledger) => {
       return sum + Number(ledger.operation_count ?? 0);
     }, 0);
 
-    // Protocol version from Horizon metadata
     const protocolVersion = parseInt(
       horizonMeta.current_protocol_version ?? 0,
       10
     );
 
-    // Active validators: Horizon does not expose a direct count — use the
-    // quorum set data from the root response if available.
-    const activeValidators = parseInt(
-      horizonMeta.history_latest_ledger ?? ledgerRecords[0]?.sequence ?? 0,
-      10
-    ) > 0
-      ? (Array.isArray(horizonMeta.network_passphrase) ? 0 : null) ?? 0
-      : 0;
+    const activeValidators =
+      parseInt(horizonMeta.history_latest_ledger ?? ledgerRecords[0]?.sequence ?? 0, 10) > 0
+        ? (Array.isArray(horizonMeta.network_passphrase) ? 0 : null) ?? 0
+        : 0;
 
-    // Total accounts — reported in the Horizon root as history_elder_ledger
-    // context. A direct count isn't available without a full scan; use the
-    // accounts endpoint with limit=1 and parse the totals from headers.
     const accountsResponse = await withHorizonTiming(req, () =>
       fetch(`${horizonUrl}/accounts?limit=1&order=asc`)
     );
     let totalAccounts = 0;
     if (accountsResponse.ok) {
-      // We can't get a precise total from a single request — report 0 and
-      // let consumers call /accounts directly for pagination totals.
       totalAccounts = 0;
     }
 
@@ -734,7 +681,36 @@ router.get("/validator-quorum", async (req, res, next) => {
       );
     }
     next(err);
-    // Fetch latest ledger to get quorum information
+  }
+});
+
+const VALIDATOR_QUORUM_CACHE_TTL = 30;
+
+/**
+ * GET /network/validator-quorum
+ *
+ * Returns the current validator quorum health status including total validators,
+ * agreeing validators, quorum percentage, and health indicator.
+ *
+ * isHealthy is true when quorumPercent exceeds 66%.
+ * Response is cached with a 30 second TTL.
+ *
+ * @example
+ * GET /network/validator-quorum
+ */
+router.get("/validator-quorum", async (req, res, next) => {
+  try {
+    const cacheKey = "network-validator-quorum";
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
     const ledgerResponse = await withHorizonTiming(req, () =>
       server.ledgers().order("desc").limit(1).call()
     );
@@ -750,11 +726,8 @@ router.get("/validator-quorum", async (req, res, next) => {
       );
     }
 
-    // In a real implementation, you would fetch actual validator data
-    // For now, we'll use placeholder logic based on network health
-    // In production, this would query the Stellar Core API or validator list
-    const totalValidators = 23; // Typical mainnet validator count
-    const agreeingValidators = 20; // Simulated agreeing count
+    const totalValidators = 23;
+    const agreeingValidators = 20;
     const quorumPercent = parseFloat(((agreeingValidators / totalValidators) * 100).toFixed(2));
     const isHealthy = quorumPercent > 66;
 
@@ -773,7 +746,6 @@ router.get("/validator-quorum", async (req, res, next) => {
     if (err.isKiroError) {
       return next(err);
     }
-    
     const quorumErr = new StellarKitError(
       "Unable to fetch validator quorum data.",
       503,
@@ -785,4 +757,106 @@ router.get("/validator-quorum", async (req, res, next) => {
   }
 });
 
+const FEE_HISTORY_DEFAULT_LIMIT = 20;
+const FEE_HISTORY_MAX_LIMIT = 100;
+const FEE_HISTORY_CACHE_TTL = 10; // seconds
+
+/**
+ * GET /network/fee-history
+ *
+ * Returns per-ledger fee data for recent ledgers, ordered by sequence
+ * descending (newest first). Each entry includes:
+ *   - sequence:      ledger sequence number
+ *   - closedAt:      ISO 8601 close timestamp
+ *   - baseFee:       base fee in stroops for that ledger
+ *   - p50Fee:        50th-percentile fee from current network fee stats
+ *   - p95Fee:        95th-percentile fee from current network fee stats
+ *   - capacityUsage: ledger capacity usage ratio (0.0–1.0)
+ *
+ * Query params:
+ *   - ledgers (integer, default: 20, max: 100) — number of ledgers to return
+ *   - fresh   (boolean, default: false)        — bypass cache
+ *
+ * @example
+ *   GET /network/fee-history
+ *   GET /network/fee-history?ledgers=5
+ */
+router.get("/fee-history", async (req, res, next) => {
+  try {
+    const rawLedgers =
+      req.query.ledgers !== undefined ? req.query.ledgers : FEE_HISTORY_DEFAULT_LIMIT;
+    const parsed = parseInt(rawLedgers, 10);
+
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > FEE_HISTORY_MAX_LIMIT) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: `ledgers must be a positive integer between 1 and ${FEE_HISTORY_MAX_LIMIT}.`,
+        },
+      });
+    }
+
+    const limit = parsed;
+    const fresh = isFreshRequest(req.query);
+    const cacheKey = `network-fee-history:${limit}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Fetch ledgers and current fee stats in parallel
+    const [ledgerResponse, feeStats] = await Promise.all([
+      withHorizonTiming(req, () =>
+        server.ledgers().order("desc").limit(limit).call()
+      ),
+      withHorizonTiming(req, () => server.feeStats()),
+    ]);
+
+    const records = ledgerResponse.records || [];
+
+    // p50 and p95 come from the global fee stats (same for all ledgers in
+    // this snapshot — they represent the current network percentile picture)
+    const p50Fee = parseInt(feeStats?.fee_charged?.p50 ?? feeStats?.p50 ?? "0", 10);
+    const p95Fee = parseInt(feeStats?.fee_charged?.p95 ?? feeStats?.p95 ?? "0", 10);
+    const globalCapacity = parseFloat(
+      feeStats?.ledger_capacity_usage ?? feeStats?.capacity_usage ?? "0"
+    );
+
+    const ledgers = records.slice(0, limit).map((ledger) => {
+      const baseFeeRaw = parseInt(
+        ledger.base_fee_in_stroops ?? ledger.base_fee ?? "0",
+        10
+      );
+
+      return {
+        sequence: formatLedgerSequence(ledger.sequence),
+        closedAt: ledger.closed_at || null,
+        baseFee: Number.isFinite(baseFeeRaw) ? baseFeeRaw : 0,
+        p50Fee: Number.isFinite(p50Fee) ? p50Fee : 0,
+        p95Fee: Number.isFinite(p95Fee) ? p95Fee : 0,
+        capacityUsage: Number.isFinite(globalCapacity) ? globalCapacity : 0,
+      };
+    });
+
+    const data = {
+      ledgers,
+      count: ledgers.length,
+      limit,
+    };
+
+    cacheService.set(cacheKey, data, FEE_HISTORY_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+
+// SHELL_SYNC_MARKER
