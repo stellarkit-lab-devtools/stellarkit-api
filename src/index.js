@@ -420,6 +420,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/dex/spread/:sellAsset/:buyAsset", description: "Calculate bid-ask spread for a DEX trading pair" },
         { method: "GET", path: "/dex/imbalance/:sellAsset/:buyAsset", description: "Detect buy/sell pressure imbalance on a trading pair" },
         { method: "GET", path: "/account/:id/counterparties", description: "Analyze frequent payment counterparties for an account" },
+        { method: "GET", path: "/account/:id/largest-transactions", description: "Surface the highest value transactions for an account" },
         { method: "GET", path: "/network/ledger-timing", description: "Analyze network ledger close time consistency" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
 
@@ -681,6 +682,11 @@ app.get("/", (req, res) => {
           method: "GET",
           path: "/account/:id/counterparties",
           description: "Analyze frequent payment counterparties for an account",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/largest-transactions",
+          description: "Surface the highest value transactions for an account",
         },
         {
           method: "GET",
