@@ -45,6 +45,7 @@ This project is ideal for:
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
 - [SEP Integration Guide](docs/sep-integration.md) - Use StellarKit discovery, account, asset, fee, and monitoring endpoints in SEP-10, SEP-24, and SEP-31 workflows
+- [Anchor Integration Guide](docs/anchor-integration.md) - Discover anchors, check SEP-24 support, and run deposit flow preflights using StellarKit
 - [Soroban Integration Guide](docs/soroban-integration.md) - End-to-end workflow for querying contract state, monitoring events, checking expiry, and simulating invocations
 - [Soroban Contract Monitoring Guide](docs/soroban-monitoring.md) - Monitor deployed contracts: expiry, storage changes, upgrades, caller activity and failure rates, and network Soroban stats, with a complete alerting dashboard example
 - [Code Patterns Guide](docs/code-patterns.md) - Required patterns for new endpoints (Horizon instance, response envelope, amount formatting, caching, error handling), with wrong and correct examples

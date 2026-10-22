@@ -1672,4 +1672,116 @@ router.get("/best-path/:sourceAsset/:destAsset", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /dex/price-impact/:sellAsset/:buyAsset
+ *
+ * Estimates the price impact of a trade against the live order book.
+ * Simulates consuming the bid stack to calculate the volume-weighted average
+ * fill price and compares it to the best bid to derive price impact percent.
+ *
+ * Query params:
+ *   - amount (required, positive number) — units of sellAsset to trade
+ *
+ * Response shape:
+ *   { sellAsset, buyAsset, amount, priceImpactPercent, warning? }
+ *
+ * Returns:
+ *   - 400: missing or non-numeric amount
+ *   - 404: OrderBookEmpty when no active bids exist
+ *
+ * @example
+ * GET /dex/price-impact/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?amount=100
+ */
+router.get("/price-impact/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+
+    const rawAmount = req.query.amount;
+    if (rawAmount === undefined || rawAmount === "") {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: "Query parameter 'amount' is required." },
+      });
+    }
+
+    const parsedAmount = Number(rawAmount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: "'amount' must be a positive number." },
+      });
+    }
+
+    let selling, buying;
+    try {
+      selling = parseDexAssetParam(sellAsset);
+      buying = parseDexAssetParam(buyAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: err.message },
+      });
+    }
+
+    const orderBookResponse = await server
+      .orderbook(selling, buying)
+      .limit(200)
+      .call();
+
+    const bids = orderBookResponse.bids || [];
+
+    if (bids.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(
+          selling.isNative() ? "XLM" : selling.getCode(),
+          buying.isNative() ? "XLM" : buying.getCode(),
+        ),
+      });
+    }
+
+    // Simulate selling `parsedAmount` of sellAsset into the bid stack.
+    // Walk from best bid (bids[0]) downward, filling each level in turn.
+    const bestBidPrice = parseFloat(bids[0].price);
+    let remaining = parsedAmount;
+    let totalBuyReceived = 0;
+
+    for (const bid of bids) {
+      if (remaining <= 0) break;
+      const available = parseFloat(bid.amount);
+      const bidPrice = parseFloat(bid.price);
+      const fill = Math.min(remaining, available);
+      totalBuyReceived += fill * bidPrice;
+      remaining -= fill;
+    }
+
+    // Any portion of the trade not absorbed by the book fills at 0 (worst case).
+    const effectivePrice = totalBuyReceived / parsedAmount;
+    const priceImpactPercent = bestBidPrice > 0
+      ? Math.max(0, (bestBidPrice - effectivePrice) / bestBidPrice * 100)
+      : 0;
+
+    const data = {
+      sellAsset,
+      buyAsset,
+      amount: parsedAmount.toFixed(7),
+      priceImpactPercent: priceImpactPercent.toFixed(4),
+    };
+
+    if (priceImpactPercent > 5) {
+      data.warning = "High price impact: this trade size consumes significant order book depth.";
+    }
+
+    return success(res, data);
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(req.params.sellAsset, req.params.buyAsset),
+      });
+    }
+    next(err);
+  }
+});
+
 module.exports = router;
