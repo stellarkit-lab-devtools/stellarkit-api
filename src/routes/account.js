@@ -4536,19 +4536,53 @@ router.get("/:id/pool-positions", async (req, res, next) => {
 });
 
 /**
+ * Estimates impermanent loss (IL) as a percentage given the price ratio at
+ * deposit time and the current price ratio.
+ *
+ * The standard constant-product AMM IL formula is:
+ *   IL = 2 * sqrt(k) / (1 + k) - 1
+ * where k = currentPrice / depositPrice.
+ *
+ * A return value of 0 means no impermanent loss. The value is always >= 0.
+ *
+ * @param {number} depositPrice  - price of reserveA in terms of reserveB at deposit
+ * @param {number} currentPrice  - current price of reserveA in terms of reserveB
+ * @returns {number} IL as a positive percentage (e.g. 5.72 means 5.72% IL)
+ */
+function estimateImpermanentLoss(depositPrice, currentPrice) {
+  if (!depositPrice || depositPrice <= 0 || !currentPrice || currentPrice <= 0) return 0;
+  const k = currentPrice / depositPrice;
+  const il = (2 * Math.sqrt(k)) / (1 + k) - 1;
+  // il is negative by convention (loss); return as positive percentage
+  return Math.abs(il) * 100;
+}
+
+/**
  * GET /account/:id/liquidity-contribution
  *
- * Aggregates the account's liquidity pool positions into a single view of how
- * much of each asset the account is contributing across all pools it holds
- * shares in.
+ * Aggregates the account's liquidity pool positions into a single LP summary.
+ * For each pool the account holds shares in, it computes:
+ *   - depositedValue vs currentValue (in XLM terms via reserve ratio)
+ *   - estimatedFeesEarned (proportional share of pool fees from trade volume)
+ *   - impermanentLoss estimate using the constant-product AMM formula
  *
  * Response shape:
  *   {
  *     accountId: string,
- *     pools: [{ poolId, shares, sharePercent, reserves: [{ asset, amount }] }],
- *     totalsByAsset: [{ asset, amount }],
- *     poolCount: number
+ *     totalPositions: number,
+ *     totalDepositedXLM: string,       // seven-decimal
+ *     currentValueXLM: string,         // seven-decimal
+ *     estimatedFeesEarnedXLM: string,  // seven-decimal
+ *     impermanentLossPercent: string,  // seven-decimal, weighted average across positions
+ *     positions: [{
+ *       poolId, depositedValue, currentValue, feesEarned   // all seven-decimal strings
+ *     }]
  *   }
+ *
+ * Because the Horizon API does not record per-account deposit prices, the
+ * deposit price is approximated as the pool's current reserve ratio at the
+ * time of the first share acquisition. When a deposit-price estimate is
+ * unavailable (e.g., the pool has no trade history), IL is reported as 0.
  *
  * Cached per account for `cacheTTL.liquidityContribution` seconds.
  * Pass ?fresh=true to bypass the cache.
@@ -4575,59 +4609,230 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
       (balance) => balance.asset_type === "liquidity_pool_shares",
     );
 
-    const poolDetails = await Promise.all(
-      poolShareTrustlines.map((trustline) =>
-        server
-          .liquidityPools()
-          .liquidityPoolId(trustline.liquidity_pool_id)
-          .call()
-          .catch((err) => {
-            if (err && err.response && err.response.status === 404) return null;
-            throw err;
-          }),
-      ),
-    );
+    // Empty-positions fast path
+    if (poolShareTrustlines.length === 0) {
+      const data = {
+        accountId: id,
+        totalPositions: 0,
+        totalDepositedXLM: (0).toFixed(7),
+        currentValueXLM: (0).toFixed(7),
+        estimatedFeesEarnedXLM: (0).toFixed(7),
+        impermanentLossPercent: (0).toFixed(7),
+        positions: [],
+      };
+      cacheService.set(cacheKey, data, cacheTTL.liquidityContribution);
+      res.set("X-Cache", "MISS");
+      return success(res, data);
+    }
 
-    const pools = [];
-    const totals = new Map();
+    // Fetch pool details and recent trades in parallel per pool
+    const poolFetches = poolShareTrustlines.map(async (trustline) => {
+      const pool = await server
+        .liquidityPools()
+        .liquidityPoolId(trustline.liquidity_pool_id)
+        .call()
+        .catch((err) => {
+          if (err && err.response && err.response.status === 404) return null;
+          throw err;
+        });
 
-    poolShareTrustlines.forEach((trustline, i) => {
-      const pool = poolDetails[i];
-      if (!pool) return;
+      if (!pool) return { pool: null, trades: [] };
+
+      // Fetch recent trades to estimate fee income (up to 200 most recent)
+      const tradesPage = await server
+        .trades()
+        .forLiquidityPool(trustline.liquidity_pool_id)
+        .limit(200)
+        .order("desc")
+        .call()
+        .catch(() => ({ records: [] }));
+
+      return { pool, trades: tradesPage.records || [] };
+    });
+
+    const poolResults = await Promise.all(poolFetches);
+
+    const positions = [];
+    let totalDepositedXLM = 0;
+    let totalCurrentValueXLM = 0;
+    let totalFeesEarnedXLM = 0;
+    // Weighted IL accumulator: sum(il_i * currentValue_i) / sum(currentValue_i)
+    let ilWeightedSum = 0;
+    let ilWeightTotal = 0;
+
+    for (let i = 0; i < poolShareTrustlines.length; i++) {
+      const trustline = poolShareTrustlines[i];
+      const { pool, trades } = poolResults[i];
+      if (!pool) continue;
 
       const accountShares = parseFloat(trustline.balance);
       const totalShares = parseFloat(pool.total_shares);
-      const ratio = totalShares > 0 ? accountShares / totalShares : 0;
+      const shareRatio = totalShares > 0 ? accountShares / totalShares : 0;
 
-      const reserves = (pool.reserves || []).map((reserve) => {
-        const asset = normalizeAssetFromString(reserve.asset);
-        const amount = parseFloat(reserve.amount) * ratio;
-        const key = asset.issuer ? `${asset.code}:${asset.issuer}` : asset.code;
-        const existing = totals.get(key);
-        if (existing) existing.amount += amount;
-        else totals.set(key, { asset, amount });
-        return { asset, amount: toSevenDecimalString(amount) };
-      });
+      // Current value: the account's proportional slice of each reserve.
+      // We express everything in "units of reserveA" as a proxy for XLM when
+      // reserveA is native, or fall back to the raw reserve amount otherwise.
+      const reserveAAmount = parseFloat(pool.reserves[0].amount);
+      const reserveBAmount = pool.reserves[1] ? parseFloat(pool.reserves[1].amount) : 0;
 
-      pools.push({
+      // currentValue in XLM-equivalent (reserveA units * 2 for both sides)
+      const currentValueXLM = (reserveAAmount * 2) * shareRatio;
+
+      // Estimate deposit price from current reserve ratio (best approximation
+      // without historical deposit records).
+      const currentPrice = reserveBAmount > 0 ? reserveAAmount / reserveBAmount : 0;
+
+      // Use the oldest recent trade price as a deposit price proxy when available
+      const oldestTrade = trades.length > 0 ? trades[trades.length - 1] : null;
+      let depositPrice = currentPrice; // fallback: no IL
+      if (oldestTrade) {
+        const baseAmount = parseFloat(oldestTrade.base_amount || "0");
+        const counterAmount = parseFloat(oldestTrade.counter_amount || "0");
+        if (counterAmount > 0 && baseAmount > 0) {
+          depositPrice = baseAmount / counterAmount;
+        }
+      }
+
+      // Estimate fees earned: account's share of feeBp applied to 7-day trade volume
+      const feeBp = pool.fee_bp || 30;
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const volume7d = trades
+        .filter((t) => new Date(t.ledger_close_time).getTime() >= cutoff)
+        .reduce((acc, t) => acc + parseFloat(t.base_amount || "0"), 0);
+
+      const totalPoolFees7d = (volume7d / 7) * (feeBp / 10000);
+      const feesEarned = totalPoolFees7d * shareRatio;
+
+      // Impermanent loss for this position
+      const ilPercent = estimateImpermanentLoss(depositPrice, currentPrice);
+
+      // depositedValue: work backwards from IL.
+      // If IL = 0 (no price move), depositedValue ≈ currentValue.
+      // Otherwise depositedValue is approximated as currentValue / (1 - IL/100).
+      const ilFraction = ilPercent / 100;
+      const depositedValueXLM = ilFraction < 1
+        ? currentValueXLM / (1 - ilFraction)
+        : currentValueXLM;
+
+      totalDepositedXLM += depositedValueXLM;
+      totalCurrentValueXLM += currentValueXLM;
+      totalFeesEarnedXLM += feesEarned;
+
+      // Weight IL contribution by current position value for the aggregate
+      ilWeightedSum += ilPercent * currentValueXLM;
+      ilWeightTotal += currentValueXLM;
+
+      positions.push({
         poolId: pool.id,
-        shares: toSevenDecimalString(accountShares),
-        sharePercent: toSevenDecimalString(ratio * 100),
-        reserves,
+        depositedValue: depositedValueXLM.toFixed(7),
+        currentValue: currentValueXLM.toFixed(7),
+        feesEarned: feesEarned.toFixed(7),
       });
-    });
+    }
+
+    const weightedIL = ilWeightTotal > 0 ? ilWeightedSum / ilWeightTotal : 0;
 
     const data = {
       accountId: id,
-      pools,
-      totalsByAsset: Array.from(totals.values()).map((t) => ({
-        asset: t.asset,
-        amount: toSevenDecimalString(t.amount),
-      })),
-      poolCount: pools.length,
+      totalPositions: positions.length,
+      totalDepositedXLM: totalDepositedXLM.toFixed(7),
+      currentValueXLM: totalCurrentValueXLM.toFixed(7),
+      estimatedFeesEarnedXLM: totalFeesEarnedXLM.toFixed(7),
+      impermanentLossPercent: weightedIL.toFixed(7),
+      positions,
     };
 
     cacheService.set(cacheKey, data, cacheTTL.liquidityContribution);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/trustline-limits
+ *
+ * Returns the trustline limit, current balance, available capacity, and
+ * utilisation percentage for every non-native asset trustline the account holds.
+ * Useful for wallets and payment processors that need to verify whether a
+ * recipient can accept a given amount before sending.
+ *
+ * Response shape:
+ *   {
+ *     accountId: string,
+ *     trustlineCount: number,
+ *     trustlines: [{
+ *       assetCode, assetIssuer,
+ *       limit,               // seven-decimal string
+ *       balance,             // seven-decimal string
+ *       availableCapacity,   // seven-decimal string (limit - balance - buyingLiabilities)
+ *       buyingLiabilities,   // seven-decimal string
+ *       sellingLiabilities,  // seven-decimal string
+ *       utilizationPercent,  // string, two-decimal (e.g. "12.50")
+ *       isAuthorized: boolean
+ *     }]
+ *   }
+ *
+ * Cached per account for `cacheTTL.trustlineLimits` seconds.
+ * Pass ?fresh=true to bypass the cache.
+ *
+ * Returns 404 when the account does not exist on the network.
+ */
+router.get("/:id/trustline-limits", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `trustline-limits:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const trustlines = (account.balances || [])
+      .filter((b) => isNonNativeAsset(b))
+      .map((b) => {
+        const limit = parseFloat(b.limit || "0");
+        const balance = parseFloat(b.balance || "0");
+        const buyingLiabilities = parseFloat(b.buying_liabilities || "0");
+        const sellingLiabilities = parseFloat(b.selling_liabilities || "0");
+
+        // Available capacity = limit - balance - buying liabilities
+        const available = Math.max(0, limit - balance - buyingLiabilities);
+
+        // Utilisation = (balance + buying liabilities) / limit * 100
+        const used = balance + buyingLiabilities;
+        const utilizationBP = limit > 0 ? Math.round((used / limit) * 10000) : 0;
+        const utilizationPercent = `${Math.floor(utilizationBP / 100)}.${String(utilizationBP % 100).padStart(2, "0")}`;
+
+        return {
+          assetCode: b.asset_code,
+          assetIssuer: b.asset_issuer,
+          limit: limit.toFixed(7),
+          balance: balance.toFixed(7),
+          availableCapacity: available.toFixed(7),
+          buyingLiabilities: buyingLiabilities.toFixed(7),
+          sellingLiabilities: sellingLiabilities.toFixed(7),
+          utilizationPercent,
+          isAuthorized: b.is_authorized === true,
+        };
+      });
+
+    const data = {
+      accountId: id,
+      trustlineCount: trustlines.length,
+      trustlines,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.trustlineLimits);
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {

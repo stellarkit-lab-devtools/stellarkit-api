@@ -41,6 +41,7 @@ This project is ideal for:
 
 ## Documentation
 
+- [DeFi Guide](docs/defi-guide.md) — DEX trading, liquidity provision, price impact estimation, LP position monitoring, and arbitrage detection workflows with chained curl examples
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
@@ -248,6 +249,7 @@ See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples
 
 ## Documentation
 
+- [docs/defi-guide.md](docs/defi-guide.md) — DeFi workflows: pool profitability, price impact estimation, LP position monitoring, and arbitrage detection using StellarKit endpoints.
 - [docs/sep-integration.md](docs/sep-integration.md) — SEP-10 authentication, SEP-24 hosted transfers, and SEP-31 cross-border payment workflows using StellarKit.
 - [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`.
 - [docs/account-endpoints.md](docs/account-endpoints.md) — Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint.

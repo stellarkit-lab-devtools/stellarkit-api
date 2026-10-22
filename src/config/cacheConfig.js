@@ -93,6 +93,12 @@ const cacheTTL = {
     15000
   ),
 
+  /** /account/:id/trustline-limits — changes only when trustlines are added/removed/modified */
+  trustlineLimits: msToSeconds(
+    process.env.CACHE_TTL_TRUSTLINE_LIMITS_MS,
+    15000
+  ),
+
   /** /account/:id/transaction-count — changes only on new submissions */
   transactionCount: msToSeconds(
     process.env.CACHE_TTL_TX_COUNT_MS,
