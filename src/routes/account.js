@@ -6488,34 +6488,7 @@ const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // An account holds at most 1,000 subentries, so five full pages always cover
 // every open offer.
 const OFFERS_SUMMARY_MAX_PAGES = 5;
-const STROOPS_PER_UNIT = 10_000_000n;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/**
- * Parses a Horizon decimal amount ("12.5000000") into integer stroops so that
- * totals can be summed without floating-point drift.
- *
- * @param {string} amount
- * @returns {bigint} Stroops, or 0n when the value is not a decimal amount.
- */
-function amountToStroops(amount) {
-  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(String(amount ?? "").trim());
-  if (!match) return 0n;
-  const [, whole, fraction = ""] = match;
-  return BigInt(whole) * STROOPS_PER_UNIT + BigInt(fraction.padEnd(7, "0"));
-}
-
-/**
- * Formats integer stroops as a seven-decimal amount string.
- *
- * @param {bigint} stroops
- * @returns {string}
- */
-function stroopsToAmount(stroops) {
-  const whole = stroops / STROOPS_PER_UNIT;
-  const fraction = (stroops % STROOPS_PER_UNIT).toString().padStart(7, "0");
-  return `${whole}.${fraction}`;
-}
 
 /**
  * Returns an offer's price (units of buying asset per unit of selling asset)
@@ -7474,6 +7447,210 @@ router.get("/:id/fee-spending", async (req, res, next) => {
       averageFeeXLM,
       transactionCount,
       breakdown,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+const LARGEST_TRANSACTIONS_DEFAULT_LIMIT = 10;
+const LARGEST_TRANSACTIONS_MAX_LIMIT = 50;
+const LARGEST_TRANSACTIONS_DEFAULT_DAYS = 30;
+const LARGEST_TRANSACTIONS_MAX_DAYS = 90;
+
+/**
+ * Classifies one payment-like operation relative to `accountId`.
+ *
+ * Returns `{ sent, received }`; both are false for operations that do not move
+ * value to or from the account.
+ *
+ * @param {object} op - Horizon payment/operation record.
+ * @param {string} accountId
+ * @returns {{sent: boolean, received: boolean}}
+ */
+function largestTransactionLeg(op, accountId) {
+  const type = op.type;
+
+  if (type === "create_account") {
+    return { sent: op.funder === accountId, received: op.account === accountId };
+  }
+  if (type === "account_merge") {
+    return { sent: op.account === accountId, received: op.into === accountId };
+  }
+  if (
+    type === "payment" ||
+    type === "path_payment_strict_send" ||
+    type === "path_payment_strict_receive"
+  ) {
+    return { sent: op.from === accountId, received: op.to === accountId };
+  }
+  return { sent: false, received: false };
+}
+
+/**
+ * GET /account/:id/largest-transactions
+ *
+ * Surfaces the highest-value transactions the account sent, received, or both.
+ * Value is the sum of the matched payment-like operations in each transaction.
+ *
+ * Query parameters:
+ *   - direction: "sent" | "received" | "both" (default "both")
+ *   - limit: 1-50 (default 10; values above 50 are capped at 50)
+ *   - days: 1-90 (default 30)
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId,
+ *       transactions: [{ hash, totalValueXLM, operationCount, direction, timestamp }],
+ *       period: { days, from, to }
+ *     }
+ *   }
+ *
+ * Returns 404 when the account does not exist.
+ *
+ * @example
+ * GET /account/GABC.../largest-transactions?direction=received&limit=5
+ */
+router.get("/:id/largest-transactions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const direction = String(req.query.direction || "both")
+      .toLowerCase()
+      .trim();
+    if (!["sent", "received", "both"].includes(direction)) {
+      const err = new Error(
+        "Query parameter 'direction' must be one of 'sent', 'received', 'both'.",
+      );
+      err.isValidation = true;
+      err.field = "direction";
+      err.receivedValue = String(req.query.direction);
+      err.expectedFormat = "sent|received|both";
+      return next(err);
+    }
+
+    let limit = LARGEST_TRANSACTIONS_DEFAULT_LIMIT;
+    if (req.query.limit !== undefined) {
+      const parsedLimit = Number(req.query.limit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
+        const err = new Error(
+          "Query parameter 'limit' must be an integer between 1 and 50.",
+        );
+        err.isValidation = true;
+        err.field = "limit";
+        err.receivedValue = String(req.query.limit);
+        err.expectedFormat = "1-50";
+        return next(err);
+      }
+      limit = Math.min(parsedLimit, LARGEST_TRANSACTIONS_MAX_LIMIT);
+    }
+
+    let days = LARGEST_TRANSACTIONS_DEFAULT_DAYS;
+    if (req.query.days !== undefined) {
+      const parsedDays = Number(req.query.days);
+      if (
+        !Number.isInteger(parsedDays) ||
+        parsedDays < 1 ||
+        parsedDays > LARGEST_TRANSACTIONS_MAX_DAYS
+      ) {
+        const err = new Error(
+          "Query parameter 'days' must be an integer between 1 and 90.",
+        );
+        err.isValidation = true;
+        err.field = "days";
+        err.receivedValue = String(req.query.days);
+        err.expectedFormat = "1-90";
+        return next(err);
+      }
+      days = parsedDays;
+    }
+
+    const now = Date.now();
+    const since = now - days * 24 * 60 * 60 * 1000;
+
+    // Verify the account exists so a typo returns 404 rather than an empty list.
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const paymentsResponse = await server
+      .payments()
+      .forAccount(id)
+      .limit(200)
+      .order("desc")
+      .call();
+
+    const byHash = new Map();
+
+    for (const op of paymentsResponse.records || []) {
+      if (op.transaction_successful === false) continue;
+
+      const createdAt = Date.parse(op.created_at);
+      if (Number.isFinite(createdAt) && createdAt < since) continue;
+
+      const hash = op.transaction_hash;
+      if (!hash) continue;
+
+      const leg = largestTransactionLeg(op, id);
+      if (!leg.sent && !leg.received) continue;
+
+      const amount =
+        Number.parseFloat(op.amount ?? op.starting_balance ?? op.source_amount ?? "0") ||
+        0;
+
+      let entry = byHash.get(hash);
+      if (!entry) {
+        entry = {
+          hash,
+          totalValue: 0,
+          operationCount: 0,
+          sent: false,
+          received: false,
+          timestamp: toISOTimestamp(op.created_at),
+        };
+        byHash.set(hash, entry);
+      }
+
+      entry.totalValue += amount;
+      entry.operationCount += 1;
+      entry.sent = entry.sent || leg.sent;
+      entry.received = entry.received || leg.received;
+    }
+
+    const transactions = [];
+    for (const entry of byHash.values()) {
+      let txDirection = "both";
+      if (entry.sent && !entry.received) txDirection = "sent";
+      else if (!entry.sent && entry.received) txDirection = "received";
+
+      const matchesDirection =
+        direction === "both" ||
+        (direction === "sent" && entry.sent) ||
+        (direction === "received" && entry.received);
+      if (!matchesDirection) continue;
+
+      transactions.push({
+        hash: entry.hash,
+        totalValueXLM: entry.totalValue.toFixed(7),
+        operationCount: entry.operationCount,
+        direction: txDirection,
+        timestamp: entry.timestamp,
+      });
+    }
+
+    transactions.sort(
+      (a, b) => Number.parseFloat(b.totalValueXLM) - Number.parseFloat(a.totalValueXLM),
+    );
+
+    return success(res, {
+      accountId: id,
+      transactions: transactions.slice(0, limit),
+      period: {
+        days,
+        from: new Date(since).toISOString(),
+        to: new Date(now).toISOString(),
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
