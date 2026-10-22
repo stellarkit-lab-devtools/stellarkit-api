@@ -783,4 +783,36 @@ export class AccountModule {
       params,
     );
   }
+
+  /**
+   * Get the asset-sent summary for an account.
+   *
+   * Calls `GET /account/:id/asset-sent-summary`. Responses are cached by the
+   * API; pass `fresh: true` to force a live recalculation that bypasses the
+   * cache (adds `?fresh=true`).
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @param options - Optional cache-control options.
+   * @param options.fresh - When true, bypasses the server cache and forces a live recalculation.
+   * @returns Resolves to the asset-sent summary payload.
+   * @throws {StellarKitError} If `id` is missing/empty, or on a non-2xx API response.
+   *
+   * @example
+   * const summary = await account.getAssetSentSummary("GAAZI4...");
+   * const live = await account.getAssetSentSummary("GAAZI4...", { fresh: true });
+   */
+  async getAssetSentSummary(
+    id: string,
+    options?: { fresh?: boolean },
+  ): Promise<Record<string, unknown>> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError("id is required and must be a non-empty string", 400, "ValidationError");
+    }
+    const params: Record<string, string | number | undefined> = {};
+    if (options?.fresh) params.fresh = "true";
+    return this._get<Record<string, unknown>>(
+      `/account/${id}/asset-sent-summary`,
+      params,
+    );
+  }
 }

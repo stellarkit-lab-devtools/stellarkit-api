@@ -43,7 +43,7 @@ export class StellarKitError extends Error {
  *
  * @example
  * const assets = new AssetsModule({ baseUrl: "http://localhost:3000" });
- * const toml = await assets.getToml("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+ * const toml = await assets.getToml("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RhTM335X2KGX3IHOJAPP5RE34K4KZVN");
  */
 export class AssetsModule {
   private readonly baseUrl: string;
@@ -101,10 +101,10 @@ export class AssetsModule {
    * try {
    *   const toml = await assets.getToml(
    *     "USDC",
-   *     "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+   *     "GA5ZSEJYB37JRC5AVCIA5MOP4RhTM335X2KGX3IHOJAPP5RE34K4KZVN"
    *   );
    *   console.log(toml.name);        // "USD Coin"
-   *   console.log(toml.description); // "Stablecoin pegged to US Dollar"
+   *   console.log(toml.description); // "Stablecoin pegged to US Hollar"
    *   console.log(toml.image);       // "https://example.com/usdc.png"
    * } catch (err) {
    *   if (err instanceof StellarKitError && err.type === "TomlFetchFailed") {
