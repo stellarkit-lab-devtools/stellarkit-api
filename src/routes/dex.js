@@ -1520,6 +1520,125 @@ router.get("/liquidity-depth/:baseAsset/:counterAsset", async (req, res, next) =
 });
 
 /**
+ * @route GET /dex/liquidity-concentration/:baseAsset/:counterAsset
+ * @desc Measures how concentrated order book liquidity is by computing the
+ *   percentage of total bid and ask volume that sits within 1%, 2%, and 5%
+ *   of the mid price.
+ * @param {import("express").Request} req - Express request object.
+ * @param {string} req.params.baseAsset - Base asset in `CODE:ISSUER` format or `XLM:native`.
+ * @param {string} req.params.counterAsset - Counter asset in `CODE:ISSUER` format or `XLM:native`.
+ * @param {import("express").Response} res - Express response object.
+ * @param {import("express").NextFunction} next - Express next middleware function.
+ * @returns {Promise<void>} JSON payload with `pair`, `midPrice`, and bid/ask
+ *   concentration percentages at the 1%, 2%, and 5% bands.
+ * @example
+ * curl -s "http://localhost:3000/dex/liquidity-concentration/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" | jq
+ * // {
+ * //   "success": true,
+ * //   "data": {
+ * //     "pair": "XLM:native/USDC:GA5Z...",
+ * //     "midPrice": "0.1287500",
+ * //     "bidConcentration": { "within1Pct": 42.5, "within2Pct": 68.1, "within5Pct": 91.3 },
+ * //     "askConcentration": { "within1Pct": 39.8, "within2Pct": 64.7, "within5Pct": 88.9 }
+ * //   }
+ * // }
+ */
+router.get("/liquidity-concentration/:baseAsset/:counterAsset", async (req, res, next) => {
+  try {
+    const { baseAsset, counterAsset } = req.params;
+
+    let selling, buying;
+    try {
+      selling = parseDexAssetParam(baseAsset);
+      buying = parseDexAssetParam(counterAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: err.message },
+      });
+    }
+
+    const cacheKey = `dex:liquidity-concentration:${baseAsset}:${counterAsset}`;
+    const LIQUIDITY_CONCENTRATION_CACHE_TTL = 30; // 30 seconds
+
+    if (req.query.fresh !== "true") {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+    res.set("X-Cache", "MISS");
+
+    const orderBookResponse = await server
+      .orderbook(selling, buying)
+      .limit(200)
+      .call();
+
+    const bids = orderBookResponse.bids || [];
+    const asks = orderBookResponse.asks || [];
+
+    if (bids.length === 0 && asks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(
+          selling.isNative() ? "XLM" : selling.getCode(),
+          buying.isNative() ? "XLM" : buying.getCode(),
+        ),
+      });
+    }
+
+    const bestBid = bids.length > 0 ? parseFloat(bids[0].price) : null;
+    const bestAsk = asks.length > 0 ? parseFloat(asks[0].price) : null;
+    const midPrice =
+      bestBid !== null && bestAsk !== null
+        ? (bestBid + bestAsk) / 2
+        : (bestBid ?? bestAsk);
+
+    const computeConcentration = (levels, bandPct) => {
+      const totalVolume = levels.reduce((sum, level) => sum + parseFloat(level.amount), 0);
+      if (totalVolume <= 0) return 0;
+      const lower = midPrice * (1 - bandPct / 100);
+      const upper = midPrice * (1 + bandPct / 100);
+      const withinVolume = levels.reduce((sum, level) => {
+        const price = parseFloat(level.price);
+        if (price >= lower && price <= upper) {
+          return sum + parseFloat(level.amount);
+        }
+        return sum;
+      }, 0);
+      return Number(((withinVolume / totalVolume) * 100).toFixed(2));
+    };
+
+    const data = {
+      pair: `${baseAsset}/${counterAsset}`,
+      midPrice: midPrice.toFixed(7),
+      bidConcentration: {
+        within1Pct: computeConcentration(bids, 1),
+        within2Pct: computeConcentration(bids, 2),
+        within5Pct: computeConcentration(bids, 5),
+      },
+      askConcentration: {
+        within1Pct: computeConcentration(asks, 1),
+        within2Pct: computeConcentration(asks, 2),
+        within5Pct: computeConcentration(asks, 5),
+      },
+    };
+
+    cacheService.set(cacheKey, data, LIQUIDITY_CONCENTRATION_CACHE_TTL);
+    return success(res, data);
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(req.params.baseAsset, req.params.counterAsset),
+      });
+    }
+    next(err);
+  }
+});
+
+/**
  * Converts an SDK Asset instance into the standard { code, issuer, type } shape.
  *
  * @param {Asset} asset

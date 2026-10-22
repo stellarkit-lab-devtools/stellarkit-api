@@ -29,6 +29,7 @@ Asset codes are case-insensitive (`xlm:native` and `XLM:native` both work).
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery |
 | GET | `/dex/top-markets` | Top markets ranked by recent trade activity |
 | GET | `/dex/volume-leaders` | Top assets ranked by 24h trading volume against XLM |
+| GET | `/dex/liquidity-concentration/:baseAsset/:counterAsset` | Order-book liquidity concentration within 1%, 2%, and 5% of mid price |
 
 ---
 
@@ -371,6 +372,19 @@ curl "http://localhost:3000/dex/volume-leaders?limit=5"
 - `uniqueTraders` counts distinct buyer and seller accounts.
 
 ---
+
+## 8. `GET /dex/liquidity-concentration/:baseAsset/:counterAsset`
+
+Measures how concentrated an order book's liquidity is around the mid price. For each side of the book, it computes the percentage of total volume that sits within 1%, 2%, and 5% of the mid price. A high percentage means liquidity is clustered near the top of the book (tight, effective depth); a low percentage means volume is spread across many distant price levels.
+
+**When to use:** Assess effective market depth for a pair — how much of the book is actually usable at prices close to the current mid — and compare liquidity quality across markets.
+
+**Difference from `/dex/depth`:** `depth` reports raw counts and cumulative volumes across the whole book. `liquidity-concentration` normalises those volumes into percentages relative to the mid price, making it easy to compare how *usable* the liquidity is across pairs of different sizes.
+
+**Path parameters:** `:baseAsset` and `:counterAsset` use the standard `CODE:ISSUER` notation (`XLM:native` for native XLM).
+
+**curl example:**
+
 
 ## How the Endpoints Relate
 
