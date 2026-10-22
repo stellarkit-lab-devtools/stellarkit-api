@@ -1,12 +1,10 @@
 node_modules/
-.env
 coverage/
 *.log
 .DS_Store
 dist/
 
 # ── Editor settings ────────────────────────────────────────────────────────────
-.vscode/
 .idea/
 
 # ── Test output artefacts ──────────────────────────────────────────────────────
@@ -34,3 +32,4 @@ QUICK_START_DOCS.md
 TODO.md
 GITHUB_ISSUES.md
 README.me
+config.bat
