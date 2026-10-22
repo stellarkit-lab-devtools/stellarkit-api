@@ -845,73 +845,6 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
  * - 30d — 30-day window, weekly buckets  (month-over-month growth, default)
  * - 90d — 90-day window, weekly buckets  (quarterly growth trend)
  */
-const HOLDER_GROWTH_RESOLUTIONS = {
-  "7d": { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
-  "30d": { windowMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 7 * 24 * 60 * 60 * 1000 },
-  "90d": { windowMs: 90 * 24 * 60 * 60 * 1000, bucketMs: 7 * 24 * 60 * 60 * 1000 },
-};
-
-/**
- * Buckets change_trust operations into a holder-growth time series.
- *
- * A change_trust operation with `limit > 0` creates a trustline (+1 holder);
- * a change_trust with `limit === 0` removes one (-1 holder). Operations that
- * fall before `windowStartMs` are excluded. Buckets are returned oldest-first
- * with a running `holders` total so each entry describes the net growth at
- * that point in time.
- *
- * @param {Array<Object>} operations - change_trust records from Horizon.
- * @param {number} windowStartMs - Unix-ms cutoff; earlier ops are ignored.
- * @param {number} bucketMs - Width of each time bucket in milliseconds.
- * @returns {Array<{date: string, holders: number, change: number, added: number, removed: number}>}
- */
-function aggregateTrustlineGrowth(operations, windowStartMs, bucketMs) {
-  const buckets = new Map();
-
-  for (const op of operations) {
-    const opTime = new Date(op.created_at).getTime();
-    if (!Number.isFinite(opTime) || opTime < windowStartMs) {
-      continue;
-    }
-
-    const bucketStart = Math.floor(opTime / bucketMs) * bucketMs;
-    if (!buckets.has(bucketStart)) {
-      buckets.set(bucketStart, {
-        bucketStart,
-        date: new Date(bucketStart).toISOString(),
-        change: 0,
-        added: 0,
-        removed: 0,
-      });
-    }
-
-    const bucket = buckets.get(bucketStart);
-    if (parseFloat(op.limit) > 0) {
-      bucket.change += 1;
-      bucket.added += 1;
-    } else {
-      bucket.change -= 1;
-      bucket.removed += 1;
-    }
-  }
-
-  const sorted = Array.from(buckets.values()).sort(
-    (a, b) => a.bucketStart - b.bucketStart,
-  );
-
-  let cumulativeHolders = 0;
-  return sorted.map((bucket) => {
-    cumulativeHolders += bucket.change;
-    return {
-      date: bucket.date,
-      holders: cumulativeHolders,
-      change: bucket.change,
-      added: bucket.added,
-      removed: bucket.removed,
-    };
-  });
-}
-
 /**
  * GET /asset/:code/:issuer/holder-growth
  *
@@ -1259,61 +1192,6 @@ router.get("/:code/:issuer/top-traders", async (req, res, next) => {
  * - 7d  — 7-day window,  daily buckets
  * - 30d — 30-day window, daily buckets (default)
  */
-const HOLDER_GROWTH_RESOLUTIONS = {
-  "7d":  { windowMs: 7  * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
-  "30d": { windowMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
-};
-
-/**
- * Buckets change_trust operations into a holder-growth time series.
- *
- * A change_trust operation with `limit > 0` creates a trustline (+1 holder);
- * a change_trust with `limit === 0` removes one (-1 holder). Operations that
- * fall before `windowStartMs` are excluded. Buckets are returned oldest-first
- * with a running `holderCount` total so each entry describes the cumulative
- * count at that point in time.
- *
- * @param {Array<Object>} operations  - change_trust records from Horizon.
- * @param {number} windowStartMs      - Unix-ms cutoff; earlier ops are ignored.
- * @param {number} bucketMs           - Width of each time bucket in milliseconds.
- * @returns {Array<{ timestamp: string, holderCount: number, change: number }>}
- */
-function aggregateTrustlineGrowth(operations, windowStartMs, bucketMs) {
-  const buckets = new Map();
-
-  for (const op of operations) {
-    const opTime = new Date(op.created_at).getTime();
-    if (!Number.isFinite(opTime) || opTime < windowStartMs) continue;
-
-    const bucketStart = Math.floor(opTime / bucketMs) * bucketMs;
-
-    if (!buckets.has(bucketStart)) {
-      buckets.set(bucketStart, { bucketStart, change: 0 });
-    }
-
-    const bucket = buckets.get(bucketStart);
-    if (parseFloat(op.limit) > 0) {
-      bucket.change += 1;
-    } else {
-      bucket.change -= 1;
-    }
-  }
-
-  const sorted = Array.from(buckets.values()).sort(
-    (a, b) => a.bucketStart - b.bucketStart,
-  );
-
-  let cumulativeHolders = 0;
-  return sorted.map((bucket) => {
-    cumulativeHolders += bucket.change;
-    return {
-      timestamp: new Date(bucket.bucketStart).toISOString(),
-      holderCount: cumulativeHolders,
-      change: bucket.change,
-    };
-  });
-}
-
 /**
  * GET /asset/:code/:issuer/holder-growth
  *
@@ -1363,8 +1241,6 @@ const validResolutions = ["7d", "30d", "90d"];
 
     const cacheKey = `asset-issuance-history:${assetCode}:${issuer}:${resolution}`;
     const fresh = isFreshRequest(req.query);
-    const cacheKey = `asset-holder-growth:${assetCode}:${issuer}:${resolution}`;
-
     if (!fresh) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -1639,6 +1515,175 @@ router.get("/:code/:issuer/price-history", async (req, res, next) => {
     };
 
     cacheService.set(cacheKey, data, cacheTTL.assetPrice);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /asset/:code/:issuer/burn-history
+ *
+ * Returns a time series of burn events for an asset. A burn is any payment of
+ * the asset back to its issuer, or a payment to a known burn address. Each
+ * event reports the timestamp, amount, burner address, and transaction hash.
+ * The response also includes the total lifetime burned amount and the average
+ * daily burn over the last 7 days.
+ *
+ * Query params:
+ *   limit  (number, 1–200, default: 20) — maximum number of events to return.
+ *   cursor (string) — paging token from a previous response.
+ *   fresh  (boolean, default: false) — bypass the cache when "true".
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       code: string,
+ *       issuer: string,
+ *       totalBurned: string,   // seven-decimal string
+ *       burnRate7d: string,    // average daily burn over last 7 days, seven-decimal string
+ *       events: [{ timestamp, amount, burnerAddress, txHash }],
+ *       nextCursor: string | null,
+ *       hasMore: boolean
+ *     }
+ *   }
+ *
+ * Returns an empty events array when no burns have occurred.
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/burn-history?limit=10
+ */
+router.get("/:code/:issuer/burn-history", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const asset = new Asset(assetCode, issuer);
+
+    const rawLimit = req.query.limit;
+    const limit = rawLimit !== undefined ? validateLimit(rawLimit, 200) : 20;
+    const cursor = req.query.cursor || null;
+    const fresh = isFreshRequest(req.query);
+
+    const cacheKey = `asset-burn-history:${assetCode}:${issuer}:${limit}:${cursor || ""}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Known burn addresses for this asset: the issuer itself (sending back to
+    // the issuer effectively burns the token) plus any configured burn account.
+    const burnAddresses = new Set([issuer]);
+    if (process.env.ASSET_BURN_ADDRESS) {
+      burnAddresses.add(process.env.ASSET_BURN_ADDRESS);
+    }
+
+    const events = [];
+    let totalBurned = 0;
+    let burned7d = 0;
+    const windowStartMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let pageCursor = cursor;
+    let nextCursor = null;
+    let hasMore = false;
+
+    // Walk payments for the asset, newest first, collecting burns.
+    while (events.length < limit) {
+      let query = server
+        .payments()
+        .forAsset(asset)
+        .order("desc")
+        .limit(200);
+      if (pageCursor) query = query.cursor(pageCursor);
+
+      const response = await query.call();
+      const records = response.records || [];
+      if (records.length === 0) break;
+
+      for (const record of records) {
+        pageCursor = record.paging_token;
+
+        if (record.type !== "payment") continue;
+        if (record.asset_code?.toUpperCase() !== assetCode) continue;
+        if (record.asset_issuer !== issuer) continue;
+        if (!burnAddresses.has(record.to)) continue;
+
+        const amount = Number(record.amount);
+        const safeAmount = Number.isFinite(amount) ? amount : 0;
+        const timestamp = record.created_at;
+        const tsMs = new Date(timestamp).getTime();
+
+        totalBurned += safeAmount;
+        if (Number.isFinite(tsMs) && tsMs >= windowStartMs) {
+          burned7d += safeAmount;
+        }
+
+        if (events.length < limit) {
+          events.push({
+            timestamp,
+            amount: toSevenDecimalString(safeAmount),
+            burnerAddress: record.from,
+            txHash: record.transaction_hash,
+          });
+        }
+      }
+
+      if (records.length < 200 || !pageCursor) break;
+      if (events.length >= limit) {
+        hasMore = true;
+        nextCursor = pageCursor;
+        break;
+      }
+    }
+
+    // Compute totalBurned across all history by continuing to page through
+    // remaining payments when the first pass did not reach the end.
+    if (hasMore) {
+      let scanCursor = pageCursor;
+      while (scanCursor) {
+        const response = await server
+          .payments()
+          .forAsset(asset)
+          .order("desc")
+          .limit(200)
+          .cursor(scanCursor)
+          .call();
+        const records = response.records || [];
+        if (records.length === 0) break;
+
+        for (const record of records) {
+          scanCursor = record.paging_token;
+          if (record.type !== "payment") continue;
+          if (record.asset_code?.toUpperCase() !== assetCode) continue;
+          if (record.asset_issuer !== issuer) continue;
+          if (!burnAddresses.has(record.to)) continue;
+          const amount = Number(record.amount);
+          if (Number.isFinite(amount)) totalBurned += amount;
+        }
+
+        if (records.length < 200) break;
+      }
+    }
+
+    const burnRate7d = toSevenDecimalString(burned7d / 7);
+
+    const data = {
+      code: assetCode,
+      issuer,
+      totalBurned: toSevenDecimalString(totalBurned),
+      burnRate7d,
+      events,
+      nextCursor,
+      hasMore,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.asset);
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {
