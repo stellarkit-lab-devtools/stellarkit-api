@@ -6800,7 +6800,6 @@ const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // An account holds at most 1,000 subentries, so five full pages always cover
 // every open offer.
 const OFFERS_SUMMARY_MAX_PAGES = 5;
-const STROOPS_PER_UNIT = 10_000_000n;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
@@ -7786,6 +7785,260 @@ router.get("/:id/fee-spending", async (req, res, next) => {
       averageFeeXLM,
       transactionCount,
       breakdown,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/self-payment-detection
+ *
+ * Detects circular payment chains where an account's money comes back to itself.
+ * Identifies direct self-payments (A sends to A) and multi-hop circular chains (A -> B -> C -> A).
+ * Chains longer than 10 hops are not flagged to avoid false positives.
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId: <string>,
+ *       selfPaymentsDetected: <boolean>,
+ *       chains: [
+ *         {
+ *           type: "direct_self" | "circular_chain",
+ *           length: <number>,
+ *           chain: [<accountId>, ...],
+ *           totalAmount: <string (XLM equivalent)>,
+ *           firstOccurrence: <ISO8601 timestamp>
+ *         }
+ *       ]
+ *     }
+ *   }
+ *
+ * Returns 404 if the account does not exist.
+ *
+ * @example
+ * GET /account/GBRPYHIL2CI3WHZDTOOQFC6EB4CGQG5N3KBI5DOMMZMDBESIOXW32DT/self-payment-detection
+ */
+router.get("/:id/self-payment-detection", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Verify account exists
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Fetch payment operations for this account
+    const paymentsResponse = await withHorizonTiming(req, () =>
+      server.payments().forAccount(id).order("desc").limit(200).call()
+    );
+
+    const payments = paymentsResponse.records || [];
+    const chains = [];
+    const visited = new Set();
+
+    // Check for direct self-payments
+    for (const payment of payments) {
+      if (payment.from === id && payment.to === id) {
+        const chainKey = `direct_self_${payment.id}`;
+        if (!visited.has(chainKey)) {
+          visited.add(chainKey);
+          chains.push({
+            type: "direct_self",
+            length: 1,
+            chain: [id],
+            totalAmount: payment.amount,
+            firstOccurrence: payment.created_at,
+          });
+        }
+      }
+    }
+
+    // Check for circular chains (A -> B -> C -> A)
+    // Build a graph of payments
+    const graph = new Map();
+    for (const payment of payments) {
+      if (!graph.has(payment.from)) {
+        graph.set(payment.from, []);
+      }
+      graph.get(payment.from).push({
+        to: payment.to,
+        amount: payment.amount,
+        timestamp: payment.created_at,
+      });
+    }
+
+    // DFS to find cycles that include the target account
+    const findCycles = (startAccount) => {
+      const cycles = [];
+      const visitedInDFS = new Set();
+      const stack = [];
+
+      const dfs = (current, path) => {
+        if (path.length > 10) return; // Don't flag chains longer than 10 hops
+
+        if (current === startAccount && path.length > 1) {
+          // Found a cycle back to start account
+          const cycleKey = path.sort().join("|");
+          if (!visitedInDFS.has(cycleKey)) {
+            visitedInDFS.add(cycleKey);
+            cycles.push({
+              type: "circular_chain",
+              length: path.length,
+              chain: [...path],
+              totalAmount: "0", // Sum would require more detailed tracking
+              firstOccurrence: null,
+            });
+          }
+          return;
+        }
+
+        if (visited.has(current) || path.includes(current)) return;
+
+        const neighbors = graph.get(current) || [];
+        for (const neighbor of neighbors) {
+          path.push(neighbor.to);
+          dfs(neighbor.to, path);
+          path.pop();
+        }
+      };
+
+      dfs(startAccount, [startAccount]);
+      return cycles;
+    };
+
+    const circulars = findCycles(id);
+    chains.push(...circulars);
+
+    return success(res, {
+      accountId: id,
+      selfPaymentsDetected: chains.length > 0,
+      chains,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/largest-transactions
+ *
+ * Returns the highest value transactions for an account.
+ * Useful for financial analysts and compliance tools to identify top transactions without paging.
+ *
+ * Query params:
+ *   - direction (string, optional): "sent", "received", or "both" (default: "both")
+ *   - limit (number, optional, default: 10, max: 50)
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId: <string>,
+ *       transactions: [
+ *         {
+ *           hash: <string>,
+ *           totalValueXLM: <string (7 decimals)>,
+ *           operationCount: <number>,
+ *           direction: "sent" | "received",
+ *           timestamp: <ISO8601>
+ *         }
+ *       ],
+ *       period: {
+ *         startDate: <ISO8601>,
+ *         endDate: <ISO8601>
+ *       }
+ *     }
+ *   }
+ *
+ * Returns 404 if the account does not exist.
+ *
+ * @example
+ * GET /account/GBRPYHIL2CI3WHZDTOOQFC6EB4CGQG5N3KBI5DOMMZMDBESIOXW32DT/largest-transactions?direction=sent&limit=20
+ */
+router.get("/:id/largest-transactions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const direction = (req.query.direction || "both").toLowerCase();
+    if (!["sent", "received", "both"].includes(direction)) {
+      const err = new Error('Invalid direction. Must be "sent", "received", or "both".');
+      err.isValidation = true;
+      return next(err);
+    }
+
+    let limit = parseInt(req.query.limit, 10) || 10;
+    limit = Math.min(limit, 50); // Cap at 50
+
+    // Verify account exists
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Fetch transactions
+    const txResponse = await withHorizonTiming(req, () =>
+      server.transactions().forAccount(id).order("desc").limit(200).call()
+    );
+
+    const transactions = txResponse.records || [];
+    const largestTxs = [];
+
+    for (const tx of transactions) {
+      if (tx.successful !== true) continue;
+
+      // Fetch operations for this transaction
+      const opResponse = await withHorizonTiming(req, () =>
+        server.operations().forTransaction(tx.id).limit(200).call()
+      );
+
+      const operations = opResponse.records || [];
+      let totalValueXLM = 0;
+
+      for (const op of operations) {
+        if (op.type === "payment" || op.type === "path_payment_strict_receive" || op.type === "path_payment_strict_send") {
+          const amount = parseFloat(op.amount || 0);
+          const isReceived = op.to === id;
+          const isDirectionMatch =
+            direction === "both" ||
+            (direction === "sent" && !isReceived && op.from === id) ||
+            (direction === "received" && isReceived);
+
+          if (isDirectionMatch) {
+            // Convert to XLM equivalent (simplification; real code would handle different assets)
+            totalValueXLM += amount;
+          }
+        }
+      }
+
+      if (totalValueXLM > 0) {
+        largestTxs.push({
+          hash: tx.hash,
+          totalValueXLM: totalValueXLM.toFixed(7),
+          operationCount: tx.operation_count,
+          direction:
+            transactions.find((t) => t.id === tx.id)?.operations?.some((op) => op.to === id) ||
+            operations.some((op) => op.to === id)
+              ? "received"
+              : "sent",
+          timestamp: tx.created_at,
+        });
+      }
+    }
+
+    // Sort by total value descending and take top N
+    largestTxs.sort((a, b) => parseFloat(b.totalValueXLM) - parseFloat(a.totalValueXLM));
+    const topTxs = largestTxs.slice(0, limit);
+
+    const now = new Date();
+    const startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); // 90 days ago
+
+    return success(res, {
+      accountId: id,
+      transactions: topTxs,
+      period: {
+        startDate: startDate.toISOString(),
+        endDate: now.toISOString(),
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);

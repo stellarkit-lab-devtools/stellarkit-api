@@ -1925,4 +1925,139 @@ router.get("/pool-share-value/:poolId/:shares", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /dex/order-book-depth/:sellAsset/:buyAsset
+ *
+ * Returns the order book with cumulative volume calculations for each price level.
+ * Computes cumulative bid and ask volumes from outermost to innermost prices,
+ * and calculates the spread between best bid and best ask.
+ *
+ * Path params:
+ *   - sellAsset (string): Asset to sell, format "CODE:ISSUER" or "XLM:native"
+ *   - buyAsset (string): Asset to buy, format "CODE:ISSUER" or "XLM:native"
+ *
+ * Query params:
+ *   - depth (number, optional, default: 10, max: 50): Number of price levels to return
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       bestBid: <string (price)>,
+ *       bestAsk: <string (price)>,
+ *       spread: <string (absolute difference)>,
+ *       bids: [
+ *         {
+ *           price: <string>,
+ *           cumulativeVolume: <string>
+ *         }
+ *       ],
+ *       asks: [
+ *         {
+ *           price: <string>,
+ *           cumulativeVolume: <string>
+ *         }
+ *       ]
+ *     }
+ *   }
+ *
+ * Returns 404 with type "OrderBookEmpty" if no orders exist.
+ *
+ * @example
+ * GET /dex/order-book-depth/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?depth=5
+ */
+router.get("/order-book-depth/:sellAsset/:buyAsset", async (req, res, next) => {
+  try {
+    const { sellAsset, buyAsset } = req.params;
+
+    // Validate assets
+    validateAsset(sellAsset, null);
+    validateAsset(buyAsset, null);
+
+    let depth = parseInt(req.query.depth, 10) || 10;
+    depth = Math.min(Math.max(depth, 1), 50); // Clamp between 1 and 50
+
+    const cacheKey = `dex:order-book-depth:${sellAsset}:${buyAsset}:${depth}`;
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Parse assets for Horizon API
+    const [sellCode, sellIssuer] = sellAsset.includes(":") ? sellAsset.split(":") : [sellAsset, null];
+    const [buyCode, buyIssuer] = buyAsset.includes(":") ? buyAsset.split(":") : [buyAsset, null];
+
+    const sellAst =
+      sellCode.toUpperCase() === "XLM" && (!sellIssuer || sellIssuer.toLowerCase() === "native")
+        ? Asset.native()
+        : new Asset(sellCode.toUpperCase(), sellIssuer);
+
+    const buyAst =
+      buyCode.toUpperCase() === "XLM" && (!buyIssuer || buyIssuer.toLowerCase() === "native")
+        ? Asset.native()
+        : new Asset(buyCode.toUpperCase(), buyIssuer);
+
+    // Fetch order book
+    const orderBookResponse = await server.orderbook(sellAst, buyAst).limit(depth).call();
+
+    const bids = orderBookResponse.bids || [];
+    const asks = orderBookResponse.asks || [];
+
+    if (bids.length === 0 && asks.length === 0) {
+      return next(makeOrderBookEmptyError(sellAsset, buyAsset));
+    }
+
+    // Compute best bid and ask
+    const bestBid = bids.length > 0 ? bids[0].price : null;
+    const bestAsk = asks.length > 0 ? asks[0].price : null;
+
+    // Compute spread
+    let spread = null;
+    if (bestBid && bestAsk) {
+      spread = (parseFloat(bestAsk) - parseFloat(bestBid)).toFixed(7);
+    }
+
+    // Compute cumulative volumes for bids (outermost to innermost)
+    const bidsWithCumulative = [];
+    let bidCumulativeVolume = 0;
+    for (const bid of bids.slice(0, depth)) {
+      bidCumulativeVolume += parseFloat(bid.amount);
+      bidsWithCumulative.push({
+        price: bid.price,
+        cumulativeVolume: bidCumulativeVolume.toFixed(7),
+      });
+    }
+
+    // Compute cumulative volumes for asks (outermost to innermost)
+    const asksWithCumulative = [];
+    let askCumulativeVolume = 0;
+    for (const ask of asks.slice(0, depth)) {
+      askCumulativeVolume += parseFloat(ask.amount);
+      asksWithCumulative.push({
+        price: ask.price,
+        cumulativeVolume: askCumulativeVolume.toFixed(7),
+      });
+    }
+
+    const data = {
+      bestBid,
+      bestAsk,
+      spread,
+      bids: bidsWithCumulative,
+      asks: asksWithCumulative,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.orderBookDepth || 5);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
