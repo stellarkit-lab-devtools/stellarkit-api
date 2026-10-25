@@ -1,15 +1,10 @@
 # StellarKit API 🚀
 
-<p align="center">
-  <b>English 🇺🇸</b> | <a href="README.fr.md">Français 🇫🇷</a> | <a href="README.es.md">Español 🇪🇸</a>
-</p>
+StellarKit API is a ready-to-use web service for reading data from the Stellar blockchain, a payment network for sending money and digital assets quickly and cheaply. It exists so developers can get account balances, transaction history, fee estimates, and network status from simple web requests, without learning Stellar's low-level tools first. Use it to add Stellar features to a website, mobile app, or wallet.
 
-> StellarKit API is a developer utility service that exposes the Stellar Horizon blockchain through a simple REST interface. It is designed for application developers who need fast, typed access to account details, fee estimates, transaction history, network health, and asset metadata.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/) [![Stellar Network](https://img.shields.io/badge/Stellar-testnet%20%7C%20mainnet-blue)](https://developers.stellar.org/docs/networks) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
-[![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+**English 🇺🇸** | [Français 🇫🇷](README.fr.md) | [Español 🇪🇸](README.es.md)
 
 ---
 
