@@ -1,12 +1,12 @@
 {
   "name": "stellarkit-api",
   "version": "1.0.0",
-  "description": "A developer utility API for the Stellar blockchain \u2014 fee estimation, account info, transaction history, network status, and asset metadata via Horizon.",
+  "description": "A developer utility API for the Stellar blockchain — fee estimation, account info, transaction history, network status, and asset metadata via Horizon.",
   "main": "src/index.js",
   "types": "types/index.d.ts",
   "scripts": {
-    "start": "node api.js && node src/index.js",
-    "dev": "node api.js && nodemon src/index.js",
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "test": "jest --coverage",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix",
@@ -46,10 +46,7 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/.kilo/"
-    ]
+    "testPathIgnorePatterns": ["/node_modules/", "/.kilo/"]
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",

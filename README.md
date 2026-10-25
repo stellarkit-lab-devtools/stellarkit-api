@@ -84,7 +84,6 @@ This project is ideal for:
 - [Tax Reporting Guide](docs/tax-reporting-guide.md) - Gather Stellar tax inputs (transactions, trades, fee spending, historical balances, cross-asset conversions) and compute cost basis
 - [Analytics Endpoints Guide](docs/analytics-endpoints.md) - Account analytics endpoints grouped by activity, volume, and compliance use cases, with an account health dashboard example
 - [SEP-10 Authentication Guide](docs/sep10-authentication.md) - Complete SEP-10 challenge-response flow using StellarKit for discovery, preflight, and inspection, with Node.js signing example
-- [Building a Wallet Guide](docs/building-a-wallet.md) - End-to-end guide for building a Stellar wallet with StellarKit: balance display, payment pre-flight, transaction history, real-time SSE updates, trustline management, offer management, reserve health monitoring, and production architecture recommendations
 
 ---
 
