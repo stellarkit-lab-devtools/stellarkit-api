@@ -2014,6 +2014,186 @@ router.get("/:id/effects", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/claimable-balance-summary
+ *
+ * Returns a compact summary of an account's claimable balances without
+ * fetching the full paginated list. Categorises balances by eligibility:
+ *   - eligibleNow  — predicates are satisfied at the current time
+ *   - pending      — predicates exist but are not yet satisfied (time-locked)
+ *   - expired      — past their not_after predicate; can no longer be claimed
+ *
+ * totalValueXLM is computed from eligible balances only, treating every
+ * native XLM balance at face value. Non-XLM balances contribute 0 to the
+ * total (no cross-asset pricing is performed).
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId:     string,
+ *       totalBalances: number,   // integer count of all claimable balances
+ *       eligibleNow:   number,   // integer
+ *       pending:       number,   // integer
+ *       expired:       number,   // integer
+ *       totalValueXLM: string    // seven-decimal string, eligible XLM only
+ *     }
+ *   }
+ *
+ * Returns 404 when the account does not exist.
+ * Response is cached with a 15 second TTL. Pass ?fresh=true to bypass.
+ *
+ * @example
+ *   GET /account/GABC.../claimable-balance-summary
+ */
+router.get("/:id/claimable-balance-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === "true";
+    const cacheKey = `claimable-balance-summary:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Ensure the account exists — raises 404 for unknown accounts.
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Fetch all claimable balances for this claimant (up to 200 per page).
+    // For summary purposes a single page is sufficient; most accounts hold
+    // far fewer than 200 pending claimable balances.
+    const response = await server
+      .claimableBalances()
+      .claimant(id)
+      .limit(200)
+      .order("desc")
+      .call();
+
+    const records = response.records || [];
+    const now = Date.now();
+
+    let eligibleNow = 0;
+    let pending = 0;
+    let expired = 0;
+    let totalValueXLMRaw = 0;
+
+    for (const balance of records) {
+      // Find the predicate for this specific claimant.
+      const claimantEntry = (balance.claimants || []).find(
+        (c) => c.destination === id
+      );
+
+      const predicate = claimantEntry ? claimantEntry.predicate : null;
+      const eligibility = evaluateClaimPredicate(predicate, now);
+
+      if (eligibility === "eligible") {
+        eligibleNow++;
+        // Accumulate XLM value from eligible native balances only.
+        if (balance.asset === "native" || balance.asset_type === "native") {
+          totalValueXLMRaw += parseFloat(balance.amount || "0");
+        }
+      } else if (eligibility === "expired") {
+        expired++;
+      } else {
+        pending++;
+      }
+    }
+
+    const data = {
+      accountId: id,
+      totalBalances: records.length,
+      eligibleNow,
+      pending,
+      expired,
+      totalValueXLM: totalValueXLMRaw.toFixed(7),
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.claimableBalanceSummary);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * Evaluates a Horizon claimable balance predicate against the current time.
+ *
+ * Horizon predicates can be:
+ *   - null / { unconditional: true }   → always eligible
+ *   - { not: { unconditional: true } } → never eligible (treat as expired)
+ *   - { abs_before: "<ISO>" }          → eligible before that time (expired if past)
+ *   - { rel_before: "<seconds>" }      → treated as pending (relative to creation,
+ *                                        which we don't have here without extra fetch)
+ *   - { and: [...] } / { or: [...] }   → compound predicates
+ *
+ * Returns "eligible", "pending", or "expired".
+ *
+ * @param {object|null} predicate - Raw Horizon predicate object
+ * @param {number} nowMs - Current time in milliseconds
+ * @returns {"eligible"|"pending"|"expired"}
+ */
+function evaluateClaimPredicate(predicate, nowMs) {
+  // Null or missing predicate — unconditionally claimable
+  if (!predicate || predicate.unconditional === true) {
+    return "eligible";
+  }
+
+  // { not: { unconditional: true } } — permanently unclaimable
+  if (
+    predicate.not &&
+    predicate.not.unconditional === true
+  ) {
+    return "expired";
+  }
+
+  // Absolute time-lock: claimable only before this timestamp
+  if (predicate.abs_before) {
+    const deadline = new Date(predicate.abs_before).getTime();
+    if (Number.isFinite(deadline)) {
+      return nowMs < deadline ? "eligible" : "expired";
+    }
+  }
+
+  // Absolute time-lock as epoch seconds (abs_before_epoch)
+  if (predicate.abs_before_epoch != null) {
+    const deadline = Number(predicate.abs_before_epoch) * 1000;
+    if (Number.isFinite(deadline)) {
+      return nowMs < deadline ? "eligible" : "expired";
+    }
+  }
+
+  // Relative time-lock — requires creation time to evaluate; treat as pending
+  if (predicate.rel_before != null) {
+    return "pending";
+  }
+
+  // Compound AND — all sub-predicates must be eligible
+  if (Array.isArray(predicate.and)) {
+    const results = predicate.and.map((p) => evaluateClaimPredicate(p, nowMs));
+    if (results.every((r) => r === "eligible")) return "eligible";
+    if (results.some((r) => r === "expired")) return "expired";
+    return "pending";
+  }
+
+  // Compound OR — at least one sub-predicate must be eligible
+  if (Array.isArray(predicate.or)) {
+    const results = predicate.or.map((p) => evaluateClaimPredicate(p, nowMs));
+    if (results.some((r) => r === "eligible")) return "eligible";
+    if (results.every((r) => r === "expired")) return "expired";
+    return "pending";
+  }
+
+  // Unknown predicate shape — treat as pending (conservative)
+  return "pending";
+}
+
+/**
  * GET /account/:id/claimable-balances
  * Returns claimable balances for an account, categorized by claimability.
  *
@@ -2445,6 +2625,138 @@ router.get("/:id/asset-exposure", async (req, res, next) => {
       accountId: id,
       totalValueXLM: totalValueXLM.toFixed(7),
       exposure,
+      breakdown,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/asset-diversity
+ *
+ * Computes the Herfindahl-Hirschman Index (HHI) for the account's portfolio
+ * based on DEX order-book prices converted to XLM.
+ *
+ * HHI = Σ (portfolioPercent_i)²  where percent is on a 0–100 scale.
+ *   - HHI = 10000  → 100% in one asset (fully concentrated)
+ *   - HHI ≤ 1500   → well diversified
+ *   - 1500 < HHI ≤ 2500 → moderately diversified
+ *   - HHI > 2500   → concentrated
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId:      string,
+ *       hhi:            number,   // integer 0–10000
+ *       diversityLevel: "diversified" | "moderate" | "concentrated",
+ *       breakdown: [
+ *         {
+ *           asset:            { code, issuer, type },
+ *           balance:          string,
+ *           valueInXLM:       string | null,
+ *           portfolioPercent: number | null   // 0–100 (two decimal places)
+ *         }
+ *       ]
+ *     }
+ *   }
+ *
+ * Returns 404 when the account does not exist.
+ *
+ * @example
+ *   GET /account/GABC.../asset-diversity
+ */
+router.get("/:id/asset-diversity", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Gather all balances (native XLM + non-native assets)
+    const allBalances = (account.balances || []).filter(
+      (b) => isNativeAsset(b) || isNonNativeAsset(b)
+    );
+
+    // Price each asset in XLM via the DEX order book
+    const priced = await Promise.all(
+      allBalances.map(async (b) => {
+        const native = isNativeAsset(b);
+        const assetCode = native ? "XLM" : b.asset_code;
+        const assetIssuer = native ? null : b.asset_issuer;
+        const assetType = b.asset_type;
+        const balance = parseFloat(b.balance || "0");
+
+        let priceInXLM = native ? 1 : null;
+
+        if (!native) {
+          try {
+            const asset = new Asset(assetCode, assetIssuer);
+            const ob = await server
+              .orderbook(asset, Asset.native())
+              .limit(1)
+              .call();
+            const bids = ob.bids || [];
+            const asks = ob.asks || [];
+            const bid = bids.length ? parseFloat(bids[0].price) : null;
+            const ask = asks.length ? parseFloat(asks[0].price) : null;
+            if (bid !== null && ask !== null) priceInXLM = (bid + ask) / 2;
+            else if (bid !== null) priceInXLM = bid;
+            else if (ask !== null) priceInXLM = ask;
+          } catch (_) {
+            // No order book available — asset remains unpriced
+          }
+        }
+
+        const valueInXLM = priceInXLM !== null ? balance * priceInXLM : null;
+
+        return {
+          asset: normalizeAsset(assetCode, assetIssuer, assetType),
+          balance: toSevenDecimalString(balance),
+          valueInXLM,
+          _raw: valueInXLM,
+        };
+      })
+    );
+
+    // Compute total portfolio value in XLM (priced assets only)
+    const totalValueXLM = priced.reduce(
+      (sum, entry) => sum + (entry._raw !== null ? entry._raw : 0),
+      0
+    );
+
+    // Assign portfolio percentages and compute HHI
+    let hhi = 0;
+    const breakdown = priced.map((entry) => {
+      let portfolioPercent = null;
+      if (entry._raw !== null && totalValueXLM > 0) {
+        portfolioPercent = Number(
+          ((entry._raw / totalValueXLM) * 100).toFixed(2)
+        );
+        hhi += portfolioPercent * portfolioPercent;
+      }
+      return {
+        asset: entry.asset,
+        balance: entry.balance,
+        valueInXLM:
+          entry._raw !== null ? toSevenDecimalString(entry._raw) : null,
+        portfolioPercent,
+      };
+    });
+
+    // Round HHI to nearest integer (consistent with standard HHI reporting)
+    hhi = Math.round(hhi);
+
+    let diversityLevel;
+    if (hhi > 2500) diversityLevel = "concentrated";
+    else if (hhi > 1500) diversityLevel = "moderate";
+    else diversityLevel = "diversified";
+
+    return success(res, {
+      accountId: id,
+      hhi,
+      diversityLevel,
       breakdown,
     });
   } catch (err) {
@@ -3323,6 +3635,112 @@ router.get("/:id/age", async (req, res, next) => {
         createdAt: creation.timestamp,
       }),
     );
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/transaction-velocity
+ *
+ * Returns transaction counts per hour for the last 24 hours, the peak hour,
+ * and a velocityScore (0–100) indicating how unusual the current rate is
+ * relative to the account's historical average.
+ *
+ * Response shape:
+ *   {
+ *     accountId,
+ *     hourlyBreakdown: [{ hour, timestamp, count }],  // 24 entries, oldest first
+ *     peakHour,        // ISO timestamp of the busiest hour, or null when inactive
+ *     peakCount,
+ *     averagePerHour,
+ *     velocityScore    // 0–100, 0 for inactive accounts
+ *   }
+ *
+ * @example
+ * GET /account/GABC.../transaction-velocity
+ */
+router.get("/:id/transaction-velocity", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const HOUR_MS = 60 * 60 * 1000;
+    const WINDOW_HOURS = 24;
+
+    // Align the window to the start of the current hour so buckets are stable.
+    const now = Date.now();
+    const currentHourStart = Math.floor(now / HOUR_MS) * HOUR_MS;
+    const windowStart = currentHourStart - (WINDOW_HOURS - 1) * HOUR_MS;
+
+    const hourlyBreakdown = [];
+    for (let i = 0; i < WINDOW_HOURS; i++) {
+      const bucketStart = windowStart + i * HOUR_MS;
+      hourlyBreakdown.push({
+        hour: new Date(bucketStart).toISOString(),
+        timestamp: new Date(bucketStart).toISOString(),
+        count: 0,
+      });
+    }
+
+    const txResponse = await server
+      .transactions()
+      .forAccount(id)
+      .order("desc")
+      .limit(200)
+      .call();
+    const records = txResponse.records || [];
+
+    let totalInWindow = 0;
+    let oldestSeen = null;
+    for (const tx of records) {
+      const createdAt = new Date(tx.created_at).getTime();
+      if (!Number.isFinite(createdAt)) continue;
+      if (oldestSeen === null || createdAt < oldestSeen) oldestSeen = createdAt;
+      if (createdAt < windowStart || createdAt > now) continue;
+      const bucketIndex = Math.floor((createdAt - windowStart) / HOUR_MS);
+      if (bucketIndex < 0 || bucketIndex >= WINDOW_HOURS) continue;
+      hourlyBreakdown[bucketIndex].count += 1;
+      totalInWindow += 1;
+    }
+
+    let peakHour = null;
+    let peakCount = 0;
+    for (const bucket of hourlyBreakdown) {
+      if (bucket.count > peakCount) {
+        peakCount = bucket.count;
+        peakHour = bucket.hour;
+      }
+    }
+
+    const averagePerHour = totalInWindow / WINDOW_HOURS;
+
+    // Historical average hourly rate: spread the fetched transactions over the
+    // span from the oldest fetched record to now. When the account has no
+    // activity at all, the velocity score is 0.
+    let velocityScore = 0;
+    if (totalInWindow > 0 && oldestSeen !== null) {
+      const spanHours = Math.max(1, (now - oldestSeen) / HOUR_MS);
+      const historicalAveragePerHour = records.length / spanHours;
+      const ratio =
+        historicalAveragePerHour > 0
+          ? averagePerHour / historicalAveragePerHour
+          : 0;
+      // A ratio of 1 (current rate matches history) maps to 50; higher ratios
+      // push the score toward 100, lower ratios toward 0.
+      velocityScore = Math.round(Math.max(0, Math.min(100, ratio * 50)));
+    }
+
+    return success(res, {
+      accountId: id,
+      hourlyBreakdown,
+      peakHour,
+      peakCount,
+      averagePerHour,
+      velocityScore,
+    });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -6382,7 +6800,6 @@ const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // An account holds at most 1,000 subentries, so five full pages always cover
 // every open offer.
 const OFFERS_SUMMARY_MAX_PAGES = 5;
-const STROOPS_PER_UNIT = 10_000_000n;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
@@ -7374,6 +7791,210 @@ router.get("/:id/fee-spending", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /account/:id/self-payment-detection
+ *
+ * Analyses recent payment history and flags:
+ *   - "direct_self"   : sender and recipient share at least one signing key
+ *   - "circular_chain": a payment chain that returns value to the originating
+ *                       account within 10 hops
+ *
+ * Response:
+ *   { success: true, data: { accountId, selfPaymentsDetected, patterns: [{ type, txHash, amount, asset, timestamp }] } }
+ */
+router.get("/:id/self-payment-detection", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Verify account exists and get its signers
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+    const accountSigners = new Set((account.signers || []).map((s) => s.key));
+
+    // Fetch recent payments (up to 200)
+    const paymentsResponse = await withHorizonTiming(req, () =>
+      server.payments().forAccount(id).limit(200).order("desc").call()
+    );
+    const payments = paymentsResponse.records || [];
+
+    const patterns = [];
+
+    // Build a map of visited accounts for circular chain detection
+    for (const op of payments) {
+      if (op.transaction_successful === false) continue;
+      if (op.type !== "payment" && op.type !== "path_payment_strict_send" && op.type !== "path_payment_strict_receive") continue;
+
+      const from = op.from || op.funder;
+      const to = op.to || op.account;
+      if (!from || !to) continue;
+
+      const assetType = op.asset_type || "native";
+      const asset = isNativeAsset({ type: assetType })
+        ? { code: "XLM", issuer: null, type: "native" }
+        : { code: op.asset_code || null, issuer: op.asset_issuer || null, type: assetType };
+      const amount = op.amount || op.starting_balance || "0";
+
+      // Direct self-payment: sender and recipient share signing keys
+      if (from !== to) {
+        try {
+          const counterparty = from === id ? to : from;
+          const counterpartyAccount = await server.loadAccount(counterparty);
+          const counterpartySigners = new Set((counterpartyAccount.signers || []).map((s) => s.key));
+          const sharedKeys = [...accountSigners].filter((k) => counterpartySigners.has(k));
+          if (sharedKeys.length > 0) {
+            patterns.push({
+              type: "direct_self",
+              txHash: op.transaction_hash,
+              amount,
+              asset,
+              timestamp: op.created_at,
+            });
+            continue;
+          }
+        } catch (_) {
+          // counterparty not found or unreachable — skip
+        }
+      }
+
+      // Direct self-payment: sender === recipient
+      if (from === id && to === id) {
+        patterns.push({
+          type: "direct_self",
+          txHash: op.transaction_hash,
+          amount,
+          asset,
+          timestamp: op.created_at,
+        });
+        continue;
+      }
+
+      // Circular chain detection: trace payment path up to 10 hops
+      if (from === id) {
+        // Walk the chain: id → to → ... → id?
+        const visited = new Set([id]);
+        let current = to;
+        let hops = 0;
+        let isCircular = false;
+        while (hops < 10 && current && !visited.has(current)) {
+          visited.add(current);
+          hops++;
+          // Find an outbound payment from `current` to another account in our payments list
+          const next = payments.find(
+            (p) =>
+              p.transaction_successful !== false &&
+              (p.from === current || p.funder === current) &&
+              p.transaction_hash !== op.transaction_hash
+          );
+          if (!next) break;
+          const nextTo = next.to || next.account;
+          if (nextTo === id) {
+            isCircular = true;
+            break;
+          }
+          current = nextTo;
+        }
+        if (isCircular) {
+          patterns.push({
+            type: "circular_chain",
+            txHash: op.transaction_hash,
+            amount,
+            asset,
+            timestamp: op.created_at,
+          });
+        }
+      }
+    }
+
+    return success(res, {
+      accountId: id,
+      selfPaymentsDetected: patterns.length > 0,
+      patterns,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/operation-type-breakdown
+ *
+ * Returns a breakdown of all operations by type with count and percentage of total.
+ * Sorted by count descending.
+ *
+ * Query params:
+ *   - days (integer, 1–90, default: 30) — how many days of history to analyse
+ *
+ * Response:
+ *   { success: true, data: { accountId, totalOperations, breakdown: [{ type, count, percent }] } }
+ */
+router.get("/:id/operation-type-breakdown", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Validate ?days= param
+    const rawDays = req.query.days;
+    let days = 30;
+    if (rawDays !== undefined) {
+      const parsed = Number(rawDays);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 90) {
+        const err = new Error("Query parameter 'days': must be an integer between 1 and 90.");
+        err.isValidation = true;
+        err.status = 400;
+        err.field = "days";
+        err.receivedValue = String(rawDays);
+        err.expectedFormat = "1–90";
+        throw err;
+      }
+      days = parsed;
+    }
+
+    // Verify account exists
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const typeCounts = new Map();
+    let cursor;
+    const MAX_PAGES = 10;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      let query = server.operations().forAccount(id).limit(200).order("desc");
+      if (cursor) query = query.cursor(cursor);
+      const response = await withHorizonTiming(req, () => query.call());
+      const records = response.records || [];
+      let reachedEnd = false;
+      for (const op of records) {
+        cursor = op.paging_token;
+        if (new Date(op.created_at) < since) {
+          reachedEnd = true;
+          break;
+        }
+        const type = op.type || "unknown";
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      }
+      if (reachedEnd || records.length < 200) break;
+    }
+
+    const totalOperations = [...typeCounts.values()].reduce((s, c) => s + c, 0);
+
+    const breakdown = [...typeCounts.entries()]
+      .map(([type, count]) => ({
+        type,
+        count,
+        percent: totalOperations > 0 ? parseFloat(((count / totalOperations) * 100).toFixed(2)) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return success(res, {
+      accountId: id,
+      totalOperations,
+      breakdown,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 module.exports = router;
 
 // SHELL_SYNC_MARKER
@@ -7612,6 +8233,18 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
       });
     }
 
+    const cacheKey = `balance-velocity:${id}`;
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+
+    // Check cache first (unless fresh=true)
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
     // Check if account exists and get current balances
     let account;
     try {
@@ -7730,6 +8363,10 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
       accountId: id,
       balanceChanges: result,
     };
+
+    // Cache the result
+    cacheService.set(cacheKey, data, cacheTTL.balanceVelocity);
+    res.set("X-Cache", "MISS");
 
     return success(res, data);
   } catch (err) {

@@ -58,6 +58,7 @@ describe("POST /utils/validate-memo", () => {
       type: "text",
       value: "Stellar memo",
       byteLength: 12,
+      error: null,
       errors: [],
     });
 
@@ -78,6 +79,7 @@ describe("POST /utils/validate-memo", () => {
       type: "id",
       value: "18446744073709551615",
       byteLength: 8,
+      error: null,
       errors: [],
     });
 
@@ -97,6 +99,7 @@ describe("POST /utils/validate-memo", () => {
       type,
       value: "ab".repeat(32),
       byteLength: 32,
+      error: null,
       errors: [],
     });
 
