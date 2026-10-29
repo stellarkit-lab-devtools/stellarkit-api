@@ -45,6 +45,7 @@ This project is ideal for:
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
 - [SEP Integration Guide](docs/sep-integration.md) - Use StellarKit discovery, account, asset, fee, and monitoring endpoints in SEP-10, SEP-24, and SEP-31 workflows
+- [Anchor Integration Guide](docs/anchor-integration.md) - Complete anchor discovery and integration workflow: discover anchors via `/network/anchor-directory`, fetch anchor info, check SEP support, and initiate deposit/withdrawal flows
 - [Soroban Integration Guide](docs/soroban-integration.md) - End-to-end workflow for querying contract state, monitoring events, checking expiry, and simulating invocations
 - [Soroban Contract Monitoring Guide](docs/soroban-monitoring.md) - Monitor deployed contracts: expiry, storage changes, upgrades, caller activity and failure rates, and network Soroban stats, with a complete alerting dashboard example
 - [Code Patterns Guide](docs/code-patterns.md) - Required patterns for new endpoints (Horizon instance, response envelope, amount formatting, caching, error handling), with wrong and correct examples
@@ -72,6 +73,7 @@ This project is ideal for:
 - [Error Codes](docs/error-codes.md) - HTTP status code reference with descriptions, scenarios, and sample responses
 - [Error Recovery Guide](docs/error-recovery.md) - Programmatic recovery patterns for HorizonUnavailable, RateLimitExceeded, AccountNotFound, OrderBookEmpty, and InvalidCursor errors
 - [Account Endpoints Guide](docs/account-endpoints.md) - Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint
+- [Claimable Balances Guide](docs/claimable-balances-guide.md) - All claimable balance endpoints with curl examples, sample responses, eligible vs pending explanation, and a worked claim example
 - [Transaction Endpoints Guide](docs/transaction-endpoints.md) - Transaction and operation endpoints for building explorers and submission tools, with curl examples and usage patterns
 - [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
 - [Rate Limiting Strategies Guide](docs/rate-limiting-strategies.md) - Practical guide for high-volume apps: request batching, caching, `?fresh=true` timing, endpoint polling priority, and a complete exponential backoff implementation

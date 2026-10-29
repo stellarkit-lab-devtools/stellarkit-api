@@ -1,6 +1,6 @@
 # DEX Endpoints Guide
 
-The Stellar DEX (Decentralized Exchange) is built directly into the Stellar ledger. Every asset pair can be traded without a central operator — participants post offers on-chain and the protocol matches them. StellarKit exposes six endpoints that cover the full lifecycle of DEX analysis: pricing, order-book structure, market pressure, arbitrage detection, top markets by volume, and historical price data.
+The Stellar DEX (Decentralized Exchange) is built directly into the Stellar ledger. Every asset pair can be traded without a central operator — participants post offers on-chain and the protocol matches them. StellarKit exposes seven endpoints that cover the full lifecycle of DEX analysis: pricing, price impact, order-book structure, market pressure, arbitrage detection, top markets by volume, and historical price data.
 
 ---
 
@@ -23,6 +23,7 @@ Asset codes are case-insensitive (`xlm:native` and `XLM:native` both work).
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | GET | `/dex/price/:sellAsset/:buyAsset` | Effective exchange rate via best DEX path |
+| GET | `/dex/price-impact/:sellAsset/:buyAsset` | Estimated price impact of a trade against the order book |
 | GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread and order-book depth summary |
 | GET | `/dex/depth/:sellAsset/:buyAsset` | Full order-book depth analysis |
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection |
@@ -70,7 +71,63 @@ curl "http://localhost:3000/dex/price/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4R
 
 ---
 
-## 2. `GET /dex/spread/:sellAsset/:buyAsset`
+## 2. `GET /dex/price-impact/:sellAsset/:buyAsset`
+
+Estimates how much a trade will move the market by walking the current order book for the pair. It simulates filling the requested `amount` of `sellAsset` against the available asks, then compares the resulting average fill price against the current market price (the best ask). The difference, expressed as a percentage, is the price impact.
+
+**When to use:** Before executing a large trade, check whether the order book is deep enough to absorb it without moving the price significantly. A large trade on a thin book will produce a high `priceImpactPercent`.
+
+**Query params:**
+
+| Param | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `amount` | number | yes | Amount of `sellAsset` to trade, in the sell asset's units |
+
+A missing or non-numeric `amount` returns a `400 ValidationError`.
+
+**curl example:**
+
+```bash
+curl "http://localhost:3000/dex/price-impact/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN?amount=5000"
+```
+
+**Sample response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "pair": "XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    "amount": "5000.0000000",
+    "estimatedFillPrice": "0.1294800",
+    "marketPrice": "0.1291000",
+    "priceImpactPercent": "0.2943",
+    "warning": null
+  }
+}
+```
+
+**Fields:**
+
+| Field | Description |
+| ----- | ----------- |
+| `pair` | The `sellAsset/buyAsset` pair the estimate was computed for |
+| `amount` | The requested sell amount, as a seven-decimal string |
+| `estimatedFillPrice` | Average price per unit obtained by filling `amount` against the book |
+| `marketPrice` | Current market price (best ask) for the pair |
+| `priceImpactPercent` | Percentage difference between `estimatedFillPrice` and `marketPrice` |
+| `warning` | Human-readable warning string when `priceImpactPercent` exceeds 1%, otherwise `null` |
+
+**Warning threshold:** when `priceImpactPercent` is greater than `1`, `warning` contains a human-readable message such as `"Price impact of 2.45% exceeds 1%. Consider splitting your order."`. Below the threshold, `warning` is `null`.
+
+**Error cases:**
+
+- `404 OrderBookEmpty` — no active order book exists for the pair.
+- `400 ValidationError` — `amount` is missing or non-numeric.
+
+---
+
+## 3. `GET /dex/spread/:sellAsset/:buyAsset`
 
 Returns the bid-ask spread for a trading pair. **Spread** is the gap between the highest buy offer (bid) and the lowest sell offer (ask). A narrow spread signals a liquid, competitive market; a wide spread means fewer participants and potentially worse execution.
 
@@ -123,7 +180,7 @@ curl "http://localhost:3000/dex/spread/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4
 
 ---
 
-## 3. `GET /dex/depth/:sellAsset/:buyAsset`
+## 4. `GET /dex/depth/:sellAsset/:buyAsset`
 
 Returns a structural analysis of the order book: total bid and ask counts, cumulative volumes on each side, and the top 5 price levels for each side. Also computes a `depthRating` that summarises how much liquidity the book can absorb.
 
@@ -176,7 +233,7 @@ curl "http://localhost:3000/dex/depth/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4R
 
 ---
 
-## 4. `GET /dex/imbalance/:sellAsset/:buyAsset`
+## 5. `GET /dex/imbalance/:sellAsset/:buyAsset`
 
 Measures buy-versus-sell pressure by comparing the total aggregate volume on the bid side against the ask side. Returns an `imbalanceRatio` (bids ÷ asks) and a human-readable `pressure` signal.
 
@@ -215,7 +272,7 @@ curl "http://localhost:3000/dex/imbalance/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5M
 
 ---
 
-## 5. `GET /dex/arbitrage/:assetCode/:assetIssuer`
+## 6. `GET /dex/arbitrage/:assetCode/:assetIssuer`
 
 Uses Horizon's strict-receive path-finding to discover circular conversion routes that start and end with the same asset. A path is flagged as `isProfitable` when the source amount required is less than the destination amount received — meaning a round-trip swap would yield more of the asset than it started with.
 
@@ -265,7 +322,7 @@ When `pathsFound` is `false`, the paths array is empty and no circular routes cu
 
 ---
 
-## 6. `GET /dex/top-markets`
+## 7. `GET /dex/top-markets`
 
 Returns the most active Stellar DEX trading pairs, ranked by base-asset volume derived from the most recent 200 trades. Each entry is enriched with a live bid-ask spread from the current order book.
 
@@ -324,7 +381,7 @@ curl "http://localhost:3000/dex/top-markets?limit=5"
 
 ---
 
-## 7. `GET /dex/volume-leaders`
+## 8. `GET /dex/volume-leaders`
 
 Returns the most actively traded assets on the Stellar DEX, ranked by 24-hour trading volume against XLM. Volume is aggregated from the most recent 200 trades, keeping only XLM-paired trades from the last 24 hours. Responses are cached for 5 minutes (configurable via `CACHE_TTL_VOLUME_LEADERS_MS`).
 
@@ -399,6 +456,7 @@ curl "http://localhost:3000/dex/volume-leaders?limit=5"
 | Goal | Endpoint |
 | ---- | -------- |
 | Know the current exchange rate for a trade | `/dex/price` |
+| Estimate how much a trade will move the price | `/dex/price-impact` |
 | Check how tight the market is right now | `/dex/spread` |
 | Assess whether the book can absorb a large order | `/dex/depth` |
 | Gauge market sentiment (buyers vs sellers) | `/dex/imbalance` |
@@ -419,6 +477,18 @@ All DEX endpoints return a consistent error envelope.
   "error": {
     "type": "ValidationError",
     "message": "Invalid asset format: \"XLMNATIVE\". Expected format: CODE:ISSUER"
+  }
+}
+```
+
+**400 — Missing or non-numeric amount (`/dex/price-impact`):**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "ValidationError",
+    "message": "Query parameter \"amount\" is required and must be a number."
   }
 }
 ```

@@ -136,4 +136,111 @@ describe("GET /account/:id/historical-balances", () => {
     expect(res.body.success).toBe(false);
     expect(server.payments).not.toHaveBeenCalled();
   });
+
+  // ── Issue #1048 required cases ───────────────────────────────────────────
+
+  it("shows balance growing over time for 3 inbound payments at different timestamps", async () => {
+    // Current balance: 30 XLM (sum of the 3 inbound payments)
+    mockAccount("30.0000000");
+    // Three inbound payments spaced apart, returned newest-first as Horizon does
+    mockPayments([
+      payment({ daysAgo: 1,  amount: "10.0000000", direction: "in" }),
+      payment({ daysAgo: 40, amount: "10.0000000", direction: "in" }),
+      payment({ daysAgo: 70, amount: "10.0000000", direction: "in" }),
+    ]);
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/historical-balances?resolution=30d`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const { snapshots } = res.body.data;
+    expect(snapshots.length).toBeGreaterThan(1);
+
+    // Walking forward in time the balance should be non-decreasing
+    // (each inbound payment adds to the balance)
+    for (let i = 1; i < snapshots.length; i++) {
+      expect(parseFloat(snapshots[i].balance)).toBeGreaterThanOrEqual(
+        parseFloat(snapshots[i - 1].balance),
+      );
+    }
+
+    // The most-recent snapshot should equal the current balance
+    const last = snapshots[snapshots.length - 1];
+    expect(parseFloat(last.balance)).toBeCloseTo(30, 4);
+  });
+
+  it("returns balance history for a specific asset when ?asset=USDC:ISSUER is given", async () => {
+    // Current state: account holds 50 USDC, received in one payment 10 days ago
+    jest.spyOn(server, "loadAccount").mockResolvedValue({
+      id: ACCOUNT_ID,
+      balances: [
+        { asset_type: "native", balance: "100.0000000" },
+        {
+          asset_type: "credit_alphanum4",
+          asset_code: "USDC",
+          asset_issuer: ISSUER_ID,
+          balance: "50.0000000",
+        },
+      ],
+    });
+    mockPayments([
+      payment({ daysAgo: 1, amount: "50.0000000", direction: "in", asset: "USDC" }),
+      payment({ daysAgo: 5, amount: "20.0000000", direction: "in" }), // XLM payment — should be ignored
+    ]);
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/historical-balances?resolution=7d&asset=USDC:${ISSUER_ID}`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.asset).toMatchObject({ code: "USDC", issuer: ISSUER_ID });
+
+    // The most recent snapshot should reflect the USDC balance (not XLM)
+    const { snapshots } = res.body.data;
+    expect(snapshots.length).toBeGreaterThan(0);
+    const latest = snapshots[snapshots.length - 1];
+    expect(parseFloat(latest.balance)).toBeCloseTo(50, 4);
+
+    // Older snapshots (before the USDC payment) should show ~0
+    const oldest = snapshots[0];
+    expect(parseFloat(oldest.balance)).toBeCloseTo(0, 4);
+  });
+
+  it("returns snapshots all showing zero balance for an account with no payment history", async () => {
+    // Account exists but has never received any payments
+    jest.spyOn(server, "loadAccount").mockResolvedValue({
+      id: ACCOUNT_ID,
+      balances: [{ asset_type: "native", balance: "0.0000000" }],
+    });
+    mockPayments([]); // no records
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/historical-balances?resolution=7d`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const { snapshots } = res.body.data;
+    expect(snapshots.length).toBeGreaterThan(0);
+    for (const snapshot of snapshots) {
+      expect(parseFloat(snapshot.balance)).toBe(0);
+    }
+  });
+
+  it("returns 404 for a non-existent account", async () => {
+    jest.spyOn(server, "loadAccount").mockRejectedValue({ response: { status: 404 } });
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/historical-balances`,
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.type).toBe("AccountNotFound");
+  });
 });

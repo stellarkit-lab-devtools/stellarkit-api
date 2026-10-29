@@ -8,6 +8,8 @@ This guide explains how to use StellarKit alongside:
 - [SEP-24: Hosted Deposit and Withdrawal](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0024.md)
 - [SEP-31: Cross-Border Payments API](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0031.md)
 
+> **See also:** [Anchor Integration Guide](anchor-integration.md) for the end-to-end anchor discovery and deposit/withdrawal workflow, including discovering anchors with `GET /network/anchor-directory`, fetching anchor info, checking SEP support, and initiating a deposit flow.
+
 ## Responsibilities and boundaries
 
 A production integration has three distinct components:

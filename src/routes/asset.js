@@ -835,31 +835,62 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
 
 /**
  * Resolution map for the holder-growth time series.
- *
- * Each resolution defines a look-back window (`windowMs`) and a bucket size
- * (`bucketMs`). Trustline operations are grouped into buckets of `bucketMs`
- * and ordered oldest-first; `holders` is the cumulative net change since the
- * start of the window.
- *
- * - 7d  — 7-day window,   daily buckets   (fine-grained recent growth)
- * - 30d — 30-day window, weekly buckets  (month-over-month growth, default)
- * - 90d — 90-day window, weekly buckets  (quarterly growth trend)
  */
+const HOLDER_GROWTH_RESOLUTIONS = {
+  "7d": { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
+  "30d": { windowMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 7 * 24 * 60 * 60 * 1000 },
+  "90d": { windowMs: 90 * 24 * 60 * 60 * 1000, bucketMs: 7 * 24 * 60 * 60 * 1000 },
+};
+
+function aggregateTrustlineGrowth(operations, windowStartMs, bucketMs) {
+  const buckets = new Map();
+
+  for (const op of operations) {
+    const opTime = new Date(op.created_at).getTime();
+    if (!Number.isFinite(opTime) || opTime < windowStartMs) {
+      continue;
+    }
+
+    const bucketStart = Math.floor(opTime / bucketMs) * bucketMs;
+    if (!buckets.has(bucketStart)) {
+      buckets.set(bucketStart, {
+        bucketStart,
+        date: new Date(bucketStart).toISOString(),
+        change: 0,
+        added: 0,
+        removed: 0,
+      });
+    }
+
+    const bucket = buckets.get(bucketStart);
+    if (parseFloat(op.limit) > 0) {
+      bucket.change += 1;
+      bucket.added += 1;
+    } else {
+      bucket.change -= 1;
+      bucket.removed += 1;
+    }
+  }
+
+  const sorted = Array.from(buckets.values()).sort(
+    (a, b) => a.bucketStart - b.bucketStart,
+  );
+
+  let cumulativeHolders = 0;
+  return sorted.map((bucket) => {
+    cumulativeHolders += bucket.change;
+    return {
+      date: bucket.date,
+      holders: cumulativeHolders,
+      change: bucket.change,
+      added: bucket.added,
+      removed: bucket.removed,
+    };
+  });
+}
+
 /**
  * GET /asset/:code/:issuer/holder-growth
- *
- * Returns a holder-growth time series built from trustline (change_trust)
- * operation history. Each entry covers one time bucket (sized by the
- * resolution) and reports the net change in holders within that bucket plus
- * the cumulative holder count since the start of the window.
- *
- * @param {string} code - Asset code, e.g. USDC
- * @param {string} issuer - Asset issuer account ID (G...)
- * @param {string} [resolution=30d] - Time resolution: 7d, 30d, or 90d.
- * @param {string} [fresh] - Bypass cache when "true".
- * @returns {Object} `{ growth: Array, asset: Object, resolution: string }`
- * @example
- * curl "http://localhost:3000/asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/holder-growth?resolution=30d"
  */
 router.get("/:code/:issuer/holder-growth", async (req, res, next) => {
   try {
@@ -1263,13 +1294,11 @@ const validResolutions = ["7d", "30d", "90d"];
     const asset = assetsResponse.records[0];
     const currentSupply = asset.amount;
 
-    // Calculate time window
     const now = Date.now();
     const daysMap = { "7d": 7, "30d": 30, "90d": 90 };
     const days = daysMap[resolution];
     const startTime = now - (days * 24 * 60 * 60 * 1000);
 
-    // Fetch effects related to issuance (payments from issuer, trust line changes)
     const effectsResponse = await server
       .effects()
       .forAccount(issuer)

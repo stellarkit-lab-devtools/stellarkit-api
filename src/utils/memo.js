@@ -121,8 +121,8 @@ function decodeMemo(type, value) {
  *
  * @param {string} type - one of: none, text, id, hash, return
  * @param {string} [value] - the memo value to validate
- * @returns {{valid:boolean, type:string, value:string|null, byteLength:number|null, error:string|null}}
- * @throws {Error} when no type is supplied (flagged with `isValidation`)
+ * @returns {{valid:boolean, type:string, value:string|null, byteLength:number, error:string|null, errors:string[]}}
+ * @throws {Error} when no type is supplied (flagged with `isValidation`, statusCode 400)
  */
 function validateMemo(type, value) {
   if (type === undefined || type === null || String(type).trim() === "") {
@@ -133,14 +133,14 @@ function validateMemo(type, value) {
   }
 
   const t = String(type).toLowerCase();
+  const errors = [];
+  let byteLength = 0;
 
   if (!VALID_MEMO_TYPES.includes(t)) {
-    return invalidMemo(t, value, `Unsupported memo type: ${type}`);
-  }
-
-  if (t === "none") {
+    errors.push(`Unsupported memo type: ${type}`);
+  } else if (t === "none") {
     if (value !== undefined && value !== null && value !== "") {
-      return invalidMemo(t, value, "A 'none' memo must not carry a value");
+      errors.push("A 'none' memo must not carry a value");
     }
     return { valid: true, type: "none", value: null, byteLength: 0, error: null };
   }

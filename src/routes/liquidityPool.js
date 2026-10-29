@@ -240,25 +240,20 @@ router.get("/:id/trades", async (req, res, next) => {
 
     const normalizedRecords = filteredRecords.map(normalizeLiquidityPoolTrade);
 
+    const nextCursor = filteredRecords.length
+      ? filteredRecords[filteredRecords.length - 1].paging_token || null
+      : null;
+
     const data = {
       trades: normalizedRecords,
+      total: normalizedRecords.length,
+      limit,
+      cursor: nextCursor,
     };
 
-    const metadata = {
-      meta: {
-        count: normalizedRecords.length,
-        limit,
-        order,
-        nextCursor: filteredRecords.length
-          ? filteredRecords[filteredRecords.length - 1].paging_token || null
-          : null,
-        hasMore: filteredRecords.length > 0 && filteredRecords.length === limit,
-      },
-    };
-
-    cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.poolTrades);
+    cacheService.set(cacheKey, data, cacheTTL.poolTrades);
     res.set("X-Cache", "MISS");
-    return success(res, data, metadata);
+    return success(res, data);
   } catch (err) {
     next(err);
   }
