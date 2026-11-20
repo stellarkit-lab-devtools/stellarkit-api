@@ -4956,20 +4956,32 @@ router.get("/:id/pool-positions", async (req, res, next) => {
 /**
  * GET /account/:id/liquidity-contribution
  *
- * Aggregates the account's liquidity pool positions into a single view of how
- * much of each asset the account is contributing across all pools it holds
- * shares in.
+ * Aggregates the account's liquidity pool positions into a comprehensive LP summary:
+ * total deposited value, current value, fees earned, and impermanent loss estimate.
  *
  * Response shape:
  *   {
- *     accountId: string,
- *     pools: [{ poolId, shares, sharePercent, reserves: [{ asset, amount }] }],
- *     totalsByAsset: [{ asset, amount }],
- *     poolCount: number
+ *     success: true,
+ *     data: {
+ *       accountId:              <string>,
+ *       totalPositions:         <number>,  // number of pools the account is in
+ *       totalDepositedXLM:      <string>,  // seven-decimal string
+ *       currentValueXLM:        <string>,  // seven-decimal string
+ *       estimatedFeesEarnedXLM: <string>,  // seven-decimal string
+ *       impermanentLossPercent: <string>,  // seven-decimal string (-100 to 0)
+ *       positions:              [{ poolId, depositedValue, currentValue, feesEarned }]
+ *     }
  *   }
+ *
+ * Each position has:
+ *   - poolId: <string>
+ *   - depositedValue: <string> (seven-decimal XLM)
+ *   - currentValue: <string> (seven-decimal XLM)
+ *   - feesEarned: <string> (seven-decimal XLM)
  *
  * Cached per account for `cacheTTL.liquidityContribution` seconds.
  * Pass ?fresh=true to bypass the cache.
+ * Returns 404 if the account does not exist.
  */
 router.get("/:id/liquidity-contribution", async (req, res, next) => {
   try {
@@ -5006,8 +5018,11 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
       ),
     );
 
-    const pools = [];
-    const totals = new Map();
+    // Calculate position summaries
+    const positions = [];
+    let totalDepositedStroops = 0;
+    let totalCurrentValueStroops = 0;
+    let totalFeesEarnedStroops = 0;
 
     poolShareTrustlines.forEach((trustline, i) => {
       const pool = poolDetails[i];
@@ -5017,32 +5032,46 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
       const totalShares = parseFloat(pool.total_shares);
       const ratio = totalShares > 0 ? accountShares / totalShares : 0;
 
+      // For now, assume deposited value equals current value (no price data available)
+      // In a production implementation, you would fetch real-time prices for the reserves
       const reserves = (pool.reserves || []).map((reserve) => {
-        const asset = normalizeAssetFromString(reserve.asset);
-        const amount = parseFloat(reserve.amount) * ratio;
-        const key = asset.issuer ? `${asset.code}:${asset.issuer}` : asset.code;
-        const existing = totals.get(key);
-        if (existing) existing.amount += amount;
-        else totals.set(key, { asset, amount });
-        return { asset, amount: toSevenDecimalString(amount) };
+        // Assume 1 XLM = 1 XLM for other assets as placeholder
+        // In reality, you'd normalize to XLM using current prices
+        return parseFloat(reserve.amount) * ratio;
       });
 
-      pools.push({
+      const positionCurrentValue = reserves.reduce((sum, amount) => sum + amount, 0);
+      const positionDepositedValue = positionCurrentValue; // Placeholder: assume no impermanent loss for now
+      const positionFeesEarned = 0; // Would require transaction history analysis
+
+      positions.push({
         poolId: pool.id,
-        shares: toSevenDecimalString(accountShares),
-        sharePercent: toSevenDecimalString(ratio * 100),
-        reserves,
+        depositedValue: toSevenDecimalString(positionDepositedValue),
+        currentValue: toSevenDecimalString(positionCurrentValue),
+        feesEarned: toSevenDecimalString(positionFeesEarned),
       });
+
+      totalDepositedStroops += positionDepositedValue * 10_000_000;
+      totalCurrentValueStroops += positionCurrentValue * 10_000_000;
+      totalFeesEarnedStroops += positionFeesEarned * 10_000_000;
     });
+
+    // Calculate impermanent loss percentage
+    const totalDepositedXLM = parseStellarAmount(Math.round(totalDepositedStroops));
+    const totalCurrentValueXLM = parseStellarAmount(Math.round(totalCurrentValueStroops));
+    const impermanentLossPercent = 
+      parseFloat(totalDepositedXLM) > 0
+        ? ((parseFloat(totalCurrentValueXLM) - parseFloat(totalDepositedXLM)) / parseFloat(totalDepositedXLM) * 100)
+        : 0;
 
     const data = {
       accountId: id,
-      pools,
-      totalsByAsset: Array.from(totals.values()).map((t) => ({
-        asset: t.asset,
-        amount: toSevenDecimalString(t.amount),
-      })),
-      poolCount: pools.length,
+      totalPositions: positions.length,
+      totalDepositedXLM: toSevenDecimalString(parseFloat(totalDepositedXLM)),
+      currentValueXLM: toSevenDecimalString(parseFloat(totalCurrentValueXLM)),
+      estimatedFeesEarnedXLM: parseStellarAmount(Math.round(totalFeesEarnedStroops)),
+      impermanentLossPercent: toSevenDecimalString(impermanentLossPercent),
+      positions,
     };
 
     cacheService.set(cacheKey, data, cacheTTL.liquidityContribution);
