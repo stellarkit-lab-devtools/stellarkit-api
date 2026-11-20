@@ -164,6 +164,12 @@ const cacheTTL = {
     process.env.CACHE_TTL_CONTRACT_FUNCTIONS_MS,
     60000
   ),
+
+  /** /soroban/transactions/:hash — transaction results are immutable once finalized */
+  sorobanTransaction: msToSeconds(
+    process.env.CACHE_TTL_SOROBAN_TX_MS,
+    30000
+  ),
 };
 
 module.exports = cacheTTL;
