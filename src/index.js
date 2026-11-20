@@ -1,3 +1,25 @@
+// Registered route files (alphabetical order):
+//   account.counterparties  → /account/:id/counterparties
+//   account                 → /account/:id/*
+//   accounts                → /accounts/*
+//   asset                   → /asset/*
+//   cacheStats              → /cache/*
+//   claimableBalances       → /claimable-balances/*
+//   dex                     → /dex/*
+//   feeEstimate             → /fee-estimate/*
+//   liquidityPool           → /liquidity-pools/*
+//   metrics                 → /metrics
+//   network                 → /network/*
+//   networkStatus           → /network-status
+//   soroban                 → /soroban/*
+//   stellarToml             → /stellar-toml/*
+//   stream                  → /stream/*
+//   transaction.effects     → /transaction/:hash/effects
+//   transactions            → /transactions/*
+//   utils                   → /utils/*
+//   webhooks                → /webhooks/*
+//   assetsOverview          → /assets-overview
+
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
@@ -390,6 +412,9 @@ app.get("/", (req, res) => {
         { method: "POST", path: "/account/:id/multisig-plan", description: "Plan multisig transactions by calculating signer combinations for each threshold" },
         { method: "POST", path: "/accounts/multisig-info", description: "Batch multisig configuration lookup for multiple accounts" },
         { method: "GET", path: "/account/:id/pool-positions", description: "Calculate liquidity pool positions and share values" },
+        { method: "GET", path: "/account/:id/liquidity-contribution", description: "Aggregate liquidity pool contributions by pool and asset" },
+        { method: "GET", path: "/account/:id/pending-effects", description: "Submitted operations that have not yet produced confirmed effects" },
+        { method: "GET", path: "/account/:id/historical-balances", description: "Balance snapshots over time reconstructed from payment and trade history" },
         { method: "GET", path: "/account/:id/transactions/search", description: "Search account transactions by memo content" },
         { method: "GET", path: "/account/:id/volume", description: "Total transaction volume by asset over a time period" },
         { method: "GET", path: "/transactions/:id", description: "Transaction history for an account" },
@@ -593,6 +618,21 @@ app.get("/", (req, res) => {
         },
         {
           method: "GET",
+          path: "/account/:id/liquidity-contribution",
+          description: "Aggregate liquidity pool contributions by pool and asset",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/pending-effects",
+          description: "Submitted operations that have not yet produced confirmed effects",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/historical-balances",
+          description: "Balance snapshots over time reconstructed from payment and trade history",
+        },
+        {
+          method: "GET",
           path: "/account/:id/transactions/search",
           description: "Search account transactions by memo content",
         },
@@ -672,6 +712,12 @@ app.get("/", (req, res) => {
         },
         {
           method: "GET",
+          path: "/network/soroban-stats",
+          description:
+            "Share of the last 24h of operations that are Soroban-related, invocation count, and Soroban fee revenue (cached; ?fresh=true bypasses cache)",
+        },
+        {
+          method: "GET",
           path: "/liquidity-pools/:id/trades",
           description: "Trade history for a liquidity pool",
         },
@@ -692,6 +738,24 @@ app.get("/", (req, res) => {
           path: "/dex/top-markets",
           description:
             "Top DEX trading pairs by volume with spread (optional ?limit=, default 10, max 50)",
+        },
+        {
+          method: "GET",
+          path: "/dex/volume-leaders",
+          description:
+            "Top assets by 24h DEX volume against XLM (optional ?limit=, default 10, max 50)",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/payment-counterparty-risk",
+          description:
+            "Risk assessment of an account's top payment counterparties (optional ?limit=, default 10, max 20)",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/offers-summary",
+          description:
+            "Open offer count, amount locked in sell offers and committed in buy offers per asset, and oldest offer age (cached; ?fresh=true bypasses cache)",
         },
         {
           method: "GET",

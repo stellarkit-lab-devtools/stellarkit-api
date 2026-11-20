@@ -46,7 +46,7 @@ describe("response normalization endpoints", () => {
     const res = await request(app).get(ASSET_PATH).expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.meta.count).toBe(1);
+    expect(res.body.meta.total).toBe(1);
     expect(res.body.meta.limit).toBe(10);
     expect(res.body.meta.hasMore).toBe(false);
     expect(res.body.data).toEqual([{ address: "GABC", balance: "10.5000000" }]);
@@ -88,7 +88,7 @@ describe("response normalization endpoints", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].address).toBe("GAHIGH");
-    expect(res.body.meta.count).toBe(1);
+    expect(res.body.meta.total).toBe(1);
     expect(res.get("X-Cache")).toBe("MISS");
   });
 
@@ -118,7 +118,7 @@ describe("response normalization endpoints", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.meta.count).toBe(2);
+    expect(res.body.meta.total).toBe(2);
   });
 
   it("returns all holders when verified param omitted", async () => {
@@ -145,7 +145,7 @@ describe("response normalization endpoints", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(2);
-    expect(res.body.meta.count).toBe(2);
+    expect(res.body.meta.total).toBe(2);
   });
 
   it("returns 400 for invalid ?verified value", async () => {
@@ -193,7 +193,7 @@ describe("response normalization endpoints", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].address).toBe("GAHIGH");
-    expect(res.body.meta.count).toBe(1);
+    expect(res.body.meta.total).toBe(1);
     expect(res.get("X-Cache")).toBe("MISS");
   });
 
@@ -215,7 +215,7 @@ describe("response normalization endpoints", () => {
 
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(0);
-    expect(res.body.meta.count).toBe(0);
+    expect(res.body.meta.total).toBe(0);
   });
 
   it("normalizes pool positions asset fields and decimal strings", async () => {
@@ -298,6 +298,6 @@ describe("response normalization endpoints", () => {
       createdAt: "2024-01-01T00:00:00Z",
       claimants: [{ destination: "GDEST", predicate: { unconditional: true } }],
     });
-    expect(res.body.meta).toMatchObject({ count: 1, limit: 10, hasMore: false });
+    expect(res.body.meta).toMatchObject({ total: 1, limit: 10, hasMore: false });
   });
 });

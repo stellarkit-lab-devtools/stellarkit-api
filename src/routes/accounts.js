@@ -541,7 +541,7 @@ async function fetchTransactionCount(address) {
       cursor = records[records.length - 1].paging_token;
 
       if (records.length < 200) break;
-    } while (true); // eslint-disable-line no-constant-condition
+    } while (true);  
   } catch (err) {
     // Horizon 404 means account does not exist — return zeroed result
     if (err && err.response && err.response.status === 404) {

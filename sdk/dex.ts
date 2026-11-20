@@ -1,3 +1,5 @@
+import type { PaginatedResponse } from "./account";
+
 /** Typed error thrown by DexModule on non-2xx API responses. */
 export class StellarKitError extends Error {
   /** HTTP status code returned by the API. */
@@ -96,6 +98,31 @@ export interface Market {
 }
 
 /**
+ * A single trade record returned by {@link DexModule.getAccountTrades}.
+ *
+ * Mirrors the normalised trade shape returned by `GET /account/:id/trades`,
+ * using the standard {@link Asset} interface for the selling and buying sides.
+ */
+export interface Trade {
+  /** Unique identifier of the trade (also usable as a pagination cursor). */
+  tradeId: string;
+  /** ISO 8601 close time of the ledger in which the trade executed. */
+  ledgerCloseTime: string;
+  /** Asset the account sold in this trade. */
+  selling: Asset;
+  /** Asset the account bought in this trade. */
+  buying: Asset;
+  /** Amount of the `selling` asset exchanged, as a seven-decimal string. */
+  soldAmount: string;
+  /** Amount of the `buying` asset received, as a seven-decimal string. */
+  boughtAmount: string;
+  /** Execution price of the trade as a decimal string. */
+  price: string;
+  /** Identifier of the DEX offer that was filled. */
+  offerId: string;
+}
+
+/**
  * Serialise an asset parameter to the "CODE:ISSUER" URL format.
  *
  * @param asset - Either a "CODE:ISSUER" string or `{ code, issuer }` object.
@@ -143,8 +170,18 @@ export class DexModule {
   }
 
   /** @private Fetch a path and return the `data` field, or throw StellarKitError. */
-  private async _get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, { headers: this.headers });
+  private async _get<T>(
+    path: string,
+    params?: Record<string, string | number | undefined>,
+  ): Promise<T> {
+    const searchParams = new URLSearchParams();
+    Object.entries(params ?? {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) searchParams.set(key, String(value));
+    });
+
+    const query = searchParams.toString();
+    const url = `${this.baseUrl}${path}${query ? `?${query}` : ""}`;
+    const res = await fetch(url, { headers: this.headers });
     const body = await res.json();
     if (!res.ok) {
       throw new StellarKitError(
@@ -254,5 +291,48 @@ export class DexModule {
   async getTopMarkets(options: { limit?: number } = {}): Promise<Market[]> {
     const query = options.limit !== undefined ? `?limit=${options.limit}` : "";
     return this._get<Market[]>(`/dex/top-markets${query}`);
+  }
+
+  /**
+   * Get the trades executed by an account on the Stellar DEX.
+   *
+   * Calls `GET /account/:id/trades` and returns a typed paginated response.
+   * The optional `limit` and `cursor` filters are forwarded as query
+   * parameters only when provided, so cursor-based pagination can be used
+   * to walk the full trade history.
+   *
+   * @param id - Stellar account public key (non-empty string).
+   * @param options - Optional pagination options.
+   * @param options.limit - Maximum number of trades to return (default: 20, max: 100).
+   * @param options.cursor - Pagination cursor returned by a previous response.
+   * @returns Resolves to a `PaginatedResponse<Trade>` with `items`, `total`, `limit`, and `cursor`.
+   * @throws {StellarKitError} With `type: "ValidationError"` when `id` is missing or empty.
+   * @throws {StellarKitError} On any non-2xx API response (e.g. 404 when the account is not found).
+   *
+   * @example
+   * const dex = new DexModule({ baseUrl: "http://localhost:3000" });
+   * const trades = await dex.getAccountTrades("GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN");
+   * console.log(`${trades.total} trades, first at ${trades.items[0]?.ledgerCloseTime}`);
+   *
+   * @example
+   * // Paginate through an account's trade history
+   * const page1 = await dex.getAccountTrades("GAAZI4...", { limit: 50 });
+   * const page2 = await dex.getAccountTrades("GAAZI4...", { limit: 50, cursor: page1.cursor ?? undefined });
+   */
+  async getAccountTrades(
+    id: string,
+    options?: { limit?: number; cursor?: string },
+  ): Promise<PaginatedResponse<Trade>> {
+    if (!id || typeof id !== "string" || id.trim() === "") {
+      throw new StellarKitError(
+        "id is required and must be a non-empty string",
+        400,
+        "ValidationError",
+      );
+    }
+    return this._get<PaginatedResponse<Trade>>(`/account/${id}/trades`, {
+      limit: options?.limit,
+      cursor: options?.cursor,
+    });
   }
 }

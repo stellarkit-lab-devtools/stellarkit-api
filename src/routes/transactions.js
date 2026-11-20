@@ -138,9 +138,14 @@ router.get("/:id", async (req, res, next) => {
 
     return success(res, {
       items: transactions,
-      total: transactions.length,
-      limit,
-      cursor: nextCursor,
+    }, {
+      meta: {
+        count: transactions.length,
+        limit,
+        order,
+        nextCursor: nextCursor || null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -312,9 +317,14 @@ router.get("/:id/operations", async (req, res, next) => {
 
     return success(res, {
       operations,
-      total: operations.length,
-      limit,
-      cursor: operations.length ? nextCursor : null,
+    }, {
+      meta: {
+        count: operations.length,
+        limit,
+        order,
+        nextCursor: operations.length ? nextCursor : null,
+        hasMore: nextCursor !== null,
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
@@ -341,13 +351,15 @@ router.post("/batch-status", async (req, res, next) => {
     const { hashes } = req.body;
 
     if (!hashes || !Array.isArray(hashes)) {
-      const err = new Error("property 'hashes' is required and must be an array.");
+      const err = new Error("Property 'hashes' is required and must be an array.");
       err.isValidation = true;
       throw err;
     }
 
     if (hashes.length === 0) {
-      return success(res, { items: [], total: 0 });
+      const err = new Error("hashes array must not be empty.");
+      err.isValidation = true;
+      throw err;
     }
 
     if (hashes.length > 20) {
@@ -356,18 +368,17 @@ router.post("/batch-status", async (req, res, next) => {
       throw err;
     }
 
-    // Validate each hash (64-character hex string)
-    for (const hash of hashes) {
-      validateTransactionHash(hash);
-    }
-
-    // Perform lookups in parallel
+    // Perform lookups in parallel; invalid hash formats return error entries
     const statusResults = await Promise.all(
       hashes.map(async (hash) => {
+        const isHex64 = typeof hash === "string" && /^[0-9a-fA-F]{64}$/.test(hash);
+        if (!isHex64) {
+          return { hash, found: false, error: `Invalid transaction hash format: '${hash}'.` };
+        }
         try {
           const tx = await server.transactions().transaction(hash).call();
           return {
-            hash: hash,
+            hash,
             found: true,
             successful: tx.successful,
             ledger: typeof tx.ledger === "number" ? tx.ledger : tx.ledger_attr,
@@ -375,20 +386,10 @@ router.post("/batch-status", async (req, res, next) => {
             fee: tx.fee_charged,
           };
         } catch (err) {
-          // If 404, the transaction was not found
           if (err.response && err.response.status === 404) {
-            return {
-              hash: hash,
-              found: false,
-            };
+            return { hash, found: false };
           }
-          // For other errors, we might want to log it or return a specific failure status
-          // But for now, let's treat it as not found or unreachable
-          return {
-            hash: hash,
-            found: false,
-            error: "Lookup failed",
-          };
+          return { hash, found: false, error: "Lookup failed" };
         }
       })
     );

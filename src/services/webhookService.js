@@ -9,6 +9,13 @@ class WebhookService {
     // Map of accountId -> { url, events: ["trustline.changed"], ...}
     this.webhooks = new Map();
     this.webhookId = 0;
+    // Delivery outcome tracking for monitoring
+    this.totalDeliveries = 0;
+    this.successfulDeliveries = 0;
+    this.failedDeliveries = 0;
+    this.retryQueueSize = 0;
+    // Map of webhookId -> failure count
+    this.failureCounts = new Map();
   }
 
   /**
@@ -38,6 +45,7 @@ class WebhookService {
       createdAt: new Date().toISOString(),
       deliveryCount: 0,
       lastDeliveryAt: null,
+      active: true,
     };
 
     this.webhooks.get(key).push(webhook);
@@ -80,6 +88,8 @@ class WebhookService {
     const maxAttempts = 3;
     const delays = [5000, 10000]; // 5s, 10s
 
+    this.totalDeliveries++;
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const response = await fetch(webhook.url, {
@@ -92,6 +102,7 @@ class WebhookService {
         if (response.ok) {
           webhook.deliveryCount++;
           webhook.lastDeliveryAt = new Date().toISOString();
+          this.successfulDeliveries++;
           logger.debug(`Webhook delivered: ${webhook.id} to ${webhook.url}`);
           return;
         }
@@ -101,17 +112,21 @@ class WebhookService {
         );
 
         if (attempt < maxAttempts - 1) {
+          this.retryQueueSize++;
           await new Promise((resolve) =>
             setTimeout(resolve, delays[attempt] || 10000)
           );
+          this.retryQueueSize--;
         }
       } catch (err) {
         logger.warn(`Webhook delivery error: ${webhook.id} - ${err.message}`);
 
         if (attempt < maxAttempts - 1) {
+          this.retryQueueSize++;
           await new Promise((resolve) =>
             setTimeout(resolve, delays[attempt] || 10000)
           );
+          this.retryQueueSize--;
         } else {
           logger.error(
             `Webhook delivery failed after ${maxAttempts} attempts: ${webhook.id}`
@@ -119,6 +134,49 @@ class WebhookService {
         }
       }
     }
+
+    this.failedDeliveries++;
+    this.failureCounts.set(
+      webhook.id,
+      (this.failureCounts.get(webhook.id) || 0) + 1
+    );
+  }
+
+  /**
+   * Get aggregate delivery health statistics.
+   * @returns {object} Dashboard stats for webhook delivery health
+   */
+  getStats() {
+    let totalWebhooks = 0;
+    let activeWebhooks = 0;
+    let pausedWebhooks = 0;
+
+    for (const webhooks of this.webhooks.values()) {
+      for (const webhook of webhooks) {
+        totalWebhooks++;
+        if (webhook.active === false) {
+          pausedWebhooks++;
+        } else {
+          activeWebhooks++;
+        }
+      }
+    }
+
+    const topFailingWebhooks = Array.from(this.failureCounts.entries())
+      .map(([id, failureCount]) => ({ id, failureCount }))
+      .sort((a, b) => b.failureCount - a.failureCount)
+      .slice(0, 5);
+
+    return {
+      totalWebhooks,
+      activeWebhooks,
+      pausedWebhooks,
+      totalDeliveries: this.totalDeliveries,
+      successfulDeliveries: this.successfulDeliveries,
+      failedDeliveries: this.failedDeliveries,
+      retryQueueSize: this.retryQueueSize,
+      topFailingWebhooks,
+    };
   }
 
   /**
@@ -145,6 +203,11 @@ class WebhookService {
   clear() {
     this.webhooks.clear();
     this.webhookId = 0;
+    this.totalDeliveries = 0;
+    this.successfulDeliveries = 0;
+    this.failedDeliveries = 0;
+    this.retryQueueSize = 0;
+    this.failureCounts.clear();
   }
 }
 

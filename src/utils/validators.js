@@ -22,6 +22,9 @@ function makeInvalidAccountIdError(accountId) {
     `""${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
   );
   err.isInvalidAccountId = true;
+  // Stable marker used by the minResponseTime middleware to identify
+  // synchronous format rejections (which never touch Horizon).
+  err.type = "InvalidAccountId";
   err.accountId = accountId;
   err.suggestion = "Account addresses start with G and are 56 characters long.";
   err.status = 400;
@@ -165,7 +168,11 @@ function validateAssetCode(code) {
 function validateLimit(limit, max = 100) {
   const parsed = parseInt(limit, 10);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
-    const err = new Error("limit must be a number between 1 and 100.");
+    const defaultMessage = "limit must be a number between 1 and 100.";
+    const message = max !== 100
+      ? `limit must be a number between 1 and ${max}.`
+      : defaultMessage;
+    const err = new Error(message);
     err.isInvalidLimit = true;
     err.status = 400;
     err.receivedValue = limit !== undefined ? String(limit).slice(0, 50) : undefined;
@@ -358,6 +365,47 @@ function isValidPoolId(poolId) {
   return typeof poolId === "string" && /^[0-9a-f]{64}$/.test(poolId);
 }
 
+/**
+ * Validate and parse the `days` lookback query parameter.
+ *
+ * Defaults to 30 when the value is absent (undefined or null). Rejects
+ * non-numeric, non-integer, zero, and negative values with a structured
+ * validation error (isValidation = true, status = 400, field = "days").
+ *
+ * @param {string|number|null|undefined} value - Raw query-parameter value.
+ * @param {number} [defaultDays=30] - Value used when the parameter is absent.
+ * @returns {number} The parsed positive integer number of days.
+ * @throws {Error} A validation error when the value is invalid.
+ */
+function validateDaysLookback(value, defaultDays = 30) {
+  if (value === undefined || value === null || value === "") {
+    return defaultDays;
+  }
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    const err = makeValidationError(
+      qp("days", "must be a positive integer."),
+      "days",
+      value,
+      "positive integer (e.g. 30)"
+    );
+    err.status = 400;
+    throw err;
+  }
+  const parsed = parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    const err = makeValidationError(
+      qp("days", "must be a positive integer."),
+      "days",
+      value,
+      "positive integer (e.g. 30)"
+    );
+    err.status = 400;
+    throw err;
+  }
+  return parsed;
+}
+
 module.exports = {
   validateAccountId,
   validateContractId,
@@ -371,4 +419,5 @@ module.exports = {
   validateCredentialType,
   validateTransactionHash,
   isValidPoolId,
+  validateDaysLookback,
 };

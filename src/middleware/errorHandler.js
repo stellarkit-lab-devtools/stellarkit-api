@@ -407,6 +407,19 @@ function errorHandler(err, req, res, next) {
     }, req));
   }
 
+  // InvalidAsset errors — thrown by validateAsset(code, issuer)
+  if (err.isInvalidAsset) {
+    logError(400, req, err.message);
+    return errorResponse(res, 400, withRequestId({
+      success: false,
+      error: {
+        type: "InvalidAsset",
+        message: err.message,
+        suggestion: err.suggestion || undefined,
+      },
+    }, req));
+  }
+
   // InvalidAccountId errors — thrown by validateAccountId(id)
   if (err.isInvalidAccountId) {
     logError(400, req, err.message);

@@ -46,6 +46,7 @@ Open `.env` in your text editor and review the settings:
 
 ```env
 STELLAR_NETWORK=testnet
+HORIZON_URL=https://horizon-testnet.stellar.org
 PORT=3000
 NODE_ENV=development
 RATE_LIMIT_MAX=100
@@ -54,11 +55,16 @@ CACHE_TTL_MS=5000
 
 **Key settings:**
 
-- `STELLAR_NETWORK`: Use `testnet` for development (free, resets periodically). Use `mainnet` for production.
+- `STELLAR_NETWORK`: Use `testnet` for development (free, resets periodically). Use `mainnet` for production with real value.
+- `HORIZON_URL`: Optional. By default, derives from `STELLAR_NETWORK`. Set this to use a custom Horizon server.
 - `PORT`: The port where the API will listen. Default is `3000`.
 - `NODE_ENV`: Set to `development` for detailed logs. Use `production` for a live server.
 
-For now, keep the defaults and save the file.
+**⚠️ Production Warning:**
+
+When deploying to production, **explicitly set `STELLAR_NETWORK=mainnet`**. Leaving it as testnet in production will silently fail real transactions. Store private keys securely—never commit them to `.env`.
+
+For complete network configuration guidance, see [docs/environment-configuration.md](environment-configuration.md).
 
 ---
 

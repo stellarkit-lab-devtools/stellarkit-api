@@ -6,7 +6,7 @@ const { server, NETWORK } = require("../config/stellar");
 const { success, toISOTimestamp} = require("../utils/response");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
-const { parsePaginationParams } = require("../utils/pagination");
+const { parsePaginationParams, resolveCursorForPage } = require("../utils/pagination");
 const { StrKey } = require("@stellar/stellar-sdk");
 const { normalizeAssetFromString, normalizeAsset } = require("../utils/asset");
 const { isNativeAsset } = require("../utils/assetHelpers");
@@ -117,6 +117,60 @@ function mapLiquidityPool(pool) {
 }
 
 /**
+ * GET /liquidity-pools
+ *
+ * Returns a paginated list of liquidity pools from Horizon. Cursor pagination
+ * is preferred; page-based pagination is also supported for clients that do
+ * not want to manage opaque Horizon paging tokens.
+ */
+router.get("/", async (req, res, next) => {
+  try {
+    const { limit, order, cursor: requestedCursor, page } = parsePaginationParams(req.query);
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cursor = page
+      ? await resolveCursorForPage(
+          (batchLimit, batchCursor) => {
+            let query = server.liquidityPools().limit(batchLimit).order(order);
+            if (batchCursor) query = query.cursor(batchCursor);
+            return query;
+          },
+          page,
+          limit,
+          order,
+        )
+      : requestedCursor;
+    const cacheKey = `liquidity-pools:${limit}:${order}:${cursor || ""}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    let query = server.liquidityPools().limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+    const response = await query.call();
+    const records = response.records || [];
+    const data = {
+      pools: records.map(mapLiquidityPool),
+      total: records.length,
+      limit,
+      order,
+      page: page || 1,
+      cursor: records.length ? records[records.length - 1].paging_token || null : null,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.poolPositions);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /liquidity-pools/:id/trades
  *
  * Returns a paginated list of trades executed against a specific liquidity pool.
@@ -186,13 +240,15 @@ router.get("/:id/trades", async (req, res, next) => {
 
     const normalizedRecords = filteredRecords.map(normalizeLiquidityPoolTrade);
 
+    const nextCursor = filteredRecords.length
+      ? filteredRecords[filteredRecords.length - 1].paging_token || null
+      : null;
+
     const data = {
       trades: normalizedRecords,
       total: normalizedRecords.length,
       limit,
-      cursor: filteredRecords.length
-        ? filteredRecords[filteredRecords.length - 1].paging_token || null
-        : null,
+      cursor: nextCursor,
     };
 
     cacheService.set(cacheKey, data, cacheTTL.poolTrades);

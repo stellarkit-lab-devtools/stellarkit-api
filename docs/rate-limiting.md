@@ -2,6 +2,8 @@
 
 StellarKit API applies per-IP rate limiting to protect the service and the upstream Stellar Horizon servers it depends on. This guide covers the default limits, how to configure them, the headers clients should read to track usage, and how to handle a `429` response.
 
+> **Building a high-volume app?** See **[Staying Within Rate Limits: A Practical Strategies Guide](rate-limiting-strategies.md)** for request batching, caching, `?fresh=true` timing, polling cadence, and a complete exponential-backoff implementation.
+
 ---
 
 ## Default Limits
@@ -113,6 +115,7 @@ X-RateLimit-Reset: 2026-07-24T15:32:10.000Z
 
 ## Related Docs
 
+- [Staying Within Rate Limits: A Practical Strategies Guide](rate-limiting-strategies.md) — batching, caching, `?fresh=true` timing, polling priority, and exponential backoff
 - [Error Reference](error-reference.md) — all error types and status codes
 - [Getting Started Guide](getting-started.md) — initial setup and environment variables
 - [Environment Configuration](environment-configuration.md) — full `.env` reference

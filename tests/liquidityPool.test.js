@@ -477,6 +477,45 @@ describe("Liquidity Pool Trades API", () => {
   });
 });
 
+describe("Liquidity Pool List API", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    cacheService.flush();
+  });
+
+  it("lists normalized pools with cursor pagination metadata", async () => {
+    const query = {
+      limit: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      cursor: jest.fn().mockReturnThis(),
+      call: jest.fn().mockResolvedValue({
+        records: [{
+          id: "pool-1",
+          fee_bp: 30,
+          total_shares: "100.0000000",
+          total_trustlines: 2,
+          last_modified_ledger: 42,
+          paging_token: "next-1",
+          reserves: [
+            { asset: "native", amount: "10" },
+            { asset: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", amount: "20" },
+          ],
+        }],
+      }),
+    };
+    server.liquidityPools.mockReturnValue(query);
+
+    const res = await request(app).get("/liquidity-pools?limit=10&order=asc");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.pools[0]).toMatchObject({ poolId: "pool-1", totalTrustlines: 2 });
+    expect(res.body.data).toMatchObject({ total: 1, limit: 10, order: "asc", cursor: "next-1" });
+    expect(query.limit).toHaveBeenCalledWith(10);
+    expect(query.order).toHaveBeenCalledWith("asc");
+  });
+});
+
 describe("Liquidity Pool Profitability API", () => {
   const poolId = "67339253ccd0390f4886b5952d7f8d68f70f61280d908e234190c609c95b6026";
 

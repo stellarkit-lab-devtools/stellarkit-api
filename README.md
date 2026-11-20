@@ -44,14 +44,26 @@ This project is ideal for:
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [SEP Integration Guide](docs/sep-integration.md) - Use StellarKit discovery, account, asset, fee, and monitoring endpoints in SEP-10, SEP-24, and SEP-31 workflows
+- [Anchor Integration Guide](docs/anchor-integration.md) - Complete anchor discovery and integration workflow: discover anchors via `/network/anchor-directory`, fetch anchor info, check SEP support, and initiate deposit/withdrawal flows
 - [Soroban Integration Guide](docs/soroban-integration.md) - End-to-end workflow for querying contract state, monitoring events, checking expiry, and simulating invocations
+- [Soroban Contract Monitoring Guide](docs/soroban-monitoring.md) - Monitor deployed contracts: expiry, storage changes, upgrades, caller activity and failure rates, and network Soroban stats, with a complete alerting dashboard example
+- [Code Patterns Guide](docs/code-patterns.md) - Required patterns for new endpoints (Horizon instance, response envelope, amount formatting, caching, error handling), with wrong and correct examples
+- [Soroban Endpoints Guide](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`
 - [Production Deployment Guide](docs/deployment.md) - Deploy to production with Node.js, Docker, Railway, Render, or Fly.io
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
 - [Response Format Guide](docs/response-format.md) - Standard response envelopes, pagination, and data formats
 - [Streaming Guide](docs/streaming.md) - SSE and WebSocket streaming endpoints, event payloads, reconnection, and clean close handling
+- [Advanced Streaming Patterns](docs/streaming-advanced.md) - Production streaming patterns: exponential backoff reconnection, multi-stream management, client-side filtering, graceful shutdown, and memory management
+- [Real-Time Guide](docs/real-time-guide.md) - Build real-time Stellar apps by combining SSE/WebSocket streams with REST calls and polling, handling interruptions, and a complete Node.js balance monitor
 - [Webhooks Guide](docs/webhooks.md) - Register webhooks, available events, payload shapes, signature verification, retries, and unregistration
 - [Webhook Security Guide](docs/webhook-security.md) - Verify HMAC-SHA256 delivery signatures in Node.js/Python/Go, handle invalid signatures, store secrets safely, and rotate with the dual-secret pattern
+- [Webhook Receiver Implementation Guide](docs/webhook-implementation.md) - Build an Express endpoint that verifies signatures, responds with 200 at the right time, de-duplicates retried deliveries, and handles errors, with a complete Node.js example
 - [Batch Endpoints Guide](docs/batch-endpoints.md) - Batch trust-status, freeze-status, and transaction status APIs, limits, and when to use batch vs individual
+- [DEX Endpoints Guide](docs/dex-endpoints.md) - All six DEX endpoints with curl examples, sample responses, and guidance on spread vs depth vs imbalance vs arbitrage
+- [Compliance Endpoints Guide](docs/compliance-endpoints.md) - All compliance and risk endpoints with curl examples, sample responses, and a complete compliance workflow
+- [Compliance Workflow Guide](docs/compliance-workflow.md) - Step-by-step KYC/AML workflow chaining risk score, watchlist, transaction velocity, compliance check, and freeze check into a compliance report
+- [Network Endpoints Guide](docs/network-endpoints.md) - All network and fee endpoints with curl examples, cache TTLs, and sample responses
 - [Caching Strategy](docs/caching-strategy.md) - Per-endpoint cache TTLs and configuration
 - [Logging Guide](docs/logging.md) - Log levels, configuration, structured log entry fields, JSON parsing, and production monitoring
 - [Monitoring Guide](docs/monitoring.md) - Key metrics, alert thresholds, health check polling strategy, and integration patterns for Prometheus, Datadog, CloudWatch, and uptime tools
@@ -59,8 +71,19 @@ This project is ideal for:
 - [Performance Guide](docs/performance.md) - Latency expectations, cache TTL tuning, Horizon optimization, and scaling recommendations
 - [Error Reference](docs/error-reference.md) - All error types, status codes, and suggested fixes
 - [Error Codes](docs/error-codes.md) - HTTP status code reference with descriptions, scenarios, and sample responses
+- [Error Recovery Guide](docs/error-recovery.md) - Programmatic recovery patterns for HorizonUnavailable, RateLimitExceeded, AccountNotFound, OrderBookEmpty, and InvalidCursor errors
+- [Account Endpoints Guide](docs/account-endpoints.md) - Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint
+- [Claimable Balances Guide](docs/claimable-balances-guide.md) - All claimable balance endpoints with curl examples, sample responses, eligible vs pending explanation, and a worked claim example
+- [Transaction Endpoints Guide](docs/transaction-endpoints.md) - Transaction and operation endpoints for building explorers and submission tools, with curl examples and usage patterns
 - [Rate Limiting](docs/rate-limiting.md) - Default limits, configuration, response headers, and retry strategies
+- [Rate Limiting Strategies Guide](docs/rate-limiting-strategies.md) - Practical guide for high-volume apps: request batching, caching, `?fresh=true` timing, endpoint polling priority, and a complete exponential backoff implementation
 - [Frequently Asked Questions (FAQ)](FAQ.md) - Common setup and contribution questions
+- [Utilities Guide](docs/utilities.md) - All utility endpoints with use cases, curl examples, and sample responses
+- [Asset Endpoints Guide](docs/asset-endpoints.md) - All six asset endpoints with curl examples, sample responses, and guidance on when to use each one
+- [Getting Started for Contributors](docs/getting-started-for-contributors.md) - First-time contributor walkthrough: environment setup, codebase orientation, response conventions, first test, and PR checklist
+- [Tax Reporting Guide](docs/tax-reporting-guide.md) - Gather Stellar tax inputs (transactions, trades, fee spending, historical balances, cross-asset conversions) and compute cost basis
+- [Analytics Endpoints Guide](docs/analytics-endpoints.md) - Account analytics endpoints grouped by activity, volume, and compliance use cases, with an account health dashboard example
+- [SEP-10 Authentication Guide](docs/sep10-authentication.md) - Complete SEP-10 challenge-response flow using StellarKit for discovery, preflight, and inspection, with Node.js signing example
 
 ---
 
@@ -75,8 +98,10 @@ This project is ideal for:
 | GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
 | GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
 | GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
+| GET | `/network/validator-quorum` | Current quorum health status | `fresh` |
 | GET | `/network/base-fee` | Current network base fee in stroops and XLM | `fresh` |
 | GET | `/network/fee-percentiles` | Fee distribution percentiles from recent activity | `fresh` |
+| GET | `/network/soroban-stats` | Soroban share of the last 24h of operations, invocation count, and Soroban fee revenue | `fresh` |
 
 ### Fees
 
@@ -84,6 +109,7 @@ This project is ideal for:
 | ------ | ---- | ----------- | ------------ |
 | GET | `/fee-estimate` | Fee tiers for transaction submission | `operations`, `fresh` |
 | GET | `/fee-estimate/surge-status` | Fee surge detection and recommendations | `fresh` |
+| GET | `/fee-estimate/trends` | Fee trend analysis across the last 50 ledgers (avg, min, max, trend direction, and recommendation) | `fresh` |
 
 ### Account
 
@@ -97,21 +123,34 @@ This project is ideal for:
 | GET | `/account/:id/sequence` | Current sequence number | — |
 | GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode`, `sponsored` |
 | GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor`, `assetCode`, `assetIssuer` |
+| GET | `/account/:id/funding-history` | Account funding sources with sender, amount, asset, and timestamp | — |
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
 | GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
+| GET | `/account/:id/offers-summary` | Open offer totals per asset (sell locked, buy committed) and oldest offer age; cached | `fresh` |
 | GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
-| GET | `/account/:id/analytics` | Basic account activity analytics | — |
+| GET | `/account/:id/analytics` | Account activity analytics: transaction frequency, first/last seen timestamps, and average transactions per day | — |
 | GET | `/account/:id/transaction-count` | Total transaction count, first and last transaction timestamps | — |
 | GET | `/account/:id/inactivity` | Days since last transaction and status | — |
-| GET | `/account/:id/volume` | Transaction volume by asset over a time period | `days` |
+| GET | `/account/:id/funding-history` | Initial funding sources sorted by amount descending | — |
+| GET | `/account/:id/volume` | Transaction volume by asset over a time period (default: 30 days, max: 90 days) | `days` (default: 30, max: 90) |
 | GET | `/account/:id/risk-score` | Computed risk score and contributing factors | — |
+| GET | `/account/:id/fee-spending` | Network fees paid, broken down by operation type | `days` (default: 30, max: 90) |
+| GET | `/account/:id/smart-contract-interactions` | Soroban contract calls (contractId, function, timestamp, success) | `limit`, `cursor` |
 | GET | `/account/:id/freeze-status/:assetCode/:assetIssuer` | Check if an asset is frozen on an account | — |
 | GET | `/account/:id/can-receive/:assetCode/:assetIssuer` | Check if an account can receive a specific asset | — |
+| GET | `/account/:id/receive-capacity` | Remaining receive capacity per held asset before its trustline limit (absolute and percent) | — |
+| GET | `/account/:id/balance-velocity` | XLM balance change over 24h/7d/30d windows, with a flag when the 24h rate exceeds the historical mean by 2σ | — |
+| GET | `/account/:id/signers` | Account signers, their weights, and threshold configuration | — |
 | GET | `/account/:id/subentry-health` | Subentry usage and remaining capacity | — |
-| GET | `/account/:id/sponsorship` | Sponsorship relationships for the account | — |
-| GET | `/account/:id/sponsorships` | Typed sponsorship summary with sponsoredBy and sponsoring arrays | — |
+| GET | `/account/:id/sponsorship` | Sponsorship relationships for the account — returns raw sponsored entries and accounts this account is sponsoring. **Prefer `/sponsorships` for new integrations.** Note: both endpoints will be consolidated in a future release (see issue #19). | — |
+| GET | `/account/:id/sponsorships` | **Preferred.** Typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays; each entry includes `type`, `address`, `sponsor`, and `reserveAmount`. More structured than `/sponsorship`. Note: will be consolidated with `/sponsorship` in a future release (see issue #19). | — |
+| GET | `/account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorises each as eligible, not yet claimable, or expired. See the [Claimable Balances](#understanding-claimable-balances) section for details. | `limit`, `cursor`, `order`, `fresh` |
 | GET | `/account/:id/pool-positions` | Liquidity pool positions and share values | — |
+| GET | `/account/:id/liquidity-contribution` | Liquidity pool contributions per pool and totals per asset (cached) | `fresh` |
+| GET | `/account/:id/pending-effects` | Submitted operations that have not yet produced confirmed effects (never cached) | — |
+| GET | `/account/:id/historical-balances` | Balance snapshots over time reconstructed from payment and trade history | `asset` (`CODE:ISSUER`, default XLM), `resolution` (`7d`\|`30d`, default `7d`) |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
+| GET | `/account/:id/payment-counterparty-risk` | Top payment counterparties by txCount with a risk level (`low`/`medium`/`high`) and risk factors for each | `limit` (default 10, max 20) |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
 | POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
 
@@ -132,6 +171,7 @@ This project is ideal for:
 | GET | `/asset/:code/:issuer/distribution` | Holder concentration and Gini coefficient | — |
 | GET | `/asset/:code/:issuer/supply` | Total, circulating, and locked supply breakdown | — |
 | GET | `/asset/:code/:issuer/verify` | Verify issuer via flags, home_domain, and stellar.toml | — |
+| GET | `/asset/:code/:issuer/issuance-history` | Time series of supply changes over a specified period | `resolution` (7d, 30d, 90d) |
 | GET | `/asset/search` | Search assets by code across all issuers | `code`, `limit` |
 
 ### DEX
@@ -139,16 +179,20 @@ This project is ideal for:
 | Method | Path | Description | Query Params |
 | ------ | ---- | ----------- | ------------ |
 | GET | `/dex/price/:sellAsset/:buyAsset` | Effective exchange rate via best DEX path | `amount` |
+| GET | `/dex/best-path/:sourceAsset/:destAsset` | Optimal conversion path with estimated rate, slippage, and hops | `amount` |
 | GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
 | GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
 | GET | `/dex/top-markets` | Top markets ranked by recent trade activity | `limit` |
+| GET | `/dex/volume-leaders` | Top assets ranked by 24h trading volume against XLM (5 min cache) | `limit` (default 10, max 50) |
+| GET | `/dex/pool-share-value/:poolId/:shares` | Calculate the equivalent value of pool shares in both reserve assets | — |
 
 ### Liquidity Pools
 
 | Method | Path | Description | Query Params |
 | ------ | ---- | ----------- | ------------ |
+| GET | `/liquidity-pools` | List liquidity pools with normalized reserves, fees, shares, and trustline metadata | `limit`, `cursor`, `page`, `order`, `fresh` |
 | GET | `/liquidity-pools/:id` | Live pool details from Horizon (reserves, fee, shares) | — |
 | GET | `/liquidity-pools/:id/profitability` | Estimated annualized fee income | — |
 | GET | `/liquidity-pools/:id/reserve-ratio` | Reserve ratio and drift from equal | — |
@@ -186,6 +230,7 @@ This project is ideal for:
 | GET | `/utils/ledger-date` | Estimate close date for a ledger sequence | `sequence` |
 | GET | `/utils/keypair` | Generate a random testnet keypair | — |
 | POST | `/utils/decode-xdr` | Decode a transaction XDR envelope to JSON | Body: `xdr` |
+| POST | `/utils/decode-transaction` | Human-readable transaction breakdown (fee, source, sequence, time bounds, memo, operations) | Body: `xdr` |
 
 ### Cache
 
@@ -203,29 +248,106 @@ A Soroban contract is referenced by a **contract ID**, which is the address used
 
 StellarKit API supports Soroban contract inspection through three endpoints: `GET /soroban/contract/:id` looks up contract details by contract ID, including the associated WASM hash and ledger metadata, `GET /soroban/contract/:id/storage` returns the contract's instance-storage entries, and `GET /soroban/contract/:id/functions` returns exported function names, parameter types, and return types parsed from the contract ABI. Together they make it easier to combine traditional Stellar account workflows with Soroban contract interactions.
 
-See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples and sample responses.
+See [docs/soroban.md](docs/soroban.md) for a full walkthrough with curl examples and sample responses. To monitor a deployed contract over time, see [docs/soroban-monitoring.md](docs/soroban-monitoring.md).
 
 ---
 
-## Documentation
+## Additional Soroban Resources
 
+- [docs/sep-integration.md](docs/sep-integration.md) — SEP-10 authentication, SEP-24 hosted transfers, and SEP-31 cross-border payment workflows using StellarKit.
 - [docs/soroban.md](docs/soroban.md) — Soroban contract endpoints: what Soroban is, how contract IDs work, and how to inspect deployed contracts via `/soroban/contract/:id`, `/soroban/contract/:id/storage`, and `/soroban/contract/:id/functions`.
+- [docs/account-endpoints.md](docs/account-endpoints.md) — Account endpoints grouped by use case (portfolio, activity, multisig, compliance) with curl examples for every endpoint.
 - [docs/webhooks.md](docs/webhooks.md) — Webhook registration, events, payloads, signature verification, retries, and unregistration.
 - [docs/webhook-security.md](docs/webhook-security.md) — Verifying HMAC-SHA256 delivery signatures (Node.js/Python/Go), handling invalid signatures, secret storage, and dual-secret rotation.
+- [docs/webhook-implementation.md](docs/webhook-implementation.md) — Building a webhook receiver in Node.js/Express: raw-body capture, HMAC verification, 200 timing, idempotency, and error handling.
 - [docs/batch-endpoints.md](docs/batch-endpoints.md) — Batch API endpoints, address/hash limits, per-entry errors, and when to use batch vs individual.
 
 ---
 
 ## Project Structure
 
+### Core Files
+
 - `src/index.js` — application entry point
 - `src/websocket.js` — WebSocket helper for Stellar streaming data
-- `src/config/stellar.js` — Stellar network configuration
-- `src/routes/` — Express route handlers for API endpoints
-- `src/utils/` — shared helpers for formatting, validation, caching, response shaping
-- `src/middleware/` — validation, error handling, rate limiting
-- `tests/` — API and integration tests
+- `src/config/` — Stellar network configuration and cache TTL settings
+- `src/routes/` — Express route handlers (21 files covering account, asset, DEX, liquidity pools, claimable balances, Soroban, webhooks, and more)
+- `src/services/` — cache, metrics, webhook delivery, and contract event polling services
+- `src/utils/` — shared helpers for formatting, validation, caching, response shaping, and Horizon mapping
+- `src/middleware/` — API key auth, validation, error handling, rate limiting, sanitisation, and request logging
+- `tests/` — 170+ test files organised into root-level unit tests, plus `integration/`, `middleware/`, `routes/`, `stream/`, and `utils/` subdirectories
 - `types/index.d.ts` — exported TypeScript type definitions
+- `docs/` — in-depth guides for deployment, webhooks, Soroban, streaming, rate limiting, observability, and more
+- `examples/` — runnable demo scripts for multisig, pool positions, spread calculation, and transaction search
+- `scripts/` — developer utility scripts including testnet account seeding and WebSocket client demo
+- `sdk/` — TypeScript SDK client with typed methods for accounts, assets, DEX, fees, network, and Soroban
+- `types/` — bundled TypeScript type declarations for use in TypeScript projects
+- `.github/` — GitHub Actions CI workflow and pull request template
+
+### src/routes/ — Express Route Handlers
+
+Contains endpoint implementations (21 route files). All routes import the shared Horizon server instance from `src/config/stellar.js` to ensure consistent SDK configuration across the application.
+
+### src/utils/ — Utility Helpers (30 Files)
+
+Shared helpers for formatting, validation, caching, and response shaping:
+
+| File | Purpose |
+|------|---------|
+| `response.js` | Wraps data in consistent JSON success response envelopes with metadata. |
+| `validators.js` | Query parameter and account ID validators for pagination, asset codes, and Stellar addresses. |
+| `errors.js` | Detects and translates Horizon timeout errors and provides user-friendly messages. |
+| `StellarKitError.js` | Custom error class for consistent error handling with HTTP status, type, detail, and suggestions. |
+| `cache.js` | Creates shared NodeCache instances for network status, fee estimates, and contract dependencies. |
+| `logger.js` | Structured Pino-based logger with automatic redaction of sensitive fields and environment-based verbosity. |
+| `horizonErrors.js` | Provides plain-English translations for common Horizon error codes (tx_bad_seq, op_no_trust, etc.). |
+| `horizonHealth.js` | Pings Horizon and returns connectivity status (ok/degraded/unreachable) for health checks. |
+| `horizonStatusMapper.js` | Maps Horizon result codes to corresponding HTTP status codes (e.g., tx_bad_seq → 409). |
+| `formatAmount.js` | Normalizes Stellar amounts to fixed seven-decimal string format across types. |
+| `formatBalance.js` | Formats Stellar balance strings with thousand separators (e.g., "10,000.1234567"). |
+| `formatLedgerSequence.js` | Converts ledger sequence numbers to consistent integer format from string or number inputs. |
+| `formatTransaction.js` | Formats Horizon transaction records into clean SSE payload structure. |
+| `parseStellarAmount.js` | Converts stroops (Stellar's smallest unit) to seven-decimal XLM strings. |
+| `operationFormatter.js` | Normalizes Horizon operation records into consistent API operation shape. |
+| `toCamelCase.js` | Recursively converts snake_case object keys to camelCase throughout nested structures. |
+| `memo.js` | Decodes Stellar memos from base64 to UTF-8 text or hexadecimal hashes. |
+| `asset.js` | Parses Stellar asset strings in "CODE:ISSUER" format into SDK Asset objects. |
+| `assetHelpers.js` | Utility helpers for detecting native XLM assets across different object shapes. |
+| `assetToml.js` | Fetches and normalizes asset metadata from TOML files (home domain resolution). |
+| `tomlResolver.js` | Resolves and caches TOML files from asset home domains with inline comment stripping. |
+| `accountAge.js` | Calculates account age and longevity metrics with maturity classification (new, established). |
+| `contractDeployment.js` | Finds Soroban contract deployment metadata (deployer, timestamp, ledger) from Horizon operations. |
+| `contractSpec.js` | Parses and maps Soroban contract specification XDR data to human-readable type information. |
+| `crypto.js` | Generates SHA-256 proof hashes with salt for cryptographic verification and security features. |
+| `effectTypes.js` | Defines the canonical list of valid Horizon effect type strings for validation. |
+| `mapAccountTrade.js` | Maps raw Horizon trade records to normalized StellarKit shape with formatted prices. |
+| `mapFeeEstimate.js` | Maps Horizon fee statistics to StellarKit fee estimate response with surge capacity detection. |
+| `mapNetworkStatus.js` | Maps Horizon server info and latest ledger into normalized network status payload. |
+| `pagination.js` | Resolves page numbers to Horizon paging cursors using async token lookups. |
+
+### src/middleware/ — Request Processing (17 Files)
+
+Middleware functions that validate, transform, and handle requests. Middleware execution order is important — see [docs/project-structure.md](docs/project-structure.md) for details.
+
+| File | Purpose |
+|------|---------|
+| `errorHandler.js` | Centralized error handler that formats Horizon/SDK errors into consistent JSON responses. |
+| `rateLimiter.js` | Express rate limiter with configurable per-endpoint limits (global, account, asset endpoints). |
+| `requestLogger.js` | Logs completed requests with method, path, status, request ID, and response time via Pino. |
+| `requestId.js` | Generates or validates incoming request IDs with UUID fallback and injection pattern checking. |
+| `sanitize.js` | Trims whitespace and strips null bytes from params/query; validates length and injection patterns. |
+| `apiKeyAuth.js` | Optional API key authentication middleware that validates X-API-Key header against hashed keys from env. |
+| `restrictHttpMethods.js` | Rejects unsupported HTTP methods (only GET, POST, DELETE, PATCH allowed; returns 405). |
+| `contentTypeValidator.js` | Requires "application/json" Content-Type header for POST and PATCH requests (415 rejection). |
+| `bodySizeLimit.js` | Enforces maximum request body size (default 10 KB) with configurable KB or legacy size strings. |
+| `coerceQueryParams.js` | Converts query parameters (limit, operations, fresh) from strings to integers/booleans. |
+| `normalizeAssetCode.js` | Uppercases asset code in route params and query params for consistent handling. |
+| `rejectDuplicateQueryParams.js` | Prevents HTTP parameter pollution by rejecting requests with duplicate query keys. |
+| `validateRouteParams.js` | Validates required route parameters are not empty and registers param validation handlers. |
+| `etag.js` | Generates ETags from response bodies and returns 304 Not Modified if client If-None-Match matches. |
+| `metricsCollector.js` | Intercepts responses and forwards status code, response time, and cache headers to metrics service. |
+| `routeCounter.js` | Per-route request counter middleware that tracks totals by "METHOD /path" pattern. |
+| `webhookSignatureAuth.js` | Validates HMAC-SHA256 webhook signatures with optional secret rotation support. |
 
 ---
 
@@ -351,11 +473,23 @@ If a medium-threshold operation requires `2`, then either signer C alone or sign
 StellarKit API exposes the account's multisignature details through dedicated account endpoints:
 
 - `GET /account/:id/signers` returns the account's current signers and their weights.
-- `GET /account/:id/multisig-plan` returns the account's threshold plan and how signers contribute to low, medium, and high threshold requirements.
+- `POST /account/:id/multisig-plan` returns the account's threshold plan and how signers contribute to low, medium, and high threshold requirements.
 
 These endpoints let developers inspect who can sign transactions, how much combined weight is available, and whether the account is configured correctly for its intended security model.
 
-> Use `GET /account/:id/signers` to verify signer keys and weights, and `GET /account/:id/multisig-plan` to understand the threshold requirements before submitting multisig transactions.
+> Use `GET /account/:id/signers` to verify signer keys and weights, and `POST /account/:id/multisig-plan` to understand the threshold requirements before submitting multisig transactions. The multisig-plan endpoint accepts a JSON body with an `availableSigners` array — the list of signer public keys you expect to use.
+
+```bash
+curl -X POST http://localhost:3000/account/GABC.../multisig-plan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "availableSigners": [
+      "GABC...",
+      "GDEF...",
+      "GXYZ..."
+    ]
+  }'
+```
 
 ---
 
@@ -451,7 +585,7 @@ StellarKit API exposes claimable balance data through two surfaces:
 | Endpoint                                       | Description                                                                                                                                                                                                                                           |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /account/:id/summary`                     | Returns the account's open claimable balances alongside recent transactions, open offers, and account details.                                                                                                                                        |
-| `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). |
+| `GET /account/:id/claimable-balances/eligible` | Evaluates every claimable balance where the account is a claimant and categorizes each one as **eligible** (claimable right now), **not yet claimable** (a future time predicate has not been met), or **expired** (a deadline predicate has passed). Also listed in the [Account API reference table](#account). |
 
 Use the `/claimable-balances/eligible` endpoint to build dashboards that show users exactly which funds are available to claim today and which are still locked. The API handles predicate evaluation server-side, so clients do not need to implement their own predicate logic.
 
@@ -506,7 +640,7 @@ StellarKit API provides several endpoints to interact with and analyze liquidity
 
 | Endpoint                                  | Description                                                                                                     |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /liquidity-pools`                    | Retrieves a list of all liquidity pools on the network with reserve details and fee information.                |
+| `GET /liquidity-pools`                    | Retrieves a paginated list of liquidity pools with normalized reserve details and fee information. Supports `limit` (1–100), `cursor` (Horizon paging token), `page` (1-based convenience pagination), `order` (`asc`/`desc`), and `fresh=true` to bypass the cache. |
 | `GET /liquidity-pools/:id`                | Fetches detailed information about a specific pool, including reserves, share count, and fee basis points.      |
 | `GET /account/:id/pool-positions`         | Returns all liquidity pool positions for an account with calculated share values and equivalent reserves.       |
 | `GET /dex/pool-share-value/:poolId/:shares` | Calculates the equivalent value of a specific number of pool shares in both reserve assets.                    |
@@ -692,6 +826,14 @@ Returns days since the account's last transaction and a status label (`active`, 
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/inactivity"
 ```
 
+### `GET /account/:id/analytics`
+
+Returns basic account activity analytics derived from the account's transaction history. Includes the total number of successful transactions, average transactions per day over the account's active period, and first/last seen timestamps.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/analytics"
+```
+
 ### `GET /account/:id/subentry-health`
 
 Returns subentry usage, remaining capacity, and a warning level when approaching the protocol limit.
@@ -702,7 +844,9 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 ### `GET /account/:id/sponsorship`
 
-Returns sponsorship relationships — entries on this account sponsored by others, and accounts this account is sponsoring.
+> **Note:** Both `/sponsorship` and `/sponsorships` will be consolidated in a future release (issue #19). For new integrations, prefer `/sponsorships` — it returns a more structured response.
+
+Returns sponsorship relationships — entries on this account sponsored by others, and accounts this account is sponsoring. The response includes a flat `sponsoredEntries` array (each entry has `type`, `sponsor`, and `reserveAmount`) and an `accountsSponsoring` array of account IDs this account sponsors. Use this endpoint for audit or billing workflows where you need the raw list of sponsored ledger entries.
 
 ```bash
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorship"
@@ -710,7 +854,9 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 ### `GET /account/:id/sponsorships`
 
-Returns a typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays. Each `sponsoredBy` entry includes a `type`, `address`, `sponsor`, and `reserveAmount`.
+> **Preferred endpoint.** Will be consolidated with `/sponsorship` in a future release (issue #19).
+
+Returns a typed sponsorship summary with `sponsoredBy` and `sponsoring` arrays. Each `sponsoredBy` entry includes a `type`, `address`, `sponsor`, and `reserveAmount`. Unlike `/sponsorship`, this endpoint organises results into distinct typed arrays making it easier to filter by entry type (trustline, signer, data entry, offer) and to display sponsorship direction clearly in a UI.
 
 ```bash
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/sponsorships"
@@ -793,6 +939,65 @@ Retrieves transaction history for an account, with pagination.
 ### `GET /transactions/:id/operations`
 
 Retrieves operation history for an account, with pagination.
+
+### `POST /transactions/batch-status`
+
+Checks the confirmation status of up to 20 transaction hashes in a single request. All Horizon lookups are performed in parallel. Each hash in the response includes a `found` flag; when `found` is `true` the entry also carries `successful`, `ledger`, `createdAt`, and `fee`.
+
+**Request body:**
+
+```json
+{
+  "hashes": [
+    "6bc97b244e4eff6e3a1c82e4bab89f6e6b6a3a1e5e6b7e8f9a0b1c2d3e4f5a6b",
+    "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+  ]
+}
+```
+
+**curl example:**
+
+```bash
+curl -X POST "http://localhost:3000/transactions/batch-status" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hashes": [
+      "6bc97b244e4eff6e3a1c82e4bab89f6e6b6a3a1e5e6b7e8f9a0b1c2d3e4f5a6b",
+      "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+    ]
+  }'
+```
+
+**Sample response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "hash": "6bc97b244e4eff6e3a1c82e4bab89f6e6b6a3a1e5e6b7e8f9a0b1c2d3e4f5a6b",
+        "found": true,
+        "successful": true,
+        "ledger": 52834901,
+        "createdAt": "2026-09-20T14:32:11Z",
+        "fee": "100"
+      },
+      {
+        "hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+        "found": false
+      }
+    ],
+    "total": 2
+  }
+}
+```
+
+**Key points:**
+- Body: `hashes` — array of 64-character hex transaction hashes, maximum 20 per request.
+- Returns `400` if more than 20 hashes are supplied or any hash is not a valid 64-character hex string.
+- When `found: false` the hash was not found on the network (unconfirmed or invalid).
+- Per-hash `fee` is in stroops (100 stroops = 0.0000100 XLM).
 
 ### `GET /asset/:code/:issuer`
 
@@ -896,7 +1101,7 @@ When an error occurs, the response structure differs:
 {
   "success": false,
   "error": {
-    "type": "ACCOUNT_NOT_FOUND",
+    "type": "AccountNotFound",
     "message": "Account does not exist on the Stellar network"
   }
 }
@@ -905,7 +1110,7 @@ When an error occurs, the response structure differs:
 **Fields:**
 
 - `success` **(boolean)**: Always `false` for error responses.
-- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `ACCOUNT_NOT_FOUND`, `INVALID_REQUEST`, `RATE_LIMITED`).
+- `error.type` **(string)**: A machine-readable error code for programmatic handling (e.g., `AccountNotFound`, `InvalidAccountId`, `ValidationError`).
 - `error.message` **(string)**: A human-readable error message describing what went wrong.
 
 #### Error Response Example
@@ -914,7 +1119,7 @@ When an error occurs, the response structure differs:
 {
   "success": false,
   "error": {
-    "type": "VALIDATION_ERROR",
+    "type": "ValidationError",
     "message": "Invalid Stellar account ID. Must be a valid public key starting with 'G'."
   }
 }
@@ -1235,11 +1440,13 @@ yXLM:GARDNV3Q7YGH5JEKUJE2QG7MEMBZA47GYUYFQ6EVJYY3YKGU6EBQABE
 ### Using Asset Formats in API Requests
 
 **DEX Endpoints:**
-When querying DEX endpoints like `/dex/orderbook`, `/dex/depth`, or `/dex/spread`, always use the CODE:ISSUER format:
+When querying DEX endpoints like `/dex/depth`, `/dex/spread`, `/dex/price`, or `/dex/imbalance`, use the CODE:ISSUER format as path parameters:
 
 ```
-GET /dex/orderbook?buyingAsset=USDC:GBBD47IF...&sellingAsset=XLM:native
-GET /dex/spread?buyingAsset=yXLM:GARDN...&sellingAsset=USDC:GBBD...
+GET /dex/depth/XLM:native/USDC:GBBD47IF...
+GET /dex/spread/XLM:native/USDC:GBBD47IF...
+GET /dex/spread/yXLM:GARDN.../USDC:GBBD...
+GET /dex/price/XLM:native/USDC:GBBD47IF...?amount=100
 ```
 
 **Asset Lookup Endpoints:**
@@ -1362,10 +1569,21 @@ GET /utils/memo?memo=SGVsbG8gV29ybGQ=&memo_type=text
     "status": "ok",
     "service": "StellarKit API",
     "version": "1.0.0",
-    "network": "testnet"
+    "timestamp": "2024-07-01T12:00:00.000Z",
+    "network": "testnet",
+    "uptimeSeconds": 42,
+    "nodeVersion": "v20.11.0",
+    "startedAt": "2024-07-01T11:59:18.000Z",
+    "horizon": {
+      "status": "ok",
+      "responseTimeMs": 45,
+      "network": "testnet"
+    }
   }
 }
 ```
+
+> **Note:** The `version` field is read dynamically from `package.json` at runtime. The value shown above reflects the current release and will update automatically with each new version.
 
 ### Network Status
 
@@ -1677,7 +1895,7 @@ Account sponsorship in Stellar allows one account (the sponsor) to cover the bas
 
 Using this API:
 
-- Inspect sponsorship relationships using `GET /account/:id/sponsorship`. This endpoint helps determine whether an account or its ledger entries are sponsored, who the sponsor is, and which entries are covered — useful for UI indicators, billing reconciliation, or migration workflows.
+- Inspect sponsorship relationships using `GET /account/:id/sponsorships` (preferred) or `GET /account/:id/sponsorship`. See the [API reference table](#account) for a comparison of the two endpoints and which to use for new integrations.
 
 Note: This repository documents the sponsorship inspection endpoint; it does not change any runtime behavior or add sponsorship logic.
 
@@ -2079,28 +2297,127 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting.
 
 ```
 stellarkit-api/
-├── scripts/
-│   └── ws-client-demo.js  # Runnable CLI demo for real-time ledger stream
+├── docs/                        # Supplementary documentation
+├── examples/                    # Runnable usage examples
 ├── src/
 │   ├── config/
-│   │   └── stellar.js         # Stellar SDK + Horizon setup
+│   │   ├── cacheConfig.js       # Cache TTL configuration
+│   │   └── stellar.js           # Stellar SDK + Horizon setup
 │   ├── middleware/
-│   │   ├── errorHandler.js    # Centralised error formatting
-│   │   └── rateLimiter.js     # Rate limiting
+│   │   ├── apiKeyAuth.js        # API key authentication
+│   │   ├── bodySizeLimit.js     # Request body size limiting
+│   │   ├── coerceQueryParams.js # Query param type coercion
+│   │   ├── contentTypeValidator.js
+│   │   ├── errorHandler.js      # Centralised error formatting
+│   │   ├── etag.js              # ETag response caching headers
+│   │   ├── metricsCollector.js  # Request metrics collection
+│   │   ├── normalizeAssetCode.js
+│   │   ├── rateLimiter.js       # Rate limiting
+│   │   ├── rejectDuplicateQueryParams.js
+│   │   ├── requestId.js         # Request ID injection
+│   │   ├── requestLogger.js     # HTTP request logging
+│   │   ├── restrictHttpMethods.js
+│   │   ├── routeCounter.js      # Route hit counter
+│   │   ├── sanitize.js          # Input sanitisation
+│   │   ├── validateRouteParams.js
+│   │   └── webhookSignatureAuth.js
 │   ├── routes/
-│   │   ├── account.js         # /account endpoints
-│   │   ├── asset.js           # /asset endpoints
-│   │   ├── feeEstimate.js     # /fee-estimate endpoint
-│   │   ├── networkStatus.js   # /network-status endpoint
-│   │   └── transactions.js    # /transactions endpoints
+│   │   ├── account.js           # /account endpoints
+│   │   ├── account.counterparties.js
+│   │   ├── accounts.js          # /accounts bulk endpoints
+│   │   ├── accountsBulk.js      # Additional bulk account ops
+│   │   ├── asset.js             # /asset endpoints
+│   │   ├── assetsOverview.js    # /assets overview
+│   │   ├── cacheStats.js        # /cache/stats endpoint
+│   │   ├── claimableBalances.js # /claimable-balances endpoints
+│   │   ├── dex.js               # /dex endpoints
+│   │   ├── feeEstimate.js       # /fee-estimate endpoints
+│   │   ├── liquidityPool.js     # /liquidity-pools endpoints
+│   │   ├── metrics.js           # /metrics endpoints
+│   │   ├── network.js           # /network endpoints
+│   │   ├── networkStatus.js     # /network-status endpoint
+│   │   ├── soroban.js           # /soroban endpoints
+│   │   ├── stellarToml.js       # /stellar-toml endpoint
+│   │   ├── stream.js            # /stream SSE endpoints
+│   │   ├── transaction.effects.js
+│   │   ├── transactions.js      # /transactions endpoints
+│   │   ├── utils.js             # /utils endpoints
+│   │   └── webhooks.js          # /webhooks endpoints
+│   ├── services/
+│   │   ├── cache.js             # In-memory cache service
+│   │   ├── contractEventPoller.js
+│   │   ├── metrics.js           # Metrics aggregation
+│   │   ├── trustlineChangeDetector.js
+│   │   ├── webhookDelivery.js
+│   │   ├── webhookRegistry.js
+│   │   ├── webhookService.js
+│   │   └── webhookStore.js
 │   ├── utils/
-│   │   ├── response.js        # Response helpers
-│   │   └── validators.js      # Input validation helpers
-│   ├── index.js               # App entry point
-│   └── websocket.js           # WebSocket stream handler
+│   │   ├── accountAge.js
+│   │   ├── asset.js
+│   │   ├── assetHelpers.js
+│   │   ├── assetToml.js
+│   │   ├── cache.js
+│   │   ├── contractDeployment.js
+│   │   ├── contractSpec.js
+│   │   ├── crypto.js
+│   │   ├── effectTypes.js
+│   │   ├── errors.js
+│   │   ├── formatAmount.js
+│   │   ├── formatBalance.js
+│   │   ├── formatLedgerSequence.js
+│   │   ├── formatTransaction.js
+│   │   ├── horizonErrors.js
+│   │   ├── horizonHealth.js
+│   │   ├── horizonStatusMapper.js
+│   │   ├── logger.js
+│   │   ├── mapAccountTrade.js
+│   │   ├── mapFeeEstimate.js
+│   │   ├── mapNetworkStatus.js
+│   │   ├── memo.js
+│   │   ├── operationFormatter.js
+│   │   ├── pagination.js
+│   │   ├── parseStellarAmount.js
+│   │   ├── response.js          # Response helpers
+│   │   ├── StellarKitError.js
+│   │   ├── toCamelCase.js
+│   │   ├── tomlResolver.js
+│   │   └── validators.js        # Input validation helpers
+│   ├── index.js                 # App entry point
+│   └── websocket.js             # WebSocket stream handler
 ├── tests/
-│   ├── api.test.js
-│   └── websocket.test.js      # WebSocket stream integration tests
+│   ├── integration/             # End-to-end integration tests
+│   │   ├── account.test.js
+│   │   ├── dex.test.js
+│   │   └── network.test.js
+│   ├── middleware/              # Middleware unit tests
+│   │   ├── contentTypeValidator.test.js
+│   │   ├── errorHandler.test.js
+│   │   ├── rejectDuplicateQueryParams.test.js
+│   │   ├── requestId.test.js
+│   │   ├── restrictHttpMethods.test.js
+│   │   └── sanitize.test.js
+│   ├── routes/                  # Route-level unit tests
+│   │   └── feeEstimate.test.js
+│   ├── stream/                  # Streaming endpoint tests
+│   │   ├── ledgers.test.js
+│   │   ├── payments.test.js
+│   │   ├── payments.webhook.test.js
+│   │   └── transactions.test.js
+│   ├── utils/                   # Utility unit tests
+│   │   ├── contractDeployment.test.js
+│   │   ├── crypto.test.js
+│   │   ├── validateCursor.test.js
+│   │   └── validators.test.js
+│   ├── account.*.test.js        # Account endpoint tests (60+ files)
+│   ├── asset.*.test.js          # Asset endpoint tests
+│   ├── claimableBalances.*.test.js
+│   ├── dex.*.test.js
+│   ├── network.*.test.js
+│   ├── soroban.*.test.js
+│   ├── webhooks.*.test.js
+│   ├── api.test.js              # General API smoke tests
+│   └── websocket.test.js        # WebSocket stream tests
 ├── .env.example
 ├── package.json
 └── README.md
@@ -2227,3 +2544,1230 @@ Client recommendations
 - Implement retries with exponential backoff and jitter instead of tight loops.
 
 Note: This README section documents runtime behavior only — there are intentionally no code changes in this PR.
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec,
+};
+
+const TTL_INITIAL_LEDGERS: u32 = 17_280;
+const TTL_MAX_LEDGERS: u32 = 120_960;
+const MAX_TERM_LEDGERS: u32 = 10_000_000;
+
+#[contracttype]
+#[derive(Clone)]
+pub enum ArbiterMembershipKey {
+    Admin,
+    MembershipTerm,
+    Expiry(Address),
+    Registered(Address),
+    AuditSequence,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MembershipStatus {
+    pub arbiter: Address,
+    pub registered: bool,
+    pub expiry_ledger: u32,
+    pub current_ledger: u32,
+    pub active: bool,
+    pub remaining_ledgers: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TermChangedEvent {
+    pub admin: Address,
+    pub old_term: u32,
+    pub new_term: u32,
+    pub ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenewalEvent {
+    pub arbiter: Address,
+    pub old_expiry: u32,
+    pub new_expiry: u32,
+    pub term: u32,
+    pub ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RegistrationEvent {
+    pub arbiter: Address,
+    pub expiry_ledger: u32,
+    pub term: u32,
+    pub ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MembershipAuditRecord {
+    pub sequence: u32,
+    pub action: Symbol,
+    pub subject: Address,
+    pub actor: Address,
+    pub old_expiry: u32,
+    pub new_expiry: u32,
+    pub ledger: u32,
+}
+
+#[contract]
+pub struct ArbiterMembershipContract;
+
+#[contractimpl]
+impl ArbiterMembershipContract {
+    pub fn init_membership(
+        env: Env,
+        admin: Address,
+        default_term_ledgers: u32,
+    ) {
+        admin.require_auth();
+        validate_term(default_term_ledgers);
+
+        let admin_key = ArbiterMembershipKey::Admin;
+        let term_key = ArbiterMembershipKey::MembershipTerm;
+
+        if env.storage().instance().has(&admin_key) {
+            panic!("membership already initialized");
+        }
+
+        env.storage().instance().set(&admin_key, &admin);
+        env.storage()
+            .instance()
+            .set(&term_key, &default_term_ledgers);
+
+        emit_initialized(&env, &admin, default_term_ledgers);
+    }
+
+    pub fn set_membership_term(
+        env: Env,
+        admin: Address,
+        new_term_ledgers: u32,
+    ) {
+        admin.require_auth();
+        validate_admin(&env, &admin);
+        validate_term(new_term_ledgers);
+
+        let old_term = read_term(&env);
+
+        env.storage()
+            .instance()
+            .set(
+                &ArbiterMembershipKey::MembershipTerm,
+                &new_term_ledgers,
+            );
+
+        emit_term_changed(
+            &env,
+            &admin,
+            old_term,
+            new_term_ledgers,
+        );
+
+        write_audit(
+            &env,
+            symbol_short!("term_set"),
+            admin.clone(),
+            admin,
+            0,
+            0,
+        );
+    }
+
+    pub fn register_arbiter(
+        env: Env,
+        admin: Address,
+        arbiter: Address,
+    ) {
+        admin.require_auth();
+        validate_admin(&env, &admin);
+        validate_address_not_admin(&env, &arbiter);
+
+        let registered_key =
+            ArbiterMembershipKey::Registered(arbiter.clone());
+
+        if env.storage()
+            .persistent()
+            .get::<_, bool>(&registered_key)
+            .unwrap_or(false)
+        {
+            panic!("arbiter already registered");
+        }
+
+        let term = read_term(&env);
+        let now = env.ledger().sequence();
+        let expiry = checked_add(now, term);
+
+        env.storage()
+            .persistent()
+            .set(&registered_key, &true);
+
+        env.storage()
+            .persistent()
+            .set(
+                &ArbiterMembershipKey::Expiry(arbiter.clone()),
+                &expiry,
+            );
+
+        extend_membership_ttl(&env, &arbiter);
+
+        emit_registration(&env, &arbiter, expiry, term);
+
+        write_audit(
+            &env,
+            symbol_short!("arb_reg"),
+            arbiter,
+            admin,
+            0,
+            expiry,
+        );
+    }
+
+    pub fn renew_arbiter_membership(
+        env: Env,
+        arbiter: Address,
+    ) -> u32 {
+        arbiter.require_auth();
+
+        let registered_key =
+            ArbiterMembershipKey::Registered(arbiter.clone());
+
+        if !env.storage()
+            .persistent()
+            .get::<_, bool>(&registered_key)
+            .unwrap_or(false)
+        {
+            panic!("arbiter is not registered");
+        }
+
+        let term = read_term(&env);
+        let now = env.ledger().sequence();
+
+        let expiry_key =
+            ArbiterMembershipKey::Expiry(arbiter.clone());
+
+        let old_expiry = env.storage()
+            .persistent()
+            .get::<_, u32>(&expiry_key)
+            .unwrap_or_else(|| panic!("membership expiry missing"));
+
+        let base = if old_expiry > now {
+            old_expiry
+        } else {
+            now
+        };
+
+        let new_expiry = checked_add(base, term);
+
+        env.storage()
+            .persistent()
+            .set(&expiry_key, &new_expiry);
+
+        extend_membership_ttl(&env, &arbiter);
+
+        emit_renewal(
+            &env,
+            &arbiter,
+            old_expiry,
+            new_expiry,
+            term,
+        );
+
+        write_audit(
+            &env,
+            symbol_short!("arb_renew"),
+            arbiter.clone(),
+            arbiter,
+            old_expiry,
+            new_expiry,
+        );
+
+        new_expiry
+    }
+
+    pub fn get_arbiter_membership(
+        env: Env,
+        arbiter: Address,
+    ) -> MembershipStatus {
+        let registered = env.storage()
+            .persistent()
+            .get::<_, bool>(
+                &ArbiterMembershipKey::Registered(arbiter.clone()),
+            )
+            .unwrap_or(false);
+
+        let expiry = env.storage()
+            .persistent()
+            .get::<_, u32>(
+                &ArbiterMembershipKey::Expiry(arbiter.clone()),
+            )
+            .unwrap_or(0);
+
+        let now = env.ledger().sequence();
+        let active = registered && expiry > now;
+
+        let remaining = if active {
+            expiry - now
+        } else {
+            0
+        };
+
+        MembershipStatus {
+            arbiter,
+            registered,
+            expiry_ledger: expiry,
+            current_ledger: now,
+            active,
+            remaining_ledgers: remaining,
+        }
+    }
+
+    pub fn is_arbiter_membership_active(
+        env: Env,
+        arbiter: Address,
+    ) -> bool {
+        is_active_internal(&env, &arbiter)
+    }
+
+    pub fn filter_active_arbiters(
+        env: Env,
+        candidates: Vec<Address>,
+    ) -> Vec<Address> {
+        let mut active = Vec::new(&env);
+
+        for arbiter in candidates.iter() {
+            if is_active_internal(&env, &arbiter) {
+                active.push_back(arbiter);
+            }
+        }
+
+        active
+    }
+
+    pub fn deactivate_arbiter(
+        env: Env,
+        admin: Address,
+        arbiter: Address,
+    ) {
+        admin.require_auth();
+        validate_admin(&env, &admin);
+
+        let registered_key =
+            ArbiterMembershipKey::Registered(arbiter.clone());
+
+        if !env.storage()
+            .persistent()
+            .get::<_, bool>(&registered_key)
+            .unwrap_or(false)
+        {
+            panic!("arbiter is not registered");
+        }
+
+        let expiry_key =
+            ArbiterMembershipKey::Expiry(arbiter.clone());
+
+        let old_expiry = env.storage()
+            .persistent()
+            .get::<_, u32>(&expiry_key)
+            .unwrap_or(0);
+
+        let now = env.ledger().sequence();
+
+        env.storage()
+            .persistent()
+            .set(&expiry_key, &now);
+
+        extend_membership_ttl(&env, &arbiter);
+
+        env.events().publish(
+            (symbol_short!("arb_deact"), arbiter.clone()),
+            now,
+        );
+
+        write_audit(
+            &env,
+            symbol_short!("arb_deact"),
+            arbiter,
+            admin,
+            old_expiry,
+            now,
+        );
+    }
+}
+
+fn validate_term(term: u32) {
+    if term == 0 {
+        panic!("membership term must be positive");
+    }
+
+    if term > MAX_TERM_LEDGERS {
+        panic!("membership term exceeds maximum");
+    }
+}
+
+fn validate_admin(env: &Env, caller: &Address) {
+    let admin = env.storage()
+        .instance()
+        .get::<_, Address>(&ArbiterMembershipKey::Admin)
+        .unwrap_or_else(|| panic!("membership is not initialized"));
+
+    if admin != *caller {
+        panic!("unauthorized administrator");
+    }
+}
+
+fn read_term(env: &Env) -> u32 {
+    let term = env.storage()
+        .instance()
+        .get::<_, u32>(&ArbiterMembershipKey::MembershipTerm)
+        .unwrap_or_else(|| panic!("membership term not configured"));
+
+    validate_term(term);
+    term
+}
+
+fn validate_address_not_admin(
+    env: &Env,
+    arbiter: &Address,
+) {
+    let admin = env.storage()
+        .instance()
+        .get::<_, Address>(&ArbiterMembershipKey::Admin)
+        .unwrap_or_else(|| panic!("membership is not initialized"));
+
+    if admin == *arbiter {
+        panic!("administrator cannot be registered as arbiter");
+    }
+}
+
+fn checked_add(left: u32, right: u32) -> u32 {
+    left.checked_add(right)
+        .unwrap_or_else(|| panic!("membership expiry overflow"))
+}
+
+fn is_active_internal(
+    env: &Env,
+    arbiter: &Address,
+) -> bool {
+    let registered = env.storage()
+        .persistent()
+        .get::<_, bool>(
+            &ArbiterMembershipKey::Registered(arbiter.clone()),
+        )
+        .unwrap_or(false);
+
+    if !registered {
+        return false;
+    }
+
+    let expiry = env.storage()
+        .persistent()
+        .get::<_, u32>(
+            &ArbiterMembershipKey::Expiry(arbiter.clone()),
+        )
+        .unwrap_or(0);
+
+    expiry > env.ledger().sequence()
+}
+
+fn extend_membership_ttl(
+    env: &Env,
+    arbiter: &Address,
+) {
+    let registered_key =
+        ArbiterMembershipKey::Registered(arbiter.clone());
+
+    let expiry_key =
+        ArbiterMembershipKey::Expiry(arbiter.clone());
+
+    env.storage().persistent().extend_ttl(
+        &registered_key,
+        TTL_INITIAL_LEDGERS,
+        TTL_MAX_LEDGERS,
+    );
+
+    env.storage().persistent().extend_ttl(
+        &expiry_key,
+        TTL_INITIAL_LEDGERS,
+        TTL_MAX_LEDGERS,
+    );
+}
+
+fn emit_initialized(
+    env: &Env,
+    admin: &Address,
+    term: u32,
+) {
+    env.events().publish(
+        (symbol_short!("arb_init"), admin.clone()),
+        (term, env.ledger().sequence()),
+    );
+}
+
+fn emit_term_changed(
+    env: &Env,
+    admin: &Address,
+    old_term: u32,
+    new_term: u32,
+) {
+    let event = TermChangedEvent {
+        admin: admin.clone(),
+        old_term,
+        new_term,
+        ledger: env.ledger().sequence(),
+    };
+
+    env.events().publish(
+        (symbol_short!("term_change"),),
+        event,
+    );
+}
+
+fn emit_registration(
+    env: &Env,
+    arbiter: &Address,
+    expiry: u32,
+    term: u32,
+) {
+    let event = RegistrationEvent {
+        arbiter: arbiter.clone(),
+        expiry_ledger: expiry,
+        term,
+        ledger: env.ledger().sequence(),
+    };
+
+    env.events().publish(
+        (symbol_short!("arb_register"),),
+        event,
+    );
+}
+
+fn emit_renewal(
+    env: &Env,
+    arbiter: &Address,
+    old_expiry: u32,
+    new_expiry: u32,
+    term: u32,
+) {
+    let event = RenewalEvent {
+        arbiter: arbiter.clone(),
+        old_expiry,
+        new_expiry,
+        term,
+        ledger: env.ledger().sequence(),
+    };
+
+    env.events().publish(
+        (symbol_short!("arb_renew"),),
+        event,
+    );
+}
+
+fn write_audit(
+    env: &Env,
+    action: Symbol,
+    subject: Address,
+    actor: Address,
+    old_expiry: u32,
+    new_expiry: u32,
+) {
+    let seq_key = ArbiterMembershipKey::AuditSequence;
+
+    let current = env.storage()
+        .instance()
+        .get::<_, u32>(&seq_key)
+        .unwrap_or(0);
+
+    let next = current.checked_add(1)
+        .unwrap_or_else(|| panic!("audit sequence overflow"));
+
+    let record = MembershipAuditRecord {
+        sequence: next,
+        action,
+        subject,
+        actor,
+        old_expiry,
+        new_expiry,
+        ledger: env.ledger().sequence(),
+    };
+
+    env.storage().instance().set(&seq_key, &next);
+
+    env.storage()
+        .persistent()
+        .set(&(seq_key.clone(), next), &record);
+
+    env.storage().persistent().extend_ttl(
+        &(seq_key, next),
+        TTL_INITIAL_LEDGERS,
+        TTL_MAX_LEDGERS,
+    );
+
+    env.events().publish(
+        (symbol_short!("arb_audit"),),
+        record,
+    );
+}
+
+pub fn ensure_arbiter_active(
+    env: &Env,
+    arbiter: &Address,
+) {
+    if !is_active_internal(env, arbiter) {
+        panic!("arbiter membership expired or inactive");
+    }
+}
+
+pub fn select_active_panel(
+    env: &Env,
+    candidates: &Vec<Address>,
+    required_count: u32,
+) -> Vec<Address> {
+    if required_count == 0 {
+        panic!("panel size must be positive");
+    }
+
+    let mut active = Vec::new(env);
+
+    for candidate in candidates.iter() {
+        if is_active_internal(env, &candidate)
+            && !active.contains(candidate.clone())
+        {
+            active.push_back(candidate);
+        }
+    }
+
+    if active.len() < required_count {
+        panic!("not enough active arbiters for panel");
+    }
+
+    let mut selected = Vec::new(env);
+    let mut index = 0;
+
+    while index < required_count {
+        selected.push_back(active.get(index).unwrap());
+        index += 1;
+    }
+
+    selected
+}
+
+#[cfg(test)]
+mod test_arbiter_membership {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+
+    fn setup() -> (
+        Env,
+        ArbiterMembershipContractClient<'static>,
+        Address,
+        Address,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(
+            ArbiterMembershipContract,
+            (),
+        );
+
+        let client =
+            ArbiterMembershipContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let arbiter = Address::generate(&env);
+
+        client.init_membership(&admin, &100);
+
+        (env, client, admin, arbiter)
+    }
+
+    #[test]
+    fn registration_starts_active_membership() {
+        let (env, client, admin, arbiter) = setup();
+
+        client.register_arbiter(&admin, &arbiter);
+
+        let status = client.get_arbiter_membership(&arbiter);
+
+        assert!(status.registered);
+        assert!(status.active);
+
+        assert_eq!(
+            status.expiry_ledger,
+            env.ledger().sequence() + 100,
+        );
+
+        assert_eq!(status.remaining_ledgers, 100);
+    }
+
+    #[test]
+    fn membership_expires_at_expiry_ledger() {
+        let (env, client, admin, arbiter) = setup();
+
+        client.register_arbiter(&admin, &arbiter);
+
+        env.ledger().set_sequence_number(
+            env.ledger().sequence() + 100,
+        );
+
+        assert!(
+            !client.is_arbiter_membership_active(&arbiter)
+        );
+
+        let status = client.get_arbiter_membership(&arbiter);
+
+        assert!(!status.active);
+        assert_eq!(status.remaining_ledgers, 0);
+    }
+
+    #[test]
+    fn renewal_extends_expiry() {
+        let (_env, client, admin, arbiter) = setup();
+
+        client.register_arbiter(&admin, &arbiter);
+
+        let old = client
+            .get_arbiter_membership(&arbiter)
+            .expiry_ledger;
+
+        let new_expiry =
+            client.renew_arbiter_membership(&arbiter);
+
+        assert_eq!(new_expiry, old + 100);
+
+        assert!(
+            client.is_arbiter_membership_active(&arbiter)
+        );
+    }
+
+    #[test]
+    fn late_renewal_starts_from_current_ledger() {
+        let (env, client, admin, arbiter) = setup();
+
+        client.register_arbiter(&admin, &arbiter);
+
+        let old_expiry = client
+            .get_arbiter_membership(&arbiter)
+            .expiry_ledger;
+
+        env.ledger().set_sequence_number(old_expiry + 5);
+
+        let new_expiry =
+            client.renew_arbiter_membership(&arbiter);
+
+        assert_eq!(new_expiry, old_expiry + 5 + 100);
+
+        assert!(
+            client.is_arbiter_membership_active(&arbiter)
+        );
+    }
+
+    #[test]
+    fn expired_arbiter_is_removed_from_candidates() {
+        let (env, client, admin, arbiter) = setup();
+
+        let second = Address::generate(&env);
+
+        client.register_arbiter(&admin, &arbiter);
+        client.register_arbiter(&admin, &second);
+
+        let expiry = client
+            .get_arbiter_membership(&arbiter)
+            .expiry_ledger;
+
+        env.ledger().set_sequence_number(expiry);
+
+        let candidates = Vec::from_array(
+            &env,
+            [arbiter.clone(), second.clone()],
+        );
+
+        let active = client.filter_active_arbiters(&candidates);
+
+        assert_eq!(active.len(), 1);
+        assert_eq!(active.get(0).unwrap(), second);
+    }
+
+    #[test]
+    fn query_reports_expiry_for_registered_arbiter() {
+        let (env, client, admin, arbiter) = setup();
+
+        client.register_arbiter(&admin, &arbiter);
+
+        let status = client.get_arbiter_membership(&arbiter);
+
+        assert_eq!(status.arbiter, arbiter);
+
+        assert_eq!(
+            status.current_ledger,
+            env.ledger().sequence(),
+        );
+
+        assert!(
+            status.expiry_ledger > status.current_ledger
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "membership term must be positive")]
+    fn zero_term_is_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register(
+            ArbiterMembershipContract,
+            (),
+        );
+
+        let client =
+            ArbiterMembershipContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+
+        client.init_membership(&admin, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "arbiter is not registered")]
+    fn unregistered_arbiter_cannot_renew() {
+        let (_env, client, _admin, unknown) = setup();
+
+        client.renew_arbiter_membership(&unknown);
+    }
+
+    #[test]
+    #[should_panic(expected = "arbiter already registered")]
+    fn duplicate_registration_is_rejected() {
+        let (_env, client, admin, arbiter) = setup();
+
+        client.register_arbiter(&admin, &arbiter);
+        client.register_arbiter(&admin, &arbiter);
+    }
+
+    #[test]
+    #[should_panic(expected = "membership already initialized")]
+    fn initialization_cannot_run_twice() {
+        let (_env, client, admin, _arbiter) = setup();
+
+        client.init_membership(&admin, &100);
+    }
+}
+
+const request = require("supertest");
+const app = require("../../app");
+
+jest.mock("../../services/assetHolders", () => ({
+  getAssetHolders: jest.fn(),
+}));
+
+jest.mock("../../services/dexPrice", () => ({
+  getCurrentPriceXLM: jest.fn(),
+}));
+
+const {
+  getAssetHolders,
+} = require("../../services/assetHolders");
+
+const {
+  getCurrentPriceXLM,
+} = require("../../services/dexPrice");
+
+describe("GET /asset/:code/:issuer/market-cap", () => {
+  const code = "TEST";
+  const issuer = "GISSUER123";
+
+  const url = () => `/asset/${code}/${issuer}/market-cap`;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe("circulating supply", () => {
+    test("excludes the issuer's 10% holding", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "40.0000000" },
+        { account: "GHOLDER2", balance: "50.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(2);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("returns zero when only the issuer holds the asset", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1000.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(3);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns zero when the holder list is empty", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+    });
+
+    test("does not subtract an issuer balance when it is absent", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: "GHOLDER1", balance: "25.0000000" },
+        { account: "GHOLDER2", balance: "75.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("100.0000000");
+    });
+
+    test("does not include the issuer in circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "500.0000000" },
+        { account: "GHOLDER1", balance: "200.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("200.0000000");
+    });
+  });
+
+  describe("market capitalization", () => {
+    test("computes market cap as circulating supply times price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+        { account: "GHOLDER1", balance: "600.0000000" },
+        { account: "GHOLDER2", balance: "300.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.5);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("900.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.5);
+      expect(response.body.marketCapXLM).toBe(450);
+    });
+
+    test("returns zero market cap for zero circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(10);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns null market cap when price is unavailable", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBeNull();
+      expect(response.body.marketCapXLM).toBeNull();
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("supports a zero market price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBe(0);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("preserves a positive circulating supply at a small price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1.0000000" },
+        { account: "GHOLDER1", balance: "999.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.000001);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("999.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.000001);
+      expect(response.body.marketCapXLM).toBeCloseTo(0.000999);
+    });
+  });
+
+  describe("mock verification", () => {
+    test("requests holder data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("requests DEX price data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getCurrentPriceXLM).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("queries both data sources once", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledTimes(1);
+      expect(getCurrentPriceXLM).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+const request = require("supertest");
+const app = require("../../app");
+
+jest.mock("../../services/assetHolders", () => ({
+  getAssetHolders: jest.fn(),
+}));
+
+jest.mock("../../services/dexPrice", () => ({
+  getCurrentPriceXLM: jest.fn(),
+}));
+
+const {
+  getAssetHolders,
+} = require("../../services/assetHolders");
+
+const {
+  getCurrentPriceXLM,
+} = require("../../services/dexPrice");
+
+describe("GET /asset/:code/:issuer/market-cap", () => {
+  const code = "TEST";
+  const issuer = "GISSUER123";
+
+  const url = () => `/asset/${code}/${issuer}/market-cap`;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe("circulating supply", () => {
+    test("excludes the issuer's 10% holding", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "40.0000000" },
+        { account: "GHOLDER2", balance: "50.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(2);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("returns zero when only the issuer holds the asset", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1000.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(3);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns zero when the holder list is empty", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+    });
+
+    test("does not subtract an issuer balance when it is absent", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: "GHOLDER1", balance: "25.0000000" },
+        { account: "GHOLDER2", balance: "75.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("100.0000000");
+    });
+
+    test("does not include the issuer in circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "500.0000000" },
+        { account: "GHOLDER1", balance: "200.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("200.0000000");
+    });
+  });
+
+  describe("market capitalization", () => {
+    test("computes market cap as circulating supply times price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+        { account: "GHOLDER1", balance: "600.0000000" },
+        { account: "GHOLDER2", balance: "300.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.5);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("900.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.5);
+      expect(response.body.marketCapXLM).toBe(450);
+    });
+
+    test("returns zero market cap for zero circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(10);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns null market cap when price is unavailable", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBeNull();
+      expect(response.body.marketCapXLM).toBeNull();
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("supports a zero market price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBe(0);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("preserves a positive circulating supply at a small price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1.0000000" },
+        { account: "GHOLDER1", balance: "999.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.000001);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("999.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.000001);
+      expect(response.body.marketCapXLM).toBeCloseTo(0.000999);
+    });
+  });
+
+  describe("mock verification", () => {
+    test("requests holder data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("requests DEX price data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getCurrentPriceXLM).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("queries both data sources once", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledTimes(1);
+      expect(getCurrentPriceXLM).toHaveBeenCalledTimes(1);
+    });
+  });
+});

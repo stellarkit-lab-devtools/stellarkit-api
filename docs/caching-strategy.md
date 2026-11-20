@@ -67,6 +67,7 @@ See [Cached Endpoints Reference](#cached-endpoints-reference) below for per-endp
 | `/network/base-fee` | 5 sec | `CACHE_TTL_BASE_FEE_MS` | Base fee can change each ledger during congestion |
 | `/network/fee-percentiles` | 5 sec | `CACHE_TTL_BASE_FEE_MS` | Fee distribution updates with each ledger |
 | `/network/validators` | 300 sec (5 min) | `CACHE_TTL_VALIDATORS_MS` | Validator list changes infrequently |
+| `/network/soroban-stats` | 60 sec | `CACHE_TTL_SOROBAN_STATS_MS` | Scans up to 2,000 operations per request, and a 24h aggregate barely moves within a minute |
 | `/fee-estimate` | 5 sec | `CACHE_TTL_FEE_ESTIMATE_MS` | Network congestion changes rapidly |
 | `/fee-estimate/surge-status` | 5 sec | `CACHE_TTL_FEE_ESTIMATE_MS` | Surge detection requires recent data |
 | `/fee-estimate/trends` | 5 sec | `CACHE_TTL_FEE_ESTIMATE_MS` | Historical trends updated each ledger |

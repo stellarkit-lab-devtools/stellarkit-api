@@ -20,6 +20,7 @@
  *   CACHE_TTL_BALANCES_BY_SPONSOR_MS — /claimable-balances/by-sponsor (default: 30 000 ms)
  *   CACHE_TTL_FREEZE_CHECK_MS   — /account/:id/freeze-status     (default: 30 000 ms)
  *   CACHE_TTL_SIGNING_KEYS_MS   — /account/:id/signing-keys      (default: 20 000 ms)
+ *   CACHE_TTL_SOROBAN_STATS_MS  — /network/soroban-stats         (default: 60 000 ms)
  *
  * The legacy CACHE_TTL_MS variable is still respected as a global fallback so
  * existing deployments are not broken.
@@ -87,6 +88,12 @@ const cacheTTL = {
     15000
   ),
 
+  /** /account/:id/liquidity-contribution — aggregated pool positions, same volatility as pool-positions */
+  liquidityContribution: msToSeconds(
+    process.env.CACHE_TTL_LIQUIDITY_CONTRIBUTION_MS,
+    15000
+  ),
+
   /** /account/:id/transaction-count — changes only on new submissions */
   transactionCount: msToSeconds(
     process.env.CACHE_TTL_TX_COUNT_MS,
@@ -97,6 +104,12 @@ const cacheTTL = {
   topMarkets: msToSeconds(
     process.env.CACHE_TTL_TOP_MARKETS_MS,
     60000
+  ),
+
+  /** /dex/volume-leaders — 24h asset volume ranking, refresh every 5 min by default */
+  volumeLeaders: msToSeconds(
+    process.env.CACHE_TTL_VOLUME_LEADERS_MS,
+    300000
   ),
 
   /** /dex/arbitrage — market conditions change rapidly, short TTL by default */
@@ -153,6 +166,18 @@ const cacheTTL = {
     20000
   ),
 
+  /** /account/:id/claimable-balance-summary — claimable balance eligibility summary, 15 s default */
+  claimableBalanceSummary: msToSeconds(
+    process.env.CACHE_TTL_CLAIMABLE_BALANCE_SUMMARY_MS,
+    15000
+  ),
+
+  /** /network/fee-history — per-ledger fee statistics, 10 s default */
+  feeHistory: msToSeconds(
+    process.env.CACHE_TTL_FEE_HISTORY_MS,
+    10000
+  ),
+
   /** /soroban/contract/:id/storage — instance storage changes only on invoke */
   contractStorage: msToSeconds(
     process.env.CACHE_TTL_CONTRACT_STORAGE_MS,
@@ -168,6 +193,15 @@ const cacheTTL = {
   /** /soroban/transactions/:hash — transaction results are immutable once finalized */
   sorobanTransaction: msToSeconds(
     process.env.CACHE_TTL_SOROBAN_TX_MS,
+  /** /network/soroban-stats — scans up to 2,000 operations, so cache for 60 s */
+  sorobanStats: msToSeconds(
+    process.env.CACHE_TTL_SOROBAN_STATS_MS,
+    60000
+  ),
+
+  /** /account/:id/balance-velocity — payment history analysis, 30 s default */
+  balanceVelocity: msToSeconds(
+    process.env.CACHE_TTL_BALANCE_VELOCITY_MS,
     30000
   ),
 };
