@@ -4627,6 +4627,118 @@ router.get("/:id/asset-received-summary", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/asset-sent-summary
+ *
+ * Aggregates lifetime outbound payment volume by asset, including the number
+ * of distinct recipients and the first/last sent timestamps. Results are
+ * cached with X-Cache headers and ?fresh=true bypass.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypass cache when "true"
+ *
+ * Response headers:
+ *   - X-Cache: HIT  — served from cache
+ *   - X-Cache: MISS — fetched live from Horizon and cached
+ */
+router.get("/:id/asset-sent-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `asset-sent-summary:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const sentByAsset = new Map();
+    let cursor;
+
+    for (;;) {
+      let query = server.payments().forAccount(id).limit(200).order("asc");
+      if (cursor) query = query.cursor(cursor);
+
+      const page = await withHorizonTiming(req, () => query.call());
+      const records = page.records || [];
+      if (records.length === 0) break;
+
+      for (const op of records) {
+        cursor = op.paging_token;
+        if (op.transaction_successful === false) continue;
+
+        const isCreateAccount = op.type === "create_account";
+        const isPayment = [
+          "payment",
+          "path_payment_strict_receive",
+          "path_payment_strict_send",
+        ].includes(op.type);
+        if (!isCreateAccount && !isPayment) continue;
+
+        const sender = isCreateAccount ? op.funder : op.from;
+        const recipient = isCreateAccount ? op.account : op.to;
+        if (sender !== id || !recipient || recipient === id) continue;
+
+        const amount = Number(op.amount || op.starting_balance || 0);
+        if (!Number.isFinite(amount) || amount <= 0) continue;
+
+        const assetCode = isCreateAccount ? "XLM" : op.asset_code || "XLM";
+        const assetIssuer = isCreateAccount ? null : op.asset_issuer || null;
+        const assetType = isCreateAccount
+          ? "native"
+          : op.asset_type || (assetCode === "XLM" ? "native" : null);
+        const assetKey = assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode;
+        const timestamp = new Date(op.created_at);
+        if (Number.isNaN(timestamp.getTime())) continue;
+
+        let summary = sentByAsset.get(assetKey);
+        if (!summary) {
+          summary = {
+            asset: normalizeAsset(assetCode, assetIssuer, assetType),
+            totalSent: 0,
+            recipients: new Set(),
+            firstSentAt: timestamp,
+            lastSentAt: timestamp,
+          };
+          sentByAsset.set(assetKey, summary);
+        }
+
+        summary.totalSent += amount;
+        summary.recipients.add(recipient);
+        if (timestamp < summary.firstSentAt) summary.firstSentAt = timestamp;
+        if (timestamp > summary.lastSentAt) summary.lastSentAt = timestamp;
+      }
+
+      if (records.length < 200) break;
+    }
+
+    const summary = Array.from(sentByAsset.values())
+      .filter((entry) => entry.totalSent > 0)
+      .map((entry) => ({
+        asset: entry.asset,
+        totalSent: entry.totalSent.toFixed(7),
+        recipientCount: entry.recipients.size,
+        firstSentAt: entry.firstSentAt.toISOString(),
+        lastSentAt: entry.lastSentAt.toISOString(),
+      }))
+      .sort((a, b) => Number(b.totalSent) - Number(a.totalSent));
+
+    res.set("X-Cache", "MISS");
+    const response = { accountId: id, summary };
+    cacheService.set(cacheKey, response, cacheTTL.CACHE_TTL_ACCOUNT);
+    return success(res, response);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/summary
  *
  * Returns a compact, aggregated account summary suitable for dashboards
