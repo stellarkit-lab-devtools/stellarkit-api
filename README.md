@@ -41,6 +41,7 @@ This project is ideal for:
 
 ## Documentation
 
+- [StellarKit vs raw Horizon](docs/stellarkit-vs-horizon.md) — side-by-side comparisons for balances, filtered payments, DEX spread, account risk and claimable-balance eligibility, plus when to call Horizon directly
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
