@@ -45,6 +45,7 @@ const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
 const requestIdMiddleware = require("./middleware/requestId");
+const requestTimeout = require("./middleware/requestTimeout");
 const requestLogger = require("./middleware/requestLogger");
 const metricsCollector = require("./middleware/metricsCollector");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
@@ -226,6 +227,7 @@ if (allowedOriginsEnv) {
   app.use(cors());
 }
 app.use(requestIdMiddleware);
+app.use(requestTimeout);
 app.use(requestLogger);
 app.use(metricsCollector);
 app.use(contentTypeValidator);

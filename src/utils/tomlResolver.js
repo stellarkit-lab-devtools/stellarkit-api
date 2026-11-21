@@ -1,4 +1,4 @@
-const axios = require("axios");
+const { safeFetchToml } = require("./safeFetch");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 
@@ -177,15 +177,9 @@ async function fetchStellarToml(homeDomain, timeout = 5000) {
   if (!homeDomain) return null;
 
   try {
-    const tomlUrl = `https://${homeDomain}/.well-known/stellar.toml`;
-    const response = await axios.get(tomlUrl, {
-      timeout,
-      headers: {
-        "User-Agent": "StellarKit-API/1.0",
-      },
-    });
-
-    return parseStellarToml(response.data);
+    // All TOML network I/O goes through the hardened, SSRF-safe helper.
+    const text = await safeFetchToml(homeDomain, { timeoutMs: timeout });
+    return parseStellarToml(text);
   } catch (error) {
     return null;
   }

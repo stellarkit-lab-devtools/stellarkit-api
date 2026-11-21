@@ -1,5 +1,5 @@
-const axios = require("axios");
 const toml = require("toml");
+const { safeFetchToml } = require("./safeFetch");
 
 function normalizeHomeDomain(homeDomain) {
   if (!homeDomain || typeof homeDomain !== "string") return null;
@@ -43,14 +43,8 @@ async function fetchStellarToml(homeDomain) {
   if (!domain) return null;
 
   try {
-    const { data } = await axios.get(
-      `https://${domain}/.well-known/stellar.toml`,
-      {
-        responseType: "text",
-        timeout: 5000,
-      },
-    );
-    return toml.parse(data);
+    const text = await safeFetchToml(domain);
+    return toml.parse(text);
   } catch (_) {
     return null;
   }
