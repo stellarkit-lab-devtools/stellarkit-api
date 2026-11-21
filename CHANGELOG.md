@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** All POST request bodies are now validated declaratively with a single Ajv-based `validateBody(schema)` middleware. Unknown properties are rejected with HTTP 400 `ValidationError` including `details: [{ path, message }]`; offending values are never echoed. Bodies that previously relied on ignored extra fields must omit them.
+
 ### Added
 - Account age and longevity metrics endpoint: `GET /account/:id/age`
 - Asset freeze status check endpoint: `GET /account/:id/freeze-status/:assetCode/:assetIssuer`

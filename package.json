@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "types": "types/index.d.ts",
   "scripts": {
-      "start": "node src/index.js",
-      "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "test": "jest --coverage",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix",
@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.3.0",
+    "ajv": "^8.20.0",
     "axios": "^1.7.2",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
@@ -46,7 +47,10 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testPathIgnorePatterns": ["/node_modules/", "/.kilo/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.kilo/"
+    ]
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",

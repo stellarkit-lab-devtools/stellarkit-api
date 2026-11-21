@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
@@ -364,7 +366,7 @@ router.get("/trends", async (req, res, next) => {
  * POST /fee-estimate/batch
  * { "transactions": [{ "type": "payment", "operationCount": 1 }, { "type": "swap", "operationCount": 3 }] }
  */
-router.post("/batch", async (req, res, next) => {
+router.post("/batch", validateBody(schemas.feeBatch), async (req, res, next) => {
   try {
     const BATCH_MAX = 10;
     const { transactions } = req.body || {};

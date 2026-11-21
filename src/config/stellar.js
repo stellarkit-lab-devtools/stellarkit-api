@@ -5,6 +5,7 @@ const {
   makeHorizonTimeoutError,
   isHorizonTimeoutError,
 } = require("../utils/errors");
+const logger = require("../utils/logger");
 
 const NETWORK = process.env.STELLAR_NETWORK || "testnet";
 
@@ -53,6 +54,10 @@ const sorobanServer = sorobanRpcUrl ? new rpc.Server(sorobanRpcUrl) : null;
  * @throws {Error} On Horizon errors (404, network errors, etc.)
  */
 async function fetchAccountCreation(publicKey) {
+  // Horizon wrapper logging: the shared logger automatically merges the
+  // current request context (requestId/method/route) without changing the
+  // signature of this helper or any of its callers.
+  logger.debug({ operation: "fetchAccountCreation" }, "Horizon request started");
   try {
     const txResponse = await server
       .transactions()

@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router  = express.Router();
 const webhookStore = require("../services/webhookStore");
 const { success }  = require("../utils/response");
@@ -142,7 +144,7 @@ function buildWebhookStats() {
  *
  * Response 400: invalid URL or missing required fields.
  */
-router.post("/register", (req, res, next) => {
+router.post("/register", validateBody(schemas.webhook), (req, res, next) => {
   try {
     const body = req.body || {};
 
@@ -204,7 +206,7 @@ router.post("/register", (req, res, next) => {
  *
  * Response 400: { "success": false, "error": { "type": "ValidationError", ... } }
  */
-router.post("/", webhookSignatureAuth, (req, res, next) => {
+router.post("/", webhookSignatureAuth, validateBody(schemas.webhook), (req, res, next) => {
   try {
     const validationError = validateRegistration(req.body);
     if (validationError) {
@@ -342,7 +344,7 @@ router.delete("/:webhookId", webhookSignatureAuth, (req, res, next) => {
  *
  * Response 404: webhook not found.
  */
-router.post("/:webhookId/pause", webhookSignatureAuth, (req, res, next) => {
+router.post("/:webhookId/pause", webhookSignatureAuth, validateBody(schemas.webhookAction), (req, res, next) => {
   try {
     const { webhookId } = req.params;
 
@@ -402,7 +404,7 @@ router.post("/:webhookId/pause", webhookSignatureAuth, (req, res, next) => {
  *
  * Response 404: webhook not found.
  */
-router.post("/:webhookId/resume", webhookSignatureAuth, (req, res, next) => {
+router.post("/:webhookId/resume", webhookSignatureAuth, validateBody(schemas.webhookAction), (req, res, next) => {
   try {
     const { webhookId } = req.params;
 
