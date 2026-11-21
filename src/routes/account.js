@@ -1481,6 +1481,99 @@ router.get("/:id/offers", async (req, res, next) => {
 });
 
 
+const SIGNER_CHANGE_EFFECT_TYPES = new Set([
+  "signer_created",
+  "signer_removed",
+  "signer_updated",
+  "account_thresholds_updated",
+]);
+
+/**
+ * GET /account/:id/signer-changes
+ *
+ * Lists recent signer and threshold effects for takeover monitoring. A newly
+ * created signer whose weight meets the account's current high threshold is
+ * flagged with `controlCapable: true`.
+ */
+router.get("/:id/signer-changes", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const rawDays = req.query.days === undefined ? 30 : Number(req.query.days);
+    if (!Number.isFinite(rawDays) || rawDays < 1) {
+      const err = new Error("Query param 'days' must be a positive number.");
+      err.isValidation = true;
+      err.field = "days";
+      err.status = 400;
+      throw err;
+    }
+    const days = Math.min(Math.floor(rawDays), 365);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const cutoff = Date.now() - days * MS_PER_DAY;
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+    const currentThresholds = {
+      low: Number(account.thresholds?.low_threshold ?? 0),
+      med: Number(account.thresholds?.med_threshold ?? 0),
+      high: Number(account.thresholds?.high_threshold ?? 0),
+    };
+
+    let query = server.effects().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+    const effectResponse = await query.call();
+    const effects = (effectResponse.records || []).filter((effect) => {
+      const type = effect.type === "account_thresholds_updated" ? "thresholds_updated" : effect.type;
+      if (!SIGNER_CHANGE_EFFECT_TYPES.has(effect.type)) return false;
+      const timestamp = Date.parse(effect.created_at);
+      return Number.isNaN(timestamp) || timestamp >= cutoff;
+    });
+
+    const changes = effects.map((effect) => {
+      const type = effect.type === "account_thresholds_updated" ? "thresholds_updated" : effect.type;
+      const weight = effect.weight != null ? Number(effect.weight) : null;
+      const thresholds =
+        type === "thresholds_updated"
+          ? {
+              low: Number(effect.low_threshold ?? currentThresholds.low),
+              med: Number(effect.med_threshold ?? currentThresholds.med),
+              high: Number(effect.high_threshold ?? currentThresholds.high),
+            }
+          : currentThresholds;
+
+      return {
+        type,
+        signerKey: effect.public_key || effect.key || effect.signer?.key || null,
+        weight,
+        thresholds,
+        controlCapable:
+          type === "signer_created" &&
+          weight !== null &&
+          currentThresholds.high > 0 &&
+          weight >= currentThresholds.high,
+        ledger: effect.ledger_sequence ?? effect.ledger ?? null,
+        timestamp: toISOTimestamp(effect.created_at),
+        transactionHash: effect.transaction_hash || null,
+      };
+    });
+
+    return success(res, {
+      accountId: id,
+      changes,
+      total: changes.length,
+    }, {
+      meta: {
+        limit,
+        order,
+        days,
+        cursor: cursor || null,
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 /**
  * GET /account/:id/history
  * Returns a unified account activity feed combining recent operations and effects.
@@ -6801,32 +6894,6 @@ const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // every open offer.
 const OFFERS_SUMMARY_MAX_PAGES = 5;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/**
- * Parses a Horizon decimal amount ("12.5000000") into integer stroops so that
- * totals can be summed without floating-point drift.
- *
- * @param {string} amount
- * @returns {bigint} Stroops, or 0n when the value is not a decimal amount.
- */
-function amountToStroops(amount) {
-  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(String(amount ?? "").trim());
-  if (!match) return 0n;
-  const [, whole, fraction = ""] = match;
-  return BigInt(whole) * STROOPS_PER_UNIT + BigInt(fraction.padEnd(7, "0"));
-}
-
-/**
- * Formats integer stroops as a seven-decimal amount string.
- *
- * @param {bigint} stroops
- * @returns {string}
- */
-function stroopsToAmount(stroops) {
-  const whole = stroops / STROOPS_PER_UNIT;
-  const fraction = (stroops % STROOPS_PER_UNIT).toString().padStart(7, "0");
-  return `${whole}.${fraction}`;
-}
 
 /**
  * Returns an offer's price (units of buying asset per unit of selling asset)
