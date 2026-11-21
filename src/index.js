@@ -241,6 +241,9 @@ app.use((req, res, next) => {
 });
 
 // ── Metrics (excluded from rate limiting) ───────────────────────────────────
+// Enforce admin scope before the metrics router is mounted; the global API key
+// middleware below is mounted later in the chain.
+app.use("/metrics", apiKeyMiddleware);
 app.use("/metrics", metricsRouter);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
