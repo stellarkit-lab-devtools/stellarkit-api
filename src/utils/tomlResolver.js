@@ -167,6 +167,42 @@ function parseStellarToml(content) {
 }
 
 /**
+ * Fetches and parses a Stellar TOML file from a given home domain, returning
+ * a machine-readable reason when the fetch or parse fails. This is the single
+ * TOML fetching path shared by every consumer (including home-domain-check).
+ *
+ * @param {string} homeDomain - The home domain to fetch TOML from (e.g., "stellar.org")
+ * @param {number} [timeout=5000] - Request timeout in milliseconds
+ * @returns {Promise<{ toml: Object|null, reason: string|null }>}
+ */
+async function fetchStellarTomlResult(homeDomain, timeout = 5000) {
+  if (!homeDomain) return { toml: null, reason: "no_home_domain" };
+
+  let response;
+  try {
+    const tomlUrl = `https://${homeDomain}/.well-known/stellar.toml`;
+    response = await axios.get(tomlUrl, {
+      timeout,
+      headers: {
+        "User-Agent": "StellarKit-API/1.0",
+      },
+    });
+  } catch (error) {
+    return { toml: null, reason: "toml_unreachable" };
+  }
+
+  try {
+    const toml = parseStellarToml(response.data);
+    if (!toml || typeof toml !== "object" || Array.isArray(toml) || Object.keys(toml).length === 0) {
+      return { toml: null, reason: "toml_invalid" };
+    }
+    return { toml, reason: null };
+  } catch (error) {
+    return { toml: null, reason: "toml_invalid" };
+  }
+}
+
+/**
  * Fetches and parses a Stellar TOML file from a given home domain.
  *
  * @param {string} homeDomain - The home domain to fetch TOML from (e.g., "stellar.org")
@@ -174,21 +210,8 @@ function parseStellarToml(content) {
  * @returns {Promise<Object|null>} Parsed TOML object or null if not found/unreachable
  */
 async function fetchStellarToml(homeDomain, timeout = 5000) {
-  if (!homeDomain) return null;
-
-  try {
-    const tomlUrl = `https://${homeDomain}/.well-known/stellar.toml`;
-    const response = await axios.get(tomlUrl, {
-      timeout,
-      headers: {
-        "User-Agent": "StellarKit-API/1.0",
-      },
-    });
-
-    return parseStellarToml(response.data);
-  } catch (error) {
-    return null;
-  }
+  const { toml } = await fetchStellarTomlResult(homeDomain, timeout);
+  return toml;
 }
 
 /**
@@ -351,6 +374,7 @@ async function fetchNormalisedToml(domain, fresh = false) {
 
 module.exports = {
   fetchStellarToml,
+  fetchStellarTomlResult,
   normaliseStellarToml,
   fetchNormalisedToml,
   getAssetMetadataFromToml,
