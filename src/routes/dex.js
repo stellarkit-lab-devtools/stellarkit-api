@@ -13,6 +13,120 @@ const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { makeOrderBookEmptyError } = require("../utils/errors");
 const StellarKitError = require("../utils/StellarKitError");
+const { parsePaginationParams } = require("../utils/pagination");
+const { toISOTimestamp } = require("../utils/response");
+
+/**
+ * Parse an asset query filter. Both "XLM" and "XLM:native" are accepted for
+ * the native asset; issued assets use the README's "CODE:ISSUER" format.
+ */
+function parseOfferAssetFilter(value, field) {
+  if (typeof value !== "string" || value.trim() === "") {
+    const err = new Error(`Query param '${field}' is required.`);
+    err.isValidation = true;
+    err.field = field;
+    err.status = 400;
+    throw err;
+  }
+  const trimmed = value.trim();
+  if (trimmed.toUpperCase() === "XLM") return Asset.native();
+  try {
+    return parseStellarAsset(trimmed);
+  } catch (err) {
+    const validationErr = new Error(
+      `Query param '${field}' must be "XLM" or "CODE:ISSUER" (e.g. USDC:G...). ${err.message}`,
+    );
+    validationErr.isValidation = true;
+    validationErr.field = field;
+    validationErr.receivedValue = trimmed;
+    validationErr.expectedFormat = "XLM or CODE:ISSUER";
+    validationErr.status = 400;
+    throw validationErr;
+  }
+}
+
+function mapNetworkOffer(offer) {
+  const selling = normalizeAsset(
+    offer.selling_asset_code ?? offer.selling_asset?.code,
+    offer.selling_asset_issuer ?? offer.selling_asset?.issuer,
+    offer.selling_asset_type ?? offer.selling_asset?.type,
+  );
+  const buying = normalizeAsset(
+    offer.buying_asset_code ?? offer.buying_asset?.code,
+    offer.buying_asset_issuer ?? offer.buying_asset?.issuer,
+    offer.buying_asset_type ?? offer.buying_asset?.type,
+  );
+  return {
+    offerId: offer.id,
+    seller: offer.seller,
+    selling,
+    buying,
+    amount: formatAmount(offer.amount ?? "0"),
+    price: formatAmount(offer.price ?? "0"),
+    sponsor: offer.sponsor || null,
+    lastModifiedLedger: offer.last_modified_ledger != null ? Number(offer.last_modified_ledger) : null,
+    lastModifiedAt: toISOTimestamp(offer.last_modified_at || offer.last_modified_time),
+  };
+}
+
+/**
+ * @route GET /dex/offers
+ * @desc Search open offers across the whole DEX by seller, assets or sponsor.
+ * @query seller, selling, buying, sponsor, limit, order, cursor
+ * At least one filter is required to prevent dumping the entire order book.
+ */
+router.get("/offers", async (req, res, next) => {
+  try {
+    const filters = ["seller", "selling", "buying", "sponsor"].filter(
+      (name) => req.query[name] !== undefined && req.query[name] !== "",
+    );
+    if (filters.length === 0) {
+      const err = new Error(
+        "At least one of seller, selling, buying or sponsor is required to search DEX offers.",
+      );
+      err.type = "MissingFilter";
+      err.status = 400;
+      err.suggestion = "Provide seller, selling, buying or sponsor to narrow the search.";
+      throw err;
+    }
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    let query = server.offers().limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+
+    if (req.query.seller !== undefined && req.query.seller !== "") {
+      validateAccountId(req.query.seller);
+      query = query.seller(req.query.seller);
+    }
+    if (req.query.sponsor !== undefined && req.query.sponsor !== "") {
+      validateAccountId(req.query.sponsor);
+      query = query.sponsor(req.query.sponsor);
+    }
+    if (req.query.selling !== undefined && req.query.selling !== "") {
+      query = query.selling(parseOfferAssetFilter(req.query.selling, "selling"));
+    }
+    if (req.query.buying !== undefined && req.query.buying !== "") {
+      query = query.buying(parseOfferAssetFilter(req.query.buying, "buying"));
+    }
+
+    const response = await query.call();
+    const records = response.records || [];
+    return success(res, {
+      offers: records.map(mapNetworkOffer),
+      total: records.length,
+    }, {
+      meta: {
+        limit,
+        order,
+        cursor: cursor || null,
+        nextCursor: records.length ? records[records.length - 1].paging_token || null : null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 /**
  * @route GET /dex/arbitrage/:assetCode/:assetIssuer
