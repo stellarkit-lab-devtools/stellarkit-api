@@ -1,0 +1,39 @@
+### Network Endpoints
+@baseUrl = http://localhost:3000
+@apiKey = 
+
+### Get Network Status
+GET {{baseUrl}}/network/status
+X-API-Key: {{apiKey}}
+
+### Get Fee Estimate
+GET {{baseUrl}}/network/fee
+X-API-Key: {{apiKey}}
+
+### Get Recommended Fee
+GET {{baseUrl}}/network/recommended-fee
+X-API-Key: {{apiKey}}
+
+### Get Base Fee
+GET {{baseUrl}}/network/base-fee
+X-API-Key: {{apiKey}}
+
+### Get Fee Percentiles
+GET {{baseUrl}}/network/fee-percentiles?days=7
+X-API-Key: {{apiKey}}
+
+### Get Ledger Stats
+GET {{baseUrl}}/network/ledger-stats
+X-API-Key: {{apiKey}}
+
+### Get Ledger Timing
+GET {{baseUrl}}/network/ledger-timing?days=30
+X-API-Key: {{apiKey}}
+
+### Get Protocol Version
+GET {{baseUrl}}/network/protocol-version
+X-API-Key: {{apiKey}}
+
+### Get Validators
+GET {{baseUrl}}/network/validators
+X-API-Key: {{apiKey}}
