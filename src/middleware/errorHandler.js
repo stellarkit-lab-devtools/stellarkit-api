@@ -422,14 +422,22 @@ function errorHandler(err, req, res, next) {
 
   // InvalidAccountId errors — thrown by validateAccountId(id)
   if (err.isInvalidAccountId) {
-    logError(400, req, err.message);
+    if (err.details?.reason !== "secret_seed") {
+      logError(400, req, err.message);
+    } else {
+      logError(400, req, "InvalidAccountId: secret seed provided (redacted)");
+    }
+    const errorBody = {
+      type: "InvalidAccountId",
+      message: err.message,
+      suggestion: err.suggestion || "Account addresses start with G and are 56 characters long.",
+    };
+    if (err.details) {
+      errorBody.details = err.details;
+    }
     return errorResponse(res, 400, withRequestId({
       success: false,
-      error: {
-        type: "InvalidAccountId",
-        message: err.message,
-        suggestion: err.suggestion,
-      },
+      error: errorBody,
     }, req));
   }
 

@@ -13,20 +13,105 @@ function qp(param, msg) {
 }
 
 /**
+ * Determines the specific reason code and suggestion why an account ID is invalid.
+ *
+ * @param {*} accountId
+ * @returns {{ reason: string, suggestion: string, isSecret: boolean }}
+ */
+function inspectAccountIdReason(accountId) {
+  if (typeof accountId !== "string" || !accountId.trim()) {
+    return {
+      reason: "wrong_prefix",
+      suggestion: "Account addresses must start with the letter G.",
+      isSecret: false,
+    };
+  }
+
+  const str = accountId.trim();
+
+  // 1. Secret seed (starts with S) - sensitive, never echo back
+  if (str.startsWith("S")) {
+    return {
+      reason: "secret_seed",
+      suggestion: "Do not share secret seeds. Use the public account address starting with G.",
+      isSecret: true,
+    };
+  }
+
+  // 2. Muxed address (starts with M)
+  if (str.startsWith("M")) {
+    return {
+      reason: "muxed_address",
+      suggestion: "Use the base G... account address instead of a muxed address.",
+      isSecret: false,
+    };
+  }
+
+  // 3. Contract address (starts with C)
+  if (str.startsWith("C")) {
+    return {
+      reason: "contract_address",
+      suggestion: "Contract addresses start with C; account endpoints expect a G... account address.",
+      isSecret: false,
+    };
+  }
+
+  // 4. Wrong prefix (does not start with G)
+  if (!str.startsWith("G")) {
+    return {
+      reason: "wrong_prefix",
+      suggestion: "Account addresses must start with the letter G.",
+      isSecret: false,
+    };
+  }
+
+  // 5. Wrong length (starts with G, but not 56 chars)
+  if (str.length !== 56) {
+    return {
+      reason: "wrong_length",
+      suggestion: "Account addresses start with G and must be exactly 56 characters long.",
+      isSecret: false,
+    };
+  }
+
+  // 6. Invalid characters (contains non-RFC4648 Base32 alphabet characters: A-Z, 2-7)
+  if (!/^[A-Z2-7]{56}$/.test(str)) {
+    return {
+      reason: "invalid_characters",
+      suggestion: "Stellar addresses use base32 encoding (letters A-Z and digits 2-7 only).",
+      isSecret: false,
+    };
+  }
+
+  // 7. Bad checksum (valid 56-char base32 G... address, but CRC16 checksum check failed)
+  return {
+    reason: "bad_checksum",
+    suggestion: "Checksum validation failed. Check for typos in the address.",
+    isSecret: false,
+  };
+}
+
+/**
  * Creates a structured InvalidAccountId error.
  * @param {string} accountId
  * @returns {Error}
  */
 function makeInvalidAccountIdError(accountId) {
-  const err = new Error(
-    `""${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
-  );
+  const { reason, suggestion, isSecret } = inspectAccountIdReason(accountId);
+  const message = isSecret
+    ? "A secret seed was provided instead of a public account address."
+    : `'${String(accountId).slice(0, 60)}' is not a valid Stellar account address.`;
+
+  const err = new Error(message);
   err.isInvalidAccountId = true;
   // Stable marker used by the minResponseTime middleware to identify
   // synchronous format rejections (which never touch Horizon).
   err.type = "InvalidAccountId";
-  err.accountId = accountId;
-  err.suggestion = "Account addresses start with G and are 56 characters long.";
+  if (!isSecret) {
+    err.accountId = accountId;
+  }
+  err.suggestion = suggestion;
+  err.details = { reason };
   err.status = 400;
   return err;
 }
