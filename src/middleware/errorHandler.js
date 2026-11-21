@@ -14,6 +14,7 @@ const {
 } = require("../utils/errors");
 const { NETWORK } = require("../config/stellar");
 const metrics = require("../services/metrics");
+const { withDocsUrl } = require("../utils/errorTypes");
 
 /**
  * Returns true when the application is running in production mode.
@@ -83,6 +84,9 @@ function logError(status, req, message) {
  * @param {object} body
  */
 function errorResponse(res, status, body) {
+  // Every error body gets a docs link; all other fields remain unchanged.
+  withDocsUrl(body && body.error);
+
   metrics.incrementError(status);
 
   // Track error per endpoint (route + method combination)
