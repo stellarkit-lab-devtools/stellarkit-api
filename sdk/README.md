@@ -106,10 +106,54 @@ if (!validation.isValid) {
 await client.fundAccount('GAAZI4...');
 ```
 
+### Streaming
+
+`client.stream` wraps the real-time endpoints and handles reconnection for you:
+
+| Helper | Endpoint | Event type |
+|--------|----------|------------|
+| `client.stream.payments(accountId, options)` | SSE `GET /stream/payments/:id` | `PaymentStreamEvent` |
+| `client.stream.transactions(accountId, options)` | SSE `GET /stream/transactions/:id` | `TransactionStreamEvent` |
+| `client.stream.ledgers(options)` | WS `/stream/ledgers` | `LedgerStreamEvent` |
+
+```javascript
+const controller = new AbortController();
+
+const sub = client.stream.payments('GAAZI4...', {
+  onOpen: () => console.log('connected'),
+  onMessage: (payment) => console.log(payment.amount, payment.asset.code),
+  onError: (err) => console.warn(err.code, err.message, 'retrying:', err.willRetry),
+  signal: controller.signal, // optional — abort() closes the stream
+  maxRetries: 10,            // consecutive reconnect attempts before giving up
+  heartbeatMs: 60_000,       // reconnect if nothing arrives for 60 s
+});
+
+sub.close(); // stops the stream and cancels any pending reconnect
+```
+
+Each helper returns `{ close() }`. Options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `onMessage(event)` | — | Called once per event, in order |
+| `onError(err)` | — | Called on every failure; `err.willRetry` says whether a reconnect follows |
+| `onOpen()` | — | Called on every (re)connection |
+| `signal` | — | `AbortSignal`; aborting closes the stream |
+| `cursor` | `"now"` | Cursor to start from |
+| `maxRetries` | `10` | Consecutive reconnect attempts before giving up (`MAX_RETRIES_EXCEEDED`) |
+| `initialDelayMs` / `maxDelayMs` | `1000` / `30000` | Exponential backoff bounds; each delay is jittered within `[d/2, d]` |
+| `heartbeatMs` | off | Force a reconnect when no data (events or server keep-alives) arrives in this window. The server sends keep-alives every 25–30 s, so use a value above 30 000 |
+
+On reconnect the client resumes from the last event it received via `?cursor=`, so nothing is duplicated or skipped. Client errors such as `400` or `404` are not retried.
+
+In Node.js without a global `WebSocket`, pass one in: `new StellarKitClient({ baseUrl, WebSocket: require('ws') })`.
+
 | Option    | Type   | Required | Description                          |
 | --------- | ------ | -------- | ------------------------------------ |
 | `baseUrl` | string | Yes      | Base URL of the StellarKit API       |
 | `apiKey`  | string | No       | Sent as `X-API-Key` request header   |
+| `fetch`   | function | No     | `fetch` implementation for SSE streams (defaults to global `fetch`) |
+| `WebSocket` | constructor | No | WebSocket implementation for `stream.ledgers` (defaults to global `WebSocket`) |
 
 ### Methods
 

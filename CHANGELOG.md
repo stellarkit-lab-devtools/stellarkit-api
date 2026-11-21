@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Liquidity pool activity endpoint: `GET /liquidity-pools/:id/activity` (deposits, withdrawals, created/removed/revoked events)
+- Soroban token metadata endpoint: `GET /soroban/contract/:id/token-info`
+- SDK `client.stream` helpers for the SSE payment/transaction streams and the `/stream/ledgers` WebSocket, with backoff, heartbeat and cursor resume
+- `?cursor=` resume support on `/stream/payments/:id`, `/stream/transactions/:id` and WS `/stream/ledgers`
+- Shared `cacheKey()` helper that normalises query params so equivalent requests share one cache entry
 - Account age and longevity metrics endpoint: `GET /account/:id/age`
 - Asset freeze status check endpoint: `GET /account/:id/freeze-status/:assetCode/:assetIssuer`
 - Liquidity pool positions endpoint: `GET /account/:id/pool-positions`

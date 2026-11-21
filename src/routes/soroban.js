@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { scValToNative, xdr, TransactionBuilder, Networks, Operation, Contract, nativeToScVal, Account } = require("@stellar/stellar-sdk");
+const { scValToNative, xdr, TransactionBuilder, Networks, Operation, Contract, nativeToScVal, Account, Asset, StrKey } = require("@stellar/stellar-sdk");
 const { sorobanServer, NETWORK } = require("../config/stellar");
 const { validateContractId, validateLimit } = require("../utils/validators");
 const { success } = require("../utils/response");
@@ -10,6 +10,8 @@ const StellarKitError = require("../utils/StellarKitError");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { parseFunctionsFromWasm } = require("../utils/contractSpec");
+const { normalizeAsset } = require("../utils/asset");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 const EXECUTABLE_TYPES = {
   contractExecutableWasm: "wasm",
@@ -870,6 +872,203 @@ router.get("/contract/:id/invoke-simulation", async (req, res, next) => {
       error: errorMessage,
       success: !hasError,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Token metadata ───────────────────────────────────────────────────────────
+
+/**
+ * Placeholder source account for read-only simulations. Simulation never
+ * lands on the ledger, so the account does not need to exist and sequence 0
+ * is accepted by the RPC simulator.
+ */
+const TOKEN_INFO_SIMULATION_SOURCE = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+
+function getNetworkPassphrase() {
+  return NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+}
+
+/**
+ * Run a zero-argument, read-only contract call through simulateTransaction
+ * and return its decoded return value, or null when the simulation fails
+ * (e.g. the contract does not export the function).
+ *
+ * Transport-level RPC failures are rethrown so they surface as 5xx errors
+ * rather than being mistaken for "not a token".
+ *
+ * @param {object} rpcServer
+ * @param {string} contractId
+ * @param {string} fnName
+ * @returns {Promise<*|null>}
+ */
+async function simulateReadOnlyCall(rpcServer, contractId, fnName) {
+  const tx = new TransactionBuilder(new Account(TOKEN_INFO_SIMULATION_SOURCE, "0"), {
+    fee: "100",
+    networkPassphrase: getNetworkPassphrase(),
+  })
+    .addOperation(new Contract(contractId).call(fnName))
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpcServer.simulateTransaction(tx);
+  if (!sim || sim.error) return null;
+
+  let retval = sim.result && sim.result.retval;
+  if (!retval && Array.isArray(sim.results) && sim.results[0] && sim.results[0].xdr) {
+    retval = sim.results[0].xdr;
+  }
+  if (!retval) return null;
+
+  try {
+    const scVal = retval instanceof xdr.ScVal ? retval : xdr.ScVal.fromXDR(retval, "base64");
+    return scValToNative(scVal);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stellar Asset Contracts report their name as "native" or "CODE:ISSUER".
+ * Returns the parsed standard asset shape only when the name parses AND the
+ * contract ID matches the deterministic SAC address for that asset, so a
+ * custom token cannot pose as a Stellar asset just by choosing that name.
+ *
+ * @param {string|null} name
+ * @param {string} contractId
+ * @returns {{code: string, issuer: string|null, type: string}|null}
+ */
+function parseStellarAssetName(name, contractId) {
+  if (typeof name !== "string") return null;
+
+  let asset;
+  let normalized;
+  if (name === "native") {
+    asset = Asset.native();
+    normalized = normalizeAsset(null, null, "native");
+  } else {
+    const parts = name.split(":");
+    if (parts.length !== 2) return null;
+    const [code, issuer] = parts;
+    if (!/^[A-Za-z0-9]{1,12}$/.test(code) || !StrKey.isValidEd25519PublicKey(issuer)) {
+      return null;
+    }
+    try {
+      asset = new Asset(code, issuer);
+    } catch {
+      return null;
+    }
+    normalized = normalizeAsset(code, issuer, asset.getAssetType());
+  }
+
+  try {
+    if (asset.contractId(getNetworkPassphrase()) !== contractId) return null;
+  } catch {
+    return null;
+  }
+  return normalized;
+}
+
+/**
+ * GET /soroban/contract/:id/token-info
+ *
+ * Returns token metadata for a Soroban contract by running read-only
+ * simulations of the standard token interface's name(), symbol() and
+ * decimals() functions through the RPC (no transaction is submitted).
+ *
+ * Response shape:
+ *   {
+ *     contractId:     string,
+ *     name:           string | null,
+ *     symbol:         string | null,
+ *     decimals:       number | null,
+ *     supportsToken:  boolean,   // true when all three functions returned values
+ *     isStellarAsset: boolean,   // true for Stellar Asset Contracts ("native" / "CODE:ISSUER")
+ *     asset:          { code, issuer, type } | null
+ *   }
+ *
+ * Contracts that do not implement the token functions return
+ * supportsToken: false with null fields (not a 500).
+ *
+ * Cached for 60 seconds by default (CACHE_TTL_TOKEN_INFO_MS).
+ *
+ * Errors:
+ *   400 — malformed contract ID
+ *   404 — contract not found on the network
+ *   500 — Soroban RPC not configured
+ *
+ * @example
+ * GET /soroban/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC/token-info
+ */
+router.get("/contract/:id/token-info", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateContractId(id);
+
+    const cacheKey = buildCacheKey(req, { namespace: `token-info:${id}`, allowedParams: [] });
+    if (!isFresh(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const rpcServer = requireSorobanServer();
+
+    // Confirm the contract exists so unknown IDs return 404 instead of
+    // looking like a non-token contract.
+    let instance;
+    try {
+      instance = await rpcServer.getContractData(id, xdr.ScVal.scvLedgerKeyContractInstance());
+    } catch (err) {
+      if (err && /not found/i.test(err.message)) instance = null;
+      else throw err;
+    }
+    if (!instance) {
+      throw new StellarKitError(
+        `Contract ${id} was not found on the Stellar ${NETWORK} network.`,
+        404,
+        "ContractNotFound",
+        null,
+        "Verify the contract ID is correct and that the contract has been deployed."
+      );
+    }
+
+    const [rawName, rawSymbol, rawDecimals] = await Promise.all([
+      simulateReadOnlyCall(rpcServer, id, "name"),
+      simulateReadOnlyCall(rpcServer, id, "symbol"),
+      simulateReadOnlyCall(rpcServer, id, "decimals"),
+    ]);
+
+    const decimalsNum = typeof rawDecimals === "bigint" ? Number(rawDecimals) : rawDecimals;
+    const supportsToken =
+      typeof rawName === "string" &&
+      typeof rawSymbol === "string" &&
+      Number.isInteger(decimalsNum) &&
+      decimalsNum >= 0;
+
+    // A contract only counts as a token when all three functions respond;
+    // otherwise every metadata field is null.
+    const name = supportsToken ? rawName : null;
+    const symbol = supportsToken ? rawSymbol : null;
+    const decimals = supportsToken ? decimalsNum : null;
+    const asset = supportsToken ? parseStellarAssetName(name, id) : null;
+
+    const data = {
+      contractId: id,
+      name,
+      symbol,
+      decimals,
+      supportsToken,
+      isStellarAsset: asset !== null,
+      asset,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.tokenInfo);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     next(err);
   }

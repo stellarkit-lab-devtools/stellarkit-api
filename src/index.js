@@ -38,6 +38,7 @@ const { fetchNetworkStatus } = require("./utils/mapNetworkStatus");
 const { mapFeeStats } = require("./utils/mapFeeEstimate");
 const { getHorizonHealth } = require("./utils/horizonHealth");
 const cacheTTL = require("./config/cacheConfig");
+const { cacheKey: buildCacheKey } = require("./utils/cacheKey");
 
 const rateLimiter = require("./middleware/rateLimiter");
 const restrictHttpMethods = require("./middleware/restrictHttpMethods");
@@ -96,7 +97,11 @@ async function warmNetworkStatusCache({
     horizonUrl,
   });
 
-  cacheService.set("network-status", data, cacheTTL.networkStatus);
+  cacheService.set(
+    buildCacheKey({ query: {} }, { namespace: "network-status", allowedParams: [] }),
+    data,
+    cacheTTL.networkStatus
+  );
   const writeWarmLog =
     typeof customLogger.info === "function"
       ? customLogger.info.bind(customLogger)
@@ -161,7 +166,14 @@ async function warmFeeEstimateCache({
     },
   };
 
-  cacheService.set("fee-estimate:1", data, cacheTTL.feeEstimate);
+  cacheService.set(
+    buildCacheKey(
+      { query: {} },
+      { namespace: "fee-estimate", allowedParams: ["operations"], defaults: { operations: 1 } }
+    ),
+    data,
+    cacheTTL.feeEstimate
+  );
   const writeWarmLog =
     typeof customLogger.info === "function"
       ? customLogger.info.bind(customLogger)
@@ -426,6 +438,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/dex/price/:sellAsset/:buyAsset", description: "Calculate effective exchange rate via best DEX payment path" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
         { method: "GET", path: "/liquidity-pools/:id/reserve-ratio", description: "Get reserve ratio and drift from equal for a liquidity pool" },
+        { method: "GET", path: "/liquidity-pools/:id/activity", description: "Deposits, withdrawals and lifecycle events (created, removed, revoked) for a liquidity pool (?type= filter)" },
         { method: "GET", path: "/assets-overview", description: "Summary of total assets, trustlines, liquidity pools, and top 5 assets by trustline count" },
         { method: "GET", path: "/utils/friendbot/:accountId", description: "Fund a testnet account via Friendbot (testnet only)" },
         { method: "GET", path: "/utils/convert?xlm=:xlm", description: "Convert between XLM and stroops" },
@@ -436,6 +449,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/soroban/contract/:id/storage", description: "Soroban contract instance-storage entries" },
         { method: "GET", path: "/soroban/contract/:id/functions", description: "Exported Soroban contract function signatures parsed from the contract ABI" },
         { method: "GET", path: "/soroban/contract/:id/invoke-simulation", description: "Simulate a Soroban contract function invocation to estimate fees and resource usage without submitting to the network" },
+        { method: "GET", path: "/soroban/contract/:id/token-info", description: "Token name, symbol and decimals for a Soroban contract via read-only simulation (detects Stellar Asset Contracts)" },
         { method: "POST", path: "/accounts/transaction-counts", description: "Batch transaction count lookup for up to 20 accounts including first and last transaction timestamps" },
         { method: "GET", path: "/liquidity-pools/:id", description: "Live Horizon liquidity pool details" },
         {
