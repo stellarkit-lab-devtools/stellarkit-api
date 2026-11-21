@@ -8,6 +8,7 @@ const {
 } = require("../utils/errors");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
+const { singleFlight } = require("../utils/singleFlight");
 const {
   validateAccountId,
   validateAssetCode,
@@ -2801,7 +2802,9 @@ router.get("/:id", async (req, res, next) => {
       }
     }
 
-    // Fetch live account data from Horizon
+    // Fetch live account data from Horizon. Concurrent misses (or ?fresh=true
+    // requests) for the same account share a single upstream call.
+    const data = await singleFlight(cacheKey, async () => {
     const account = await withHorizonTiming(req, () => server.loadAccount(id));
 
     // --- Balances -----------------------------------------------------------
@@ -2853,7 +2856,7 @@ router.get("/:id", async (req, res, next) => {
       clawbackEnabled: rawFlags.auth_clawback_enabled === true,
     };
 
-    const data = {
+    const accountData = {
       accountId: account.id,
       sequence: account.sequence,
       subentryCount: account.subentry_count,
@@ -2890,7 +2893,9 @@ router.get("/:id", async (req, res, next) => {
     };
 
     // Cache the normalised response
-    cacheService.set(cacheKey, data, CACHE_TTL_ACCOUNT);
+    cacheService.set(cacheKey, accountData, CACHE_TTL_ACCOUNT);
+    return accountData;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -3954,34 +3959,6 @@ router.get(
 /** Largest amount a Stellar balance can hold: INT64_MAX stroops. */
 const MAX_BALANCE_STROOPS = 9223372036854775807n;
 const STROOPS_PER_UNIT = 10_000_000n;
-
-/**
- * Converts a Horizon decimal amount string (up to seven decimals) to BigInt
- * stroops so capacity arithmetic stays exact across the full int64 range.
- *
- * @param {string|undefined} amount
- * @returns {bigint}
- */
-function amountToStroops(amount) {
-  const match = String(amount ?? "0").trim().match(/^(-?)(\d+)(?:\.(\d{1,7}))?$/);
-  if (!match) return 0n;
-  const [, sign, whole, fraction = ""] = match;
-  const stroops = BigInt(whole) * STROOPS_PER_UNIT + BigInt(fraction.padEnd(7, "0"));
-  return sign === "-" ? -stroops : stroops;
-}
-
-/**
- * Formats BigInt stroops as a seven-decimal amount string.
- *
- * @param {bigint} stroops
- * @returns {string}
- */
-function stroopsToAmount(stroops) {
-  const sign = stroops < 0n ? "-" : "";
-  const abs = stroops < 0n ? -stroops : stroops;
-  const fraction = (abs % STROOPS_PER_UNIT).toString().padStart(7, "0");
-  return `${sign}${abs / STROOPS_PER_UNIT}.${fraction}`;
-}
 
 /**
  * Builds one receive-capacity entry. Incoming amounts are bounded by
