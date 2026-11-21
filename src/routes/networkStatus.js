@@ -26,18 +26,25 @@ router.get("/", async (req, res, next) => {
     const cacheKey = "network-status";
     const fresh = req.query.fresh === true || req.query.fresh === "true";
 
-    // Check cache first (unless fresh=true)
+    const refresh = () => fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
+
+    // Check cache first (unless fresh=true). Stale hits are served immediately
+    // with X-Cache: STALE while a single background refresh runs.
     if (!fresh) {
-      const cached = cacheService.get(cacheKey);
-      if (cached) {
-        res.set("X-Cache", "HIT");
-        return success(res, cached);
+      const cached = cacheService.getWithRevalidation(
+        cacheKey,
+        cacheTTL.networkStatus,
+        refresh,
+      );
+      if (cached.value !== undefined) {
+        res.set("X-Cache", cached.state);
+        return success(res, cached.value);
       }
     }
 
-    const data = await fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
+    const data = await refresh();
 
-    cacheService.set(cacheKey, data, cacheTTL.networkStatus);
+    cacheService.setWithRevalidation(cacheKey, data, cacheTTL.networkStatus);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

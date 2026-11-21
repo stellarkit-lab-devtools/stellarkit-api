@@ -37,17 +37,9 @@ router.get("/", async (req, res, next) => {
     const cacheKey = `fee-estimate:${operations}`;
     const fresh = req.query.fresh === true || req.query.fresh === "true";
 
-    // Check cache first (unless fresh=true)
-    if (!fresh) {
-      const cached = cacheService.get(cacheKey);
-      if (cached) {
-        res.set("X-Cache", "HIT");
-        return success(res, cached);
-      }
-    }
-
-    // Cache miss or fresh=true - fetch from Horizon
-    const feeStats = await server.feeStats();
+    const refresh = async () => {
+      // Cache miss or fresh=true - fetch from Horizon
+      const feeStats = await server.feeStats();
     const ledgerHistory = await server
       .ledgers()
       .order("desc")
@@ -143,7 +135,25 @@ router.get("/", async (req, res, next) => {
       })(),
     };
 
-    cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
+      return data;
+    };
+
+    // Stale values are served instantly with X-Cache: STALE while one
+    // background refresh repopulates the entry.
+    if (!fresh) {
+      const cached = cacheService.getWithRevalidation(
+        cacheKey,
+        cacheTTL.feeEstimate,
+        refresh,
+      );
+      if (cached.value !== undefined) {
+        res.set("X-Cache", cached.state);
+        return success(res, cached.value);
+      }
+    }
+
+    const data = await refresh();
+    cacheService.setWithRevalidation(cacheKey, data, cacheTTL.feeEstimate);
 
     res.set("X-Cache", "MISS");
     return success(res, data);

@@ -54,6 +54,18 @@ class CacheService {
     // natural TTL expiry which node-cache handles internally and never routes
     // through this method.
     this.evictions = 0;
+
+    // Opt-in stale-while-revalidate window (milliseconds). 0 disables SWR.
+    // Configured through CACHE_SWR_MS; see src/config/cacheConfig.js.
+    const configuredSwr = parseInt(process.env.CACHE_SWR_MS, 10);
+    this.swrMs = Number.isFinite(configuredSwr) && configuredSwr > 0 ? configuredSwr : 0;
+
+    // SWR metadata kept outside node-cache: node-cache drops entries at their
+    // TTL, so we store the value for ttl + swrMs and track the real freshness
+    // deadline ourselves. In-flight refreshes are tracked per key so exactly
+    // one background refresh runs for a stale entry.
+    this.swrMeta = new Map();
+    this.swrInflight = new Set();
   }
 
   /**
@@ -103,6 +115,105 @@ class CacheService {
   }
 
   /**
+   * Store a value with a stale-while-revalidate window.
+   *
+   * The node-cache entry lives for `ttlSeconds + swrMs` while `swrMeta`
+   * remembers when the value actually became stale.
+   *
+   * @param {string} key        - Cache key.
+   * @param {any}    value      - Value to cache.
+   * @param {number} ttlSeconds - Fresh lifetime in seconds.
+   * @param {number} [swrMs]    - Stale window in milliseconds.
+   * @returns {boolean} True when stored.
+   */
+  setWithRevalidation(key, value, ttlSeconds, swrMs = this.swrMs) {
+    const windowMs = Number.isFinite(swrMs) && swrMs > 0 ? swrMs : 0;
+    this.swrMeta.set(key, {
+      expiresAt: Date.now() + ttlSeconds * 1000,
+      windowMs,
+    });
+    return this.cache.set(key, value, ttlSeconds + windowMs / 1000);
+  }
+
+  /**
+   * Read a value with opt-in stale-while-revalidate support.
+   *
+   * Returns one of three states:
+   *   - `HIT`: inside the fresh TTL.
+   *   - `STALE`: past TTL but inside the SWR window; the stale value is served
+   *     immediately while exactly one background refresh runs for this key.
+   *   - `MISS`: no usable value.
+   *
+   * A failed background refresh keeps the stale value until the window closes
+   * and logs a warning; it never throws into the request path.
+   *
+   * @param {string} key          - Cache key.
+   * @param {number} ttlSeconds   - Fresh lifetime in seconds.
+   * @param {Function} refresh    - Async function returning a fresh value.
+   * @param {number} [swrMs]      - Stale window in milliseconds (0 disables SWR).
+   * @returns {{ state: "HIT"|"STALE"|"MISS", value: any }}
+   */
+  getWithRevalidation(key, ttlSeconds, refresh, swrMs = this.swrMs) {
+    const windowMs = Number.isFinite(swrMs) && swrMs > 0 ? swrMs : 0;
+    const value = this.cache.get(key);
+
+    if (value === undefined) {
+      this.swrMeta.delete(key);
+      this.misses++;
+      if (process.env.NODE_ENV !== "test") logger.debug(`Cache miss: ${key}`);
+      return { state: "MISS", value: undefined };
+    }
+
+    this.hits++;
+    if (process.env.NODE_ENV !== "test") logger.debug(`Cache hit: ${key}`);
+
+    const meta = this.swrMeta.get(key);
+    const now = Date.now();
+
+    if (windowMs === 0 || !meta || now < meta.expiresAt) {
+      return { state: "HIT", value };
+    }
+
+    if (now <= meta.expiresAt + windowMs) {
+      this.startBackgroundRefresh(key, value, ttlSeconds, refresh, windowMs);
+      return { state: "STALE", value };
+    }
+
+    // Window closed — discard the stale entry and force a synchronous fetch.
+    this.cache.del(key);
+    this.swrMeta.delete(key);
+    this.misses++;
+    return { state: "MISS", value: undefined };
+  }
+
+  /**
+   * Start (or reuse) the single in-flight refresh for a stale key.
+   *
+   * @private
+   */
+  startBackgroundRefresh(key, staleValue, ttlSeconds, refresh, windowMs) {
+    if (this.swrInflight.has(key)) return;
+
+    this.swrInflight.add(key);
+    Promise.resolve()
+      .then(() => refresh())
+      .then((freshValue) => {
+        if (freshValue !== undefined) {
+          this.setWithRevalidation(key, freshValue, ttlSeconds, windowMs);
+        }
+      })
+      .catch((err) => {
+        // Keep the stale value until the window closes.
+        logger.warn(
+          `Background cache refresh failed for ${key}: ${err && err.message ? err.message : "unknown error"}`,
+        );
+      })
+      .finally(() => {
+        this.swrInflight.delete(key);
+      });
+  }
+
+  /**
    * Immediately remove a single entry from the cache.
    *
    * Use this when you know the underlying data has changed and you want
@@ -113,6 +224,7 @@ class CacheService {
    */
   delete(key) {
     this.cache.del(key);
+    this.swrMeta.delete(key);
     this.evictions++;
   }
 
