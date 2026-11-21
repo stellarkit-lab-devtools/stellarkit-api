@@ -57,6 +57,7 @@ const { formatBalance } = require("../utils/formatBalance");
 const { parseStellarAmount } = require("../utils/parseStellarAmount");
 const { formatAmount } = require("../utils/formatAmount");
 const { mapAccountTrade } = require("../utils/mapAccountTrade");
+const { toCsv, parseExportFormat, csvAmount } = require("../utils/csv");
 
 // Cache TTL for account endpoint responses (in seconds)
 const CACHE_TTL_ACCOUNT = parseInt(process.env.CACHE_TTL_ACCOUNT_MS, 10) / 1000 || 10;
@@ -1026,6 +1027,7 @@ router.get("/:id/payments", async (req, res, next) => {
       return next();
     }
     validateAccountId(id);
+    const format = parseExportFormat(req.query.format);
 
     const { limit, order, cursor } = parsePaginationParams(req.query);
 
@@ -1157,6 +1159,25 @@ router.get("/:id/payments", async (req, res, next) => {
     const lastRecord = rawRecords[rawRecords.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
+    if (format === "csv") {
+      const headers = [
+        "paymentId", "type", "from", "to", "assetCode", "assetIssuer",
+        "assetType", "amount", "createdAt", "transactionHash",
+        "sourceAssetCode", "sourceAssetIssuer", "sourceAssetType", "sourceAmount",
+      ];
+      const rows = payments.map((p) => [
+        p.paymentId, p.type, p.from, p.to,
+        p.asset?.code ?? "", p.asset?.issuer ?? "", p.asset?.type ?? "",
+        csvAmount(p.amount), p.createdAt, p.transactionHash,
+        p.sourceAsset?.code ?? "", p.sourceAsset?.issuer ?? "",
+        p.sourceAsset?.type ?? "", p.sourceAmount ?? "",
+      ]);
+      res.set("Content-Type", "text/csv; charset=utf-8");
+      res.set("Content-Disposition", 'attachment; filename="payments-.csv"');
+      if (payments.length && nextCursor) res.set("X-Next-Cursor", nextCursor);
+      return res.send(toCsv(headers, rows));
+    }
+
     return success(res, {
       payments,
     }, {
@@ -1197,6 +1218,7 @@ router.get("/:id/trades", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
+    const format = parseExportFormat(req.query.format);
 
     const { limit, order, cursor } = parsePaginationParams(req.query);
     const fresh = req.query.fresh === true;
@@ -1268,6 +1290,26 @@ router.get("/:id/trades", async (req, res, next) => {
         hasMore: nextCursor !== null,
       },
     };
+
+    if (format === "csv") {
+      const headers = [
+        "tradeId", "ledgerCloseTime", "sellingAssetCode", "sellingAssetIssuer",
+        "sellingAssetType", "buyingAssetCode", "buyingAssetIssuer",
+        "buyingAssetType", "soldAmount", "boughtAmount", "price", "tradeType",
+        "offerId", "transactionHash",
+      ];
+      const rows = trades.map((t) => [
+        t.tradeId, t.ledgerCloseTime,
+        t.selling?.code ?? "", t.selling?.issuer ?? "", t.selling?.type ?? "",
+        t.buying?.code ?? "", t.buying?.issuer ?? "", t.buying?.type ?? "",
+        csvAmount(t.soldAmount), csvAmount(t.boughtAmount), csvAmount(t.price),
+        t.tradeType, t.offerId, t.transactionHash ?? "",
+      ]);
+      res.set("Content-Type", "text/csv; charset=utf-8");
+      res.set("Content-Disposition", 'attachment; filename="trades-.csv"');
+      if (trades.length && nextCursor) res.set("X-Next-Cursor", nextCursor);
+      return res.send(toCsv(headers, rows));
+    }
 
     cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.trades);
     res.set("X-Cache", "MISS");
