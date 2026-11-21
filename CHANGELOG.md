@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Trustline lifecycle endpoint: `GET /account/:id/trustline-history` with `?type=`, `?asset=` and pagination
+- RFC 8288 `Link: rel="next"` header on paginated responses returned through the shared `success()` helper
+- `TRUST_PROXY` setting so rate limiting sees real client IPs behind a reverse proxy (`true` is rejected at startup)
+- Architecture decision records in `docs/adr/`
 - Account age and longevity metrics endpoint: `GET /account/:id/age`
 - Asset freeze status check endpoint: `GET /account/:id/freeze-status/:assetCode/:assetIssuer`
 - Liquidity pool positions endpoint: `GET /account/:id/pool-positions`

@@ -122,6 +122,7 @@ This project is ideal for:
 | GET | `/account/:id/asset-balance/:assetCode/:assetIssuer` | Balance for a specific asset trustline | — |
 | GET | `/account/:id/sequence` | Current sequence number | — |
 | GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode`, `sponsored` |
+| GET | `/account/:id/trustline-history` | Trustline lifecycle events (created, removed, limit_updated, authorized, deauthorized, authorized_to_maintain_liabilities) | `type`, `asset`, `limit`, `order`, `cursor` |
 | GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor`, `assetCode`, `assetIssuer` |
 | GET | `/account/:id/funding-history` | Account funding sources with sender, amount, asset, and timestamp | — |
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |

@@ -38,6 +38,7 @@ const { fetchNetworkStatus } = require("./utils/mapNetworkStatus");
 const { mapFeeStats } = require("./utils/mapFeeEstimate");
 const { getHorizonHealth } = require("./utils/horizonHealth");
 const cacheTTL = require("./config/cacheConfig");
+const { parseTrustProxy } = require("./config/trustProxy");
 
 const rateLimiter = require("./middleware/rateLimiter");
 const restrictHttpMethods = require("./middleware/restrictHttpMethods");
@@ -80,6 +81,10 @@ const assetsOverviewRouter = require("./routes/assetsOverview");
 const app = express();
 // Disable server identification header for security
 app.disable("x-powered-by");
+// Proxy trust — controls whether req.ip (used by rate limiting, logging and
+// every other per-client feature) honours X-Forwarded-For. Defaults to false;
+// TRUST_PROXY=true is rejected at startup because it makes the header spoofable.
+app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
 const { normalizeAmountFields } = require("./utils/response");
 
 const PORT = process.env.PORT || 3000;
@@ -529,6 +534,12 @@ app.get("/", (req, res) => {
           method: "GET",
           path: "/account/:id/trustlines",
           description: "Trustlines with TOML asset metadata resolved",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/trustline-history",
+          description:
+            "Trustline lifecycle events (created, removed, limit changes, authorisation), filterable by ?type= and ?asset=",
         },
         {
           method: "GET",

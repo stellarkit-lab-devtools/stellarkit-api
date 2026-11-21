@@ -1,7 +1,13 @@
 const { formatAmount } = require("./formatAmount");
+const { buildNextLinkHeader } = require("./pagination");
 
 /**
  * Wraps data in a consistent success response envelope.
+ *
+ * When the metadata describes a paginated list with more results
+ * (`meta.meta.hasMore === true` and a `meta.meta.nextCursor`), an RFC 8288
+ * `Link: <url>; rel="next"` header is added so HTTP tooling can follow the
+ * next page without reading the body. The header is omitted on the final page.
  *
  * @param {import('express').Response} res - Express response object.
  * @param {any} data - The data payload to send.
@@ -9,11 +15,27 @@ const { formatAmount } = require("./formatAmount");
  * @returns {import('express').Response} The Express response.
  */
 function success(res, data, meta = {}) {
+  setNextLinkHeader(res, meta);
   return res.json({
     success: true,
     ...meta,
     data,
   });
+}
+
+/**
+ * Sets the `Link: rel="next"` header for paginated responses.
+ *
+ * @param {import('express').Response} res
+ * @param {Object} meta - The metadata object passed to success().
+ */
+function setNextLinkHeader(res, meta) {
+  const pagination = meta && meta.meta;
+  if (!pagination || pagination.hasMore !== true || !pagination.nextCursor) return;
+  if (!res || typeof res.set !== "function" || res.headersSent) return;
+
+  const link = buildNextLinkHeader(res.req, pagination.nextCursor);
+  if (link) res.set("Link", link);
 }
 
 /**

@@ -6116,6 +6116,297 @@ router.get("/:id/timeline", async (req, res, next) => {
   }
 });
 
+// ── Trustline history ─────────────────────────────────────────────────────────
+
+/** Maximum number of Horizon effect pages scanned per trustline-history request. */
+const TRUSTLINE_HISTORY_MAX_PAGES = 10;
+/** Horizon page size used while scanning effects (Horizon's maximum). */
+const TRUSTLINE_HISTORY_PAGE_SIZE = 200;
+
+/** Event types exposed by GET /account/:id/trustline-history. */
+const TRUSTLINE_HISTORY_TYPES = [
+  "created",
+  "removed",
+  "limit_updated",
+  "authorized",
+  "deauthorized",
+  "authorized_to_maintain_liabilities",
+];
+
+/** Direct mapping from Horizon trustline effect types to history event types. */
+const TRUSTLINE_EFFECT_TO_EVENT = {
+  trustline_created: "created",
+  trustline_removed: "removed",
+  trustline_updated: "limit_updated",
+  trustline_authorized: "authorized",
+  trustline_deauthorized: "deauthorized",
+  trustline_authorized_to_maintain_liabilities: "authorized_to_maintain_liabilities",
+};
+
+/**
+ * Classifies a Horizon effect as a trustline history event type.
+ *
+ * Since protocol 17 Horizon reports authorisation changes as a single
+ * `trustline_flags_updated` effect, so the resulting authorisation state is
+ * derived from its flags. Horizon spells the maintain-liabilities flag
+ * `authorized_to_maintain_liabilites_flag`; both spellings are accepted.
+ *
+ * @param {Object} effect - Raw Horizon effect record.
+ * @returns {string|null} History event type, or null when not a trustline lifecycle event.
+ */
+function classifyTrustlineEffect(effect) {
+  if (!effect) return null;
+
+  if (effect.type === "trustline_flags_updated") {
+    const authorized = effect.authorized_flag;
+    const maintain =
+      effect.authorized_to_maintain_liabilities_flag !== undefined
+        ? effect.authorized_to_maintain_liabilities_flag
+        : effect.authorized_to_maintain_liabilites_flag;
+
+    if (authorized === true) return "authorized";
+    if (maintain === true) return "authorized_to_maintain_liabilities";
+    if (authorized === false || maintain === false) return "deauthorized";
+    // Only the clawback flag changed — not an authorisation lifecycle event.
+    return null;
+  }
+
+  return TRUSTLINE_EFFECT_TO_EVENT[effect.type] || null;
+}
+
+/**
+ * Maps a raw Horizon effect to a trustline history event.
+ *
+ * Authorisation effects omit asset_issuer because they are recorded on the
+ * issuer's own account, so the effect's account is used as the issuer then.
+ * Liquidity-pool share trustlines have no asset code/issuer and are skipped.
+ *
+ * @param {Object} effect - Raw Horizon effect record.
+ * @returns {Object|null} { type, asset, limit, timestamp, transactionHash } or null.
+ */
+function toTrustlineHistoryEvent(effect) {
+  const type = classifyTrustlineEffect(effect);
+  if (!type) return null;
+  if (effect.asset_type === "liquidity_pool_shares" || !effect.asset_code) return null;
+
+  const issuer = effect.asset_issuer || effect.account || null;
+
+  return {
+    type,
+    asset: normalizeAsset(effect.asset_code, issuer, effect.asset_type),
+    limit:
+      effect.limit !== undefined && effect.limit !== null
+        ? formatAmount(effect.limit)
+        : null,
+    timestamp: toISOTimestamp(effect.created_at),
+    transactionHash: effect.transaction_hash || null,
+  };
+}
+
+/**
+ * Parses the optional ?asset=CODE:ISSUER filter.
+ *
+ * @param {string} raw
+ * @returns {{ code: string, issuer: string }}
+ */
+function parseTrustlineAssetFilter(raw) {
+  const value = String(raw);
+  const parts = value.split(":");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    const err = new Error(
+      "Query parameter 'asset': must be in the format CODE:ISSUER (e.g. USDC:GA5Z...).",
+    );
+    err.isValidation = true;
+    err.field = "asset";
+    err.receivedValue = value.slice(0, 80);
+    err.expectedFormat = "CODE:ISSUER";
+    err.status = 400;
+    throw err;
+  }
+  const [code, issuer] = parts;
+  validateAssetCode(code);
+  validateAccountId(issuer);
+  return { code: code.toUpperCase(), issuer };
+}
+
+/**
+ * Fills in transactionHash for events whose Horizon effect did not carry one,
+ * by looking up the parent operation (the effect paging token is
+ * "<operationId>-<index>"). Each operation is fetched once; failures leave
+ * transactionHash as null rather than failing the request.
+ *
+ * @param {Array<{ event: Object, pagingToken: string }>} entries
+ * @returns {Promise<void>}
+ */
+async function resolveTrustlineEventHashes(entries) {
+  const missing = entries.filter((entry) => !entry.event.transactionHash && entry.pagingToken);
+  if (missing.length === 0 || typeof server.operations !== "function") return;
+
+  const operationIds = [...new Set(missing.map((entry) => String(entry.pagingToken).split("-")[0]))];
+  const hashes = new Map();
+
+  await Promise.all(
+    operationIds.map(async (operationId) => {
+      try {
+        const operation = await server.operations().operation(operationId).call();
+        if (operation && operation.transaction_hash) {
+          hashes.set(operationId, operation.transaction_hash);
+        }
+      } catch {
+        // Leave the hash unresolved; the event itself is still accurate.
+      }
+    }),
+  );
+
+  for (const entry of missing) {
+    const operationId = String(entry.pagingToken).split("-")[0];
+    entry.event.transactionHash = hashes.get(operationId) || null;
+  }
+}
+
+/**
+ * GET /account/:id/trustline-history
+ *
+ * Returns the lifecycle of an account's trustlines — when each was created,
+ * removed, had its limit changed, or had its authorisation changed.
+ *
+ * Each event:
+ *   {
+ *     type:            "created" | "removed" | "limit_updated" | "authorized"
+ *                      | "deauthorized" | "authorized_to_maintain_liabilities",
+ *     asset:           { code, issuer, type },
+ *     limit:           string | null,   // seven-decimal string when Horizon reports one
+ *     timestamp:       string,          // ISO 8601
+ *     transactionHash: string | null,
+ *   }
+ *
+ * Query params:
+ *   - type   (optional) — one of the event types above
+ *   - asset  (optional) — CODE:ISSUER
+ *   - limit, order, cursor — standard pagination
+ *
+ * Horizon cannot filter effects by type, so up to 10 pages of 200 effects are
+ * scanned. When that cap is reached before `limit` matching events are found,
+ * meta.partial is true and meta.nextCursor resumes the scan where it stopped.
+ *
+ * Returns:
+ *   - 200: { success: true, meta: { count, limit, order, nextCursor, hasMore, partial, pagesScanned }, data: [...] }
+ *   - 400: invalid ?type=, ?asset= or pagination params
+ *   - 404: account not found
+ *
+ * @example
+ *   GET /account/GABC.../trustline-history?type=created&asset=USDC:GA5Z...
+ */
+router.get("/:id/trustline-history", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    let typeFilter = null;
+    if (req.query.type !== undefined) {
+      typeFilter = String(req.query.type).toLowerCase().trim();
+      if (!TRUSTLINE_HISTORY_TYPES.includes(typeFilter)) {
+        const err = new Error(
+          `Unknown trustline event type "${req.query.type}". Valid types are: ${TRUSTLINE_HISTORY_TYPES.join(", ")}.`,
+        );
+        err.isValidation = true;
+        err.field = "type";
+        err.receivedValue = String(req.query.type).slice(0, 80);
+        err.expectedFormat = TRUSTLINE_HISTORY_TYPES.join(", ");
+        err.status = 400;
+        throw err;
+      }
+    }
+
+    const assetFilter =
+      req.query.asset !== undefined ? parseTrustlineAssetFilter(req.query.asset) : null;
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+
+    // Ensure the account exists — raises 404 for unknown accounts.
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const matches = [];
+    let scanCursor = cursor;
+    let lastScannedToken = cursor || null;
+    let pagesScanned = 0;
+    let exhausted = false;
+
+    while (pagesScanned < TRUSTLINE_HISTORY_MAX_PAGES && matches.length <= limit) {
+      let query = server
+        .effects()
+        .forAccount(id)
+        .limit(TRUSTLINE_HISTORY_PAGE_SIZE)
+        .order(order);
+      if (scanCursor) query = query.cursor(scanCursor);
+
+      const response = await withHorizonTiming(req, () => query.call());
+      const records = (response && response.records) || [];
+      pagesScanned += 1;
+
+      for (const record of records) {
+        if (record.paging_token) lastScannedToken = record.paging_token;
+
+        const event = toTrustlineHistoryEvent(record);
+        if (!event) continue;
+        if (typeFilter && event.type !== typeFilter) continue;
+        if (
+          assetFilter &&
+          (String(event.asset.code).toUpperCase() !== assetFilter.code ||
+            event.asset.issuer !== assetFilter.issuer)
+        ) {
+          continue;
+        }
+
+        matches.push({ event, pagingToken: record.paging_token || null });
+        // One extra match tells us whether another page exists.
+        if (matches.length > limit) break;
+      }
+
+      if (matches.length > limit) break;
+
+      const lastRecord = records[records.length - 1];
+      if (records.length < TRUSTLINE_HISTORY_PAGE_SIZE || !lastRecord || !lastRecord.paging_token) {
+        exhausted = true;
+        break;
+      }
+      scanCursor = lastRecord.paging_token;
+    }
+
+    const page = matches.slice(0, limit);
+    let hasMore = false;
+    let partial = false;
+    let nextCursor = null;
+
+    if (matches.length > limit) {
+      hasMore = true;
+      nextCursor = page[page.length - 1].pagingToken;
+    } else if (!exhausted) {
+      // Scan cap reached before Horizon ran out of effects.
+      hasMore = Boolean(lastScannedToken);
+      partial = page.length < limit;
+      nextCursor = lastScannedToken;
+    }
+
+    await resolveTrustlineEventHashes(page);
+    const events = page.map((entry) => entry.event);
+
+    return success(res, events, {
+      meta: {
+        count: events.length,
+        limit,
+        order,
+        nextCursor,
+        hasMore,
+        partial,
+        pagesScanned,
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 /**
  AccountTrustlineHealthDasboardEndpoint
  * GET /account/:id/trustline-health
