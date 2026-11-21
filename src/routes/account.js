@@ -7,6 +7,7 @@ const {
   makeTrustlineNotFoundError,
 } = require("../utils/errors");
 const cacheService = require("../services/cache");
+const watchlistService = require("../services/watchlistService");
 const cacheTTL = require("../config/cacheConfig");
 const {
   validateAccountId,
@@ -7239,11 +7240,13 @@ router.get("/:id/watchlist-status", async (req, res, next) => {
 
     await withHorizonTiming(req, () => server.loadAccount(id));
 
+    const result = (await watchlistService.checkWatchlist(id)) || {};
+
     const data = {
       accountId: id,
-      onWatchlist: false,
-      sources: [],
-      reason: null,
+      onWatchlist: Boolean(result.onWatchlist),
+      sources: Array.isArray(result.sources) ? result.sources : [],
+      reason: result.reason ?? null,
       checkedAt: new Date().toISOString(),
     };
 

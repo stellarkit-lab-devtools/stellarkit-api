@@ -1,13 +1,13 @@
 const request = require('supertest');
 
-jest.mock('../../config/stellar', () => ({
+jest.mock('../../src/config/stellar', () => ({
   server: {
     loadAccount: jest.fn(),
   },
 }));
 
-const { server } = require('../../config/stellar');
-const app = require('../../app');
+const { server } = require('../../src/config/stellar');
+const app = require('../../src/index');
 
 const NATIVE_BALANCE = {
   balance: '1000.0000000',
