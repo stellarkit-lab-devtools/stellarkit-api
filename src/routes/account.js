@@ -52,7 +52,12 @@ const axios = require("axios");
 const { Asset, scValToNative, xdr } = require("@stellar/stellar-sdk");
 const { normalizeAsset, normalizeAssetFromString } = require("../utils/asset");
 const { isNativeAsset, isNonNativeAsset } = require("../utils/assetHelpers");
-const { getAssetMetadataFromToml, fetchStellarToml } = require("../utils/tomlResolver");
+const {
+  getAssetMetadataFromToml,
+  fetchStellarToml,
+  fetchStellarTomlResult,
+  normaliseStellarToml,
+} = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
 const { parseStellarAmount } = require("../utils/parseStellarAmount");
 const { formatAmount } = require("../utils/formatAmount");
@@ -5811,6 +5816,76 @@ router.get("/:id/home-domain", async (req, res, next) => {
     });
   } catch (err) {
     handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/home-domain-check
+ *
+ * Verifies that an account and the stellar.toml at its own home domain
+ * vouch for each other: the TOML must list the account in [[ACCOUNTS]].
+ * Currencies issued by this account are returned in the standard shape.
+ * Cached for five minutes; TOML failures are reported in `reason`, never 500.
+ */
+const HOME_DOMAIN_CHECK_TTL_SECONDS = 300;
+router.get("/:id/home-domain-check", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const cacheKey = `account-home-domain-check:${id}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    // Unknown accounts must still 404 before any TOML lookup is attempted.
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+    const homeDomain = account.home_domain || null;
+
+    let tomlFound = false;
+    let accountListedInToml = false;
+    let currencies = [];
+    let reason = null;
+
+    if (!homeDomain) {
+      reason = "no_home_domain";
+    } else {
+      const { toml, reason: fetchReason } = await fetchStellarTomlResult(homeDomain);
+      if (fetchReason) {
+        reason = fetchReason;
+      } else {
+        tomlFound = true;
+        const rawCurrencies = toml.CURRENCIES || toml.currencies || [];
+        const matched = (Array.isArray(rawCurrencies) ? rawCurrencies : [])
+          .filter((currency) => currency && currency.issuer === id);
+        currencies = matched.length
+          ? normaliseStellarToml({ CURRENCIES: matched }).currencies || []
+          : [];
+
+        const rawAccounts = toml.ACCOUNTS || toml.accounts || [];
+        accountListedInToml = (Array.isArray(rawAccounts) ? rawAccounts : [])
+          .some((entry) => entry && (entry.account === id || entry.key === id || entry.id === id));
+        reason = accountListedInToml ? null : "account_not_listed";
+      }
+    }
+
+    const data = {
+      accountId: id,
+      homeDomain,
+      tomlFound,
+      accountListedInToml,
+      currencies,
+      reason,
+      checkedAt: new Date().toISOString(),
+    };
+
+    cacheService.set(cacheKey, data, HOME_DOMAIN_CHECK_TTL_SECONDS);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
