@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const axios = require("axios");
 const router = express.Router();
 const registerParamValidation = require("../middleware/validateRouteParams");
@@ -182,7 +184,7 @@ router.get("/memo", (req, res, next) => {
  * { "type": "text", "value": "invoice-123" }
  * Validate a memo value before it is attached to a transaction.
  */
-router.post("/validate-memo", (req, res, next) => {
+router.post("/validate-memo", validateBody(schemas.validateMemo), (req, res, next) => {
   try {
     const { type, value } = req.body || {};
     const result = validateMemo(type, value);
@@ -493,7 +495,7 @@ router.get("/validate-hash", (req, res, next) => {
  * POST /utils/decode-xdr
  * { "xdr": "AAAAAgAAAAD..." }
  */
-router.post("/decode-xdr", (req, res, next) => {
+router.post("/decode-xdr", validateBody(schemas.decodeXdr), (req, res, next) => {
   try {
     const { xdr } = req.body;
 
@@ -745,7 +747,7 @@ function formatTimeBound(value) {
  * POST /utils/decode-transaction
  * { "xdr": "AAAAAgAAAAD..." }
  */
-router.post("/decode-transaction", (req, res, next) => {
+router.post("/decode-transaction", validateBody(schemas.decodeTransaction), (req, res, next) => {
   try {
     const { xdr: envelopeXdr } = req.body || {};
 
@@ -882,7 +884,7 @@ router.get("/keypair", (req, res, next) => {
  *
  * @returns {{ canSend: boolean, warnings: Array<{ type: string, message: string }> }}
  */
-router.post("/simulate-payment", async (req, res, next) => {
+router.post("/simulate-payment", validateBody(schemas.simulatePayment), async (req, res, next) => {
   try {
     const { source, destination, amount, assetCode, assetIssuer } = req.body || {};
     validateAccountId(source);
