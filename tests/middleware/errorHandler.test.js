@@ -1,3 +1,4 @@
+const { getDocsUrl } = require("../../src/utils/errorTypes");
 const errorHandler = require("../../src/middleware/errorHandler");
 const StellarKitError = require("../../src/utils/StellarKitError");
 
@@ -22,7 +23,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: { type: "ServerError", message: "Something went wrong" },
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"), message: "Something went wrong" },
         requestId: "req-572-test",
       });
     });
@@ -37,7 +38,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: { type: "ServerError", message: "An unexpected error occurred." },
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"), message: "An unexpected error occurred." },
         requestId: "req-572-test",
       });
       process.env.NODE_ENV = origEnv;
@@ -78,8 +79,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ServerError",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: "Resource not available",
           suggestion: "Try again later or contact support.",
         },
@@ -106,8 +106,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonError",
+        error: { type: "HorizonError", docsUrl: getDocsUrl("HorizonError"),
           title: "Transaction Failed",
           detail: "Bad sequence number.",
           status: 400,
@@ -193,8 +192,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InsufficientReserve",
+        error: { type: "InsufficientReserve", docsUrl: getDocsUrl("InsufficientReserve"),
           message: "Account does not have enough XLM to cover the minimum reserve requirement.",
           suggestion: "Fund the account with additional XLM. Each account requires a base reserve of 1 XLM plus 0.5 XLM per subentry.",
         },
@@ -222,8 +220,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "TransactionSubmissionFailed",
+        error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
           title: "Transaction Failed",
           detail: "Bad sequence.",
           message: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
@@ -245,8 +242,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(418);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "CustomType",
+        error: { type: "CustomType", docsUrl: getDocsUrl("CustomType"),
           message: "Custom error",
           detail: "Extra detail",
           suggestion: "Try something else",
@@ -263,7 +259,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: { type: "MinimalType", message: "Minimal error" },
+        error: { type: "MinimalType", docsUrl: getDocsUrl("MinimalType"), message: "Minimal error" },
         requestId: "req-572-test",
       });
     });
@@ -279,8 +275,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InternalError",
+        error: { type: "InternalError", docsUrl: getDocsUrl("InternalError"),
           title: "Internal Server Error",
           detail: "x is not defined",
         },
@@ -297,8 +292,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InternalError",
+        error: { type: "InternalError", docsUrl: getDocsUrl("InternalError"),
           title: "Internal Server Error",
           detail: "Cannot read property of undefined",
         },
@@ -316,8 +310,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InternalError",
+        error: { type: "InternalError", docsUrl: getDocsUrl("InternalError"),
           title: "Internal Server Error",
           detail: "An unexpected error occurred.",
         },
@@ -337,8 +330,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(413);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "PayloadTooLargeError",
+        error: { type: "PayloadTooLargeError", docsUrl: getDocsUrl("PayloadTooLargeError"),
           message: "Payload too large. Maximum request body size is 10kb.",
           suggestion: "Reduce your request body size to under 10kb.",
         },
@@ -373,8 +365,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(503);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonUnavailable",
+        error: { type: "HorizonUnavailable", docsUrl: getDocsUrl("HorizonUnavailable"),
           message: "Unable to connect to the Stellar Horizon node.",
           suggestion: "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status.",
         },
@@ -394,8 +385,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "NotFound",
+        error: { type: "NotFound", docsUrl: getDocsUrl("NotFound"),
           message: "Transaction abc not found",
           suggestion: "Verify the transaction hash is correct and exists on the network.",
         },
@@ -413,8 +403,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "AccountNotFound",
+        error: { type: "AccountNotFound", docsUrl: getDocsUrl("AccountNotFound"),
           message: "Account GABCD not found",
           suggestion: "Verify the account address is correct and that the account has been funded.",
         },
@@ -432,8 +421,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "AssetNotFound",
+        error: { type: "AssetNotFound", docsUrl: getDocsUrl("AssetNotFound"),
           message: "Asset not found",
           suggestion: "Verify the asset code and issuer address are correct.",
         },
@@ -451,8 +439,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "TrustlineNotFound",
+        error: { type: "TrustlineNotFound", docsUrl: getDocsUrl("TrustlineNotFound"),
           message: "Trustline not found for USDC",
           suggestion: "The account must establish a trustline before holding this asset.",
         },
@@ -472,8 +459,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InvalidAccountId",
+        error: { type: "InvalidAccountId", docsUrl: getDocsUrl("InvalidAccountId"),
           message: "Invalid account ID: G123",
           suggestion: "Account addresses start with G and are 56 characters long.",
         },
@@ -491,8 +477,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InvalidAccountId",
+        error: { type: "InvalidAccountId", docsUrl: getDocsUrl("InvalidAccountId"),
           message: "Bad ID",
           suggestion: "Use a valid G address.",
         },
@@ -510,8 +495,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InvalidAsset",
+        error: { type: "InvalidAsset", docsUrl: getDocsUrl("InvalidAsset"),
           message: "Invalid asset code",
           suggestion: null,
         },
@@ -529,8 +513,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InvalidCursor",
+        error: { type: "InvalidCursor", docsUrl: getDocsUrl("InvalidCursor"),
           message: "Bad cursor",
           suggestion: "Use the cursor returned in the previous response.",
         },
@@ -548,8 +531,7 @@ describe("errorHandler middleware — full coverage", () => {
 
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InvalidCursor",
+        error: { type: "InvalidCursor", docsUrl: getDocsUrl("InvalidCursor"),
           message: "Bad pagination",
           suggestion: "Provide a valid cursor string.",
         },
@@ -567,8 +549,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InvalidLimit",
+        error: { type: "InvalidLimit", docsUrl: getDocsUrl("InvalidLimit"),
           message: "limit must be a number between 1 and 100.",
           suggestion: "Provide a valid integer for the limit parameter, e.g. ?limit=20",
         },
@@ -588,8 +569,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(504);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonTimeout",
+        error: { type: "HorizonTimeout", docsUrl: getDocsUrl("HorizonTimeout"),
           message: "The Stellar Horizon node did not respond in time.",
           suggestion: "Try again in a few seconds. If the issue persists check the Stellar network status at https://status.stellar.org.",
         },
@@ -610,8 +590,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "OfferNotFound",
+        error: { type: "OfferNotFound", docsUrl: getDocsUrl("OfferNotFound"),
           message: "Offer '456' was not found on the Stellar testnet network.",
           suggestion: "The offer may have already been filled, cancelled, or the offer ID may be incorrect.",
         },
@@ -638,8 +617,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "OfferNotFound",
+        error: { type: "OfferNotFound", docsUrl: getDocsUrl("OfferNotFound"),
           message: "Offer '789' was not found on the Stellar testnet network.",
           suggestion: "The offer may have already been filled, cancelled, or the offer ID may be incorrect.",
         },
@@ -662,8 +640,7 @@ describe("errorHandler middleware — full coverage", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ValidationError",
+        error: { type: "ValidationError", docsUrl: getDocsUrl("ValidationError"),
           message: "Invalid format",
           field: "accountId",
           receivedValue: "abc",

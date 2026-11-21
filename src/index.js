@@ -66,6 +66,7 @@ const assetRouter = require("./routes/asset");
 const dexRouter = require("./routes/dex");
 const { validateAccountId } = require("./utils/validators");
 const { success } = require("./utils/response");
+const { getDocsUrl } = require("./utils/errorTypes");
 const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
@@ -226,6 +227,18 @@ if (allowedOriginsEnv) {
   app.use(cors());
 }
 app.use(requestIdMiddleware);
+// Guarantee a docs link on every error body, including errors emitted by
+// middleware mounted before the routes (auth, metrics, rate limiting, etc.).
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (payload) => {
+    if (payload && payload.success === false && payload.error && typeof payload.error === "object") {
+      payload.error.docsUrl = getDocsUrl(payload.error.type);
+    }
+    return originalJson(payload);
+  };
+  next();
+});
 app.use(requestLogger);
 app.use(metricsCollector);
 app.use(contentTypeValidator);
@@ -241,6 +254,9 @@ app.use((req, res, next) => {
 });
 
 // ── Metrics (excluded from rate limiting) ───────────────────────────────────
+// Enforce admin scope before the metrics router is mounted; the global API key
+// middleware below is mounted later in the chain.
+app.use("/metrics", apiKeyMiddleware);
 app.use("/metrics", metricsRouter);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────

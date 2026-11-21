@@ -16,6 +16,7 @@ const request = require("supertest");
 const app = require("../../src/index");
 const { server } = require("../../src/config/stellar");
 const cacheService = require("../../src/services/cache");
+const { loadFixture } = require("../fixtures");
 
 const ACCOUNT_A = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
 const ACCOUNT_B = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
@@ -23,30 +24,16 @@ const ISSUER_ID = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
 const POOL_ID = "dd7b1ab831c273310ddbec6f97870aa83c2fbd78ce22aded37ecbf4f3380fac7";
 
 function buildHorizonAccount(id, shares = "100.0000000") {
-  return {
-    id,
-    balances: [
-      { asset_type: "native", balance: "500.0000000" },
-      {
-        asset_type: "liquidity_pool_shares",
-        liquidity_pool_id: POOL_ID,
-        balance: shares,
-      },
-    ],
-  };
+  const account = loadFixture("account-pool", { id });
+  account.balances[1].liquidity_pool_id = POOL_ID;
+  account.balances[1].balance = shares;
+  return account;
 }
 
 function buildPool() {
-  return {
-    id: POOL_ID,
-    fee_bp: 30,
-    total_shares: "1000.0000000",
-    total_trustlines: 10,
-    reserves: [
-      { asset: "native", amount: "2000.0000000" },
-      { asset: `USDC:${ISSUER_ID}`, amount: "400.0000000" },
-    ],
-  };
+  const pool = loadFixture("liquidity-pool", { id: POOL_ID });
+  pool.reserves[1].asset = `USDC:${ISSUER_ID}`;
+  return pool;
 }
 
 let loadAccountSpy;
