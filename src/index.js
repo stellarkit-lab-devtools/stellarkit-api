@@ -70,6 +70,7 @@ const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
 const stellarTomlRouter = require("./routes/stellarToml");
+const securityTxtRouter = require("./routes/securityTxt");
 const claimableBalancesRouter = require("./routes/claimableBalances");
 const cacheStatsRouter = require("./routes/cacheStats");
 const metricsRouter = require("./routes/metrics");
@@ -239,6 +240,9 @@ app.use((req, res, next) => {
   metricsService.incrementRequests();
   next();
 });
+
+// ── Security.txt (RFC 9116 - excluded from rate limiting & auth) ───────────────
+app.use("/.well-known", securityTxtRouter);
 
 // ── Metrics (excluded from rate limiting) ───────────────────────────────────
 app.use("/metrics", metricsRouter);
