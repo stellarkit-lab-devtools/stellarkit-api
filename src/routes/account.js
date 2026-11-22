@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
@@ -5922,7 +5924,7 @@ router.get("/:id/transaction-stats", async (req, res, next) => {
   }
 });
 
-router.post("/:id/multisig-plan", async (req, res, next) => {
+router.post("/:id/multisig-plan", validateBody(schemas.multisigPlan), async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -7176,7 +7178,7 @@ router.get("/:id/transactions", async (req, res, next) => {
  *
  * Returns 400 when addresses array exceeds 20 entries or input is invalid.
  */
-router.post("/freeze-status", async (req, res, next) => {
+router.post("/freeze-status", validateBody(schemas.accountFreezeStatus), async (req, res, next) => {
   try {
     const { addresses, asset } = req.body || {};
 

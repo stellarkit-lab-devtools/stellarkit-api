@@ -12,6 +12,7 @@ This guide explains the standard response format conventions used across all Ste
 4. [Asset Shape](#asset-shape)
 5. [Timestamp Format](#timestamp-format)
 6. [Amount Format](#amount-format)
+7. [Amounts and Precision](amounts-and-precision.md)
 
 ---
 

@@ -46,6 +46,7 @@ const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
 const requestIdMiddleware = require("./middleware/requestId");
+const { requestContextMiddleware } = require("./utils/requestContext");
 const requestLogger = require("./middleware/requestLogger");
 const metricsCollector = require("./middleware/metricsCollector");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
@@ -319,9 +320,11 @@ app.use("/fee-estimate", feeEstimateRouter);
 // Apply ETag middleware to cached endpoints
 app.use("/network-status", etagMiddleware, networkStatusRouter);
 app.use("/fee-estimate", etagMiddleware, feeEstimateRouter);
+const { validateBody } = require("./middleware/validateBody");
+const schemas = require("./middleware/bodySchemas");
 const accountCounterpartiesRouter = require("./routes/account.counterparties");
 const accountsBatchRouter = express.Router();
-accountsBatchRouter.post("/multisig-info", async (req, res, next) => {
+accountsBatchRouter.post("/multisig-info", validateBody(schemas.multisigInfo), async (req, res, next) => {
   try {
     const { accountIds } = req.body;
 

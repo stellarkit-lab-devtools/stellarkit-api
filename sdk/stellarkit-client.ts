@@ -51,6 +51,35 @@ interface RequestOptions {
   body?: unknown;
 }
 
+/** Context passed to `onRequest` hooks. Mutate `headers` to add request headers. */
+export interface RequestHookContext {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+/** Summary passed to `onResponse` hooks after a successful or failed HTTP response. */
+export interface ResponseHookInfo {
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+}
+
+type Hook<T> = ((value: T) => void | Promise<void>);
+
+/** Optional lifecycle hooks shared by every SDK request. */
+export interface ClientHooks {
+  onRequest?: Hook<RequestHookContext> | Array<Hook<RequestHookContext>>;
+  onResponse?: Hook<ResponseHookInfo> | Array<Hook<ResponseHookInfo>>;
+  onError?: Hook<StellarKitError> | Array<Hook<StellarKitError>>;
+  onHookError?: HookErrorHandler;
+}
+
+/** Called when a hook itself throws; hook failures never fail the SDK call. */
+export type HookErrorHandler = (error: unknown, hookName: string) => void;
+
 /**
  * StellarKit API Client for TypeScript
  *
@@ -59,6 +88,8 @@ interface RequestOptions {
 export class StellarKitClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
+  private readonly hooks: ClientHooks;
+  private readonly onHookError?: HookErrorHandler;
 
   /**
    * Auto-reconnecting streaming helpers for the SSE payment/transaction
@@ -139,20 +170,47 @@ export class StellarKitClient {
       headers["x-api-key"] = this.apiKey;
     }
 
-    const response = await fetch(urlString, {
+    const requestBody = body ? JSON.stringify(body) : null;
+    const startedAt = Date.now();
+
+    await this.runHooks<RequestHookContext>(this.hooks.onRequest, {
+      url: urlString,
       method,
       headers,
-      body: body ? JSON.stringify(body) : null,
-    });
+      body,
+    }, "onRequest");
+
+    let response: Response;
+    try {
+      response = await fetch(urlString, {
+        method,
+        headers,
+        body: requestBody,
+      });
+    } catch (error) {
+      await this.runHooks<StellarKitError>(this.hooks.onError, error instanceof StellarKitError
+        ? error
+        : new StellarKitError(String((error as Error)?.message || error), 0, "NetworkError"), "onError");
+      throw error;
+    }
 
     const result = await response.json();
+    const durationMs = Date.now() - startedAt;
+    await this.runHooks<ResponseHookInfo>(this.hooks.onResponse, {
+      url: urlString,
+      method,
+      status: response.status,
+      durationMs,
+    }, "onResponse");
 
     if (!response.ok) {
-      throw new StellarKitError(
+      const error = new StellarKitError(
         result.error?.message || response.statusText,
         response.status,
         result.error?.type || "ApiError",
       );
+      await this.runHooks<StellarKitError>(this.hooks.onError, error, "onError");
+      throw error;
     }
 
     return result.data;
