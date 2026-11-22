@@ -117,7 +117,7 @@ Endpoints that return lists of records (transactions, payments, operations, etc.
 ```
 
 **Meta Fields:**
-- `total` — Number of items in current response
+- `total` — Number of items in the current asset-holder response. Other paginated routes generally use `count`; see [migration notes](migrations.md#pagination-metadata-moved-then-the-asset-holder-count-was-renamed) for the confirmed endpoint differences.
 - `limit` — Requested page size
 - `order` — Sort order used
 - `nextCursor` — Token for next page (null if no more pages)

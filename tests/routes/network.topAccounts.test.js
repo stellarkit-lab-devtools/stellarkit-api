@@ -63,7 +63,7 @@ describe('GET /network/top-accounts', () => {
     jest.resetModules();
     jest.clearAllMocks();
     process.env.STELLAR_HORIZON_URL = 'https://horizon-testnet.stellar.org';
-    app = require('../../src/app');
+    app = require('../../src/index');
   });
 
   afterEach(() => {

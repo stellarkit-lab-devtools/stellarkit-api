@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking response changes
+- List payloads moved into named arrays (`data.items` for transactions and asset search; `data.operations` for transaction operations). Introduced by [#368](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/368) and [#822](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/822). See [consumer migrations](docs/migrations.md#list-envelopes-and-transaction-operations).
+- Pagination fields moved from `data.total/limit/cursor` into `meta.count/limit/nextCursor` in [#869](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/869); asset holders use `meta.total` after [#870](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/870). See [endpoint-specific fixes](docs/migrations.md#pagination-metadata-moved-then-the-asset-holder-count-was-renamed).
+- Singular account sponsorship now returns HTTP 410; use the plural endpoint and its consolidated response fields ([#870](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/870)). See [sponsorship migration](docs/migrations.md#sponsorship-endpoint-consolidation).
+- Amount-like numeric fields became seven-decimal strings ([#600](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/600)); account trades replaced raw fraction/direction fields with `price` and `tradeType` ([#743](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/743)). See [amount and trade migrations](docs/migrations.md#decimal-amount-types-and-trade-fields).
+- Generic untyped errors changed from `ServerError` to `InternalError` ([#759](https://github.com/stellarkit-lab-devtools/stellarkit-api/pull/759)). See [error migration](docs/migrations.md#generic-error-identifier).
+
 ### Added
-- Trustline lifecycle endpoint: `GET /account/:id/trustline-history` with `?type=`, `?asset=` and pagination
-- RFC 8288 `Link: rel="next"` header on paginated responses returned through the shared `success()` helper
-- `TRUST_PROXY` setting so rate limiting sees real client IPs behind a reverse proxy (`true` is rejected at startup)
-- Architecture decision records in `docs/adr/`
+- Ordered Horizon failover via `HORIZON_URLS`, sticky recovery via `HORIZON_FAILOVER_STICKY_MS`, and credential-free active-host health reporting.
+- Route scaffold command `npm run new:route` with cached/paginated templates, dry-run output, collision protection, and generator tests.
+- [Response migration notes](docs/migrations.md), [API versioning policy](docs/api-versioning.md), and a [manual release checklist](docs/release-process.md).
 - Account age and longevity metrics endpoint: `GET /account/:id/age`
 - Asset freeze status check endpoint: `GET /account/:id/freeze-status/:assetCode/:assetIssuer`
 - Liquidity pool positions endpoint: `GET /account/:id/pool-positions`

@@ -16,6 +16,17 @@ import type {
   PoolPositionsResponse,
   TransactionSearchResponse,
 } from "../types/index.d.ts";
+import { StreamClient, StreamError, computeBackoffDelay } from "./stream";
+import type { WebSocketConstructor } from "./stream";
+
+export { StreamClient, StreamError, computeBackoffDelay };
+export type {
+  StreamOptions,
+  StreamHandle,
+  PaymentStreamEvent,
+  TransactionStreamEvent,
+  LedgerStreamEvent,
+} from "./stream";
 
 /**
  * Typed error thrown by StellarKitClient on non-2xx API responses.
@@ -50,17 +61,45 @@ export class StellarKitClient {
   private readonly apiKey?: string;
 
   /**
+   * Auto-reconnecting streaming helpers for the SSE payment/transaction
+   * streams and the WS /stream/ledgers WebSocket.
+   *
+   * @example
+   * const sub = client.stream.payments(accountId, { onMessage: console.log });
+   * sub.close();
+   */
+  readonly stream: StreamClient;
+
+  /**
    * Create a new StellarKit API client.
    *
    * @param options.baseUrl - The base URL of the StellarKit API (e.g. 'https://api.stellarkit.io')
    * @param options.apiKey - Optional API key for authentication
+   * @param options.fetch - Optional fetch implementation for SSE streams (defaults to global fetch)
+   * @param options.WebSocket - Optional WebSocket implementation for WS streams (defaults to global WebSocket)
    */
-  constructor({ baseUrl, apiKey }: { baseUrl: string; apiKey?: string }) {
+  constructor({
+    baseUrl,
+    apiKey,
+    fetch: fetchImpl,
+    WebSocket: WebSocketImpl,
+  }: {
+    baseUrl: string;
+    apiKey?: string;
+    fetch?: typeof fetch;
+    WebSocket?: WebSocketConstructor;
+  }) {
     if (!baseUrl) {
       throw new Error("baseUrl is required");
     }
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
+    this.stream = new StreamClient({
+      baseUrl: this.baseUrl,
+      apiKey,
+      fetch: fetchImpl,
+      WebSocket: WebSocketImpl,
+    });
   }
 
   /**
@@ -787,6 +826,16 @@ export class StellarKitClient {
     return this._request(`/soroban/contract/${contractId}`);
   }
 
+  /**
+   * Get the status and decoded return value of a Soroban transaction.
+   *
+   * @param hash - 64-character hex transaction hash
+   * @returns Transaction status, return value, and ledger metadata
+   */
+  async getSorobanTransaction(hash: string): Promise<unknown> {
+    return this._request(`/soroban/transactions/${hash}`);
+  }
+
   // ── Claimable Balances ─────────────────────────────────────────────────────
 
   /**
@@ -900,6 +949,10 @@ export class StellarKitClient {
 
 // CommonJS/UMD compatibility
 (StellarKitClient as any).default = StellarKitClient;
+// Keep the streaming exports reachable after module.exports is replaced below.
+(StellarKitClient as any).StreamClient = StreamClient;
+(StellarKitClient as any).StreamError = StreamError;
+(StellarKitClient as any).computeBackoffDelay = computeBackoffDelay;
 if (typeof module !== "undefined" && module.exports) {
   module.exports = StellarKitClient;
 } else if (typeof window !== "undefined") {

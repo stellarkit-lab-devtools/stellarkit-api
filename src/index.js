@@ -30,7 +30,7 @@ const compression = require("compression");
 const logger = require("./utils/logger");
 const { parseStellarAmount } = require("./utils/parseStellarAmount");
 const { setupWebSocket } = require("./websocket");
-const { server, horizonUrl, NETWORK } = require("./config/stellar");
+const { server, horizonUrl, NETWORK, getActiveHorizonHost } = require("./config/stellar");
 const cacheService = require("./services/cache");
 const networkStatusCache = cacheService;
 const feeEstimateCache = cacheService;
@@ -38,7 +38,7 @@ const { fetchNetworkStatus } = require("./utils/mapNetworkStatus");
 const { mapFeeStats } = require("./utils/mapFeeEstimate");
 const { getHorizonHealth } = require("./utils/horizonHealth");
 const cacheTTL = require("./config/cacheConfig");
-const { parseTrustProxy } = require("./config/trustProxy");
+const { cacheKey: buildCacheKey } = require("./utils/cacheKey");
 
 const rateLimiter = require("./middleware/rateLimiter");
 const restrictHttpMethods = require("./middleware/restrictHttpMethods");
@@ -81,10 +81,8 @@ const assetsOverviewRouter = require("./routes/assetsOverview");
 const app = express();
 // Disable server identification header for security
 app.disable("x-powered-by");
-// Proxy trust — controls whether req.ip (used by rate limiting, logging and
-// every other per-client feature) honours X-Forwarded-For. Defaults to false;
-// TRUST_PROXY=true is rejected at startup because it makes the header spoofable.
-app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
+app.use(requestIdMiddleware);
+app.use(require("./middleware/urlLimits"));
 const { normalizeAmountFields } = require("./utils/response");
 
 const PORT = process.env.PORT || 3000;
@@ -101,7 +99,11 @@ async function warmNetworkStatusCache({
     horizonUrl,
   });
 
-  cacheService.set("network-status", data, cacheTTL.networkStatus);
+  cacheService.set(
+    buildCacheKey({ query: {} }, { namespace: "network-status", allowedParams: [] }),
+    data,
+    cacheTTL.networkStatus
+  );
   const writeWarmLog =
     typeof customLogger.info === "function"
       ? customLogger.info.bind(customLogger)
@@ -166,7 +168,14 @@ async function warmFeeEstimateCache({
     },
   };
 
-  cacheService.set("fee-estimate:1", data, cacheTTL.feeEstimate);
+  cacheService.set(
+    buildCacheKey(
+      { query: {} },
+      { namespace: "fee-estimate", allowedParams: ["operations"], defaults: { operations: 1 } }
+    ),
+    data,
+    cacheTTL.feeEstimate
+  );
   const writeWarmLog =
     typeof customLogger.info === "function"
       ? customLogger.info.bind(customLogger)
@@ -230,7 +239,6 @@ if (allowedOriginsEnv) {
 } else {
   app.use(cors());
 }
-app.use(requestIdMiddleware);
 app.use(requestLogger);
 app.use(metricsCollector);
 app.use(contentTypeValidator);
@@ -269,7 +277,15 @@ app.use((req, res, next) => {
 app.get("/health", async (req, res) => {
   const network = process.env.STELLAR_NETWORK || NETWORK || "testnet";
   const horizon = await getHorizonHealth({ server, network });
+  if (getActiveHorizonHost) horizon.host = getActiveHorizonHost();
   const status = horizon.status === "ok" ? "ok" : horizon.status;
+
+  const rawCommit = process.env.GIT_SHA || null;
+  const build = {
+    commit: rawCommit ? rawCommit.slice(0, 7) : null,
+    builtAt: process.env.BUILD_TIME || null,
+    nodeEnv: process.env.NODE_ENV || "development",
+  };
 
   res.json({
     success: true,
@@ -283,6 +299,7 @@ app.get("/health", async (req, res) => {
       nodeVersion: process.version,
       startedAt: SERVER_STARTED_AT,
       horizon,
+      build,
     },
   });
 });
@@ -431,6 +448,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/dex/price/:sellAsset/:buyAsset", description: "Calculate effective exchange rate via best DEX payment path" },
         { method: "GET", path: "/liquidity-pools/:id/profitability", description: "Estimate annualized fee income for a liquidity pool" },
         { method: "GET", path: "/liquidity-pools/:id/reserve-ratio", description: "Get reserve ratio and drift from equal for a liquidity pool" },
+        { method: "GET", path: "/liquidity-pools/:id/activity", description: "Deposits, withdrawals and lifecycle events (created, removed, revoked) for a liquidity pool (?type= filter)" },
         { method: "GET", path: "/assets-overview", description: "Summary of total assets, trustlines, liquidity pools, and top 5 assets by trustline count" },
         { method: "GET", path: "/utils/friendbot/:accountId", description: "Fund a testnet account via Friendbot (testnet only)" },
         { method: "GET", path: "/utils/convert?xlm=:xlm", description: "Convert between XLM and stroops" },
@@ -441,6 +459,7 @@ app.get("/", (req, res) => {
         { method: "GET", path: "/soroban/contract/:id/storage", description: "Soroban contract instance-storage entries" },
         { method: "GET", path: "/soroban/contract/:id/functions", description: "Exported Soroban contract function signatures parsed from the contract ABI" },
         { method: "GET", path: "/soroban/contract/:id/invoke-simulation", description: "Simulate a Soroban contract function invocation to estimate fees and resource usage without submitting to the network" },
+        { method: "GET", path: "/soroban/contract/:id/token-info", description: "Token name, symbol and decimals for a Soroban contract via read-only simulation (detects Stellar Asset Contracts)" },
         { method: "POST", path: "/accounts/transaction-counts", description: "Batch transaction count lookup for up to 20 accounts including first and last transaction timestamps" },
         { method: "GET", path: "/liquidity-pools/:id", description: "Live Horizon liquidity pool details" },
         {
@@ -832,8 +851,15 @@ function startServer({
   setupWebSocketHook = setupWebSocket,
 } = {}) {
   const httpServer = appInstance.listen(port, () => {
+    const pkg = require("../package.json");
+    const rawCommit = process.env.GIT_SHA || null;
+    const commit = rawCommit ? rawCommit.slice(0, 7) : null;
+    const builtAt = process.env.BUILD_TIME || null;
+
     logger.log(`\n🚀 StellarKit API running on port ${port}`);
     logger.log(`🌐 Network : ${process.env.STELLAR_NETWORK || "testnet"}`);
+    logger.log(`📦 Version : ${pkg.version}${commit ? ` (${commit})` : ""}`);
+    if (builtAt) logger.log(`🕐 Built   : ${builtAt}`);
     logger.log(`📖 Docs    : http://localhost:${port}/\n`);
 
     warmStartupCaches({ logger }).catch((err) => {
