@@ -1,5 +1,9 @@
 const request = require("supertest");
 const app = require("../src/index");
+const cacheService = require("../src/services/cache");
+
+// Payments and transactions responses are cached; start every test cold.
+beforeEach(() => cacheService.flush());
 
 describe("GET /account/:id/transactions/search", () => {
     // Test with a known testnet account

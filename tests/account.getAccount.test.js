@@ -522,13 +522,13 @@ describe("GET /account/:id — 400 InvalidAccountId", () => {
     expect(res.body.error.type).toBe("InvalidAccountId");
   });
 
-  it("returns 400 with a descriptive message containing the bad value", async () => {
+  it("returns 400 with a descriptive reason and suggestion", async () => {
     const res = await request(app).get("/account/BADKEY123");
 
     expect(res.statusCode).toBe(400);
-    expect(res.body.error.message).toContain("BADKEY123");
+    expect(res.body.error.details.reason).toBe("wrong_prefix");
     expect(res.body.error.suggestion).toBe(
-      "Account addresses start with G and are 56 characters long."
+      "Use a public account address starting with G."
     );
   });
 });

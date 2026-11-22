@@ -16,6 +16,17 @@ import type {
   PoolPositionsResponse,
   TransactionSearchResponse,
 } from "../types/index.d.ts";
+import { StreamClient, StreamError, computeBackoffDelay } from "./stream";
+import type { WebSocketConstructor } from "./stream";
+
+export { StreamClient, StreamError, computeBackoffDelay };
+export type {
+  StreamOptions,
+  StreamHandle,
+  PaymentStreamEvent,
+  TransactionStreamEvent,
+  LedgerStreamEvent,
+} from "./stream";
 
 /**
  * Typed error thrown by StellarKitClient on non-2xx API responses.
@@ -81,60 +92,45 @@ export class StellarKitClient {
   private readonly onHookError?: HookErrorHandler;
 
   /**
+   * Auto-reconnecting streaming helpers for the SSE payment/transaction
+   * streams and the WS /stream/ledgers WebSocket.
+   *
+   * @example
+   * const sub = client.stream.payments(accountId, { onMessage: console.log });
+   * sub.close();
+   */
+  readonly stream: StreamClient;
+
+  /**
    * Create a new StellarKit API client.
    *
    * @param options.baseUrl - The base URL of the StellarKit API (e.g. 'https://api.stellarkit.io')
    * @param options.apiKey - Optional API key for authentication
-   * @param options.hooks - Optional { onRequest, onResponse, onError } hooks. Each may be
-   *   a function or an array of functions, run in registration order. `onRequest` may
-   *   mutate `headers`; `onResponse` receives { url, method, status, durationMs };
-   *   `onError` receives the typed StellarKitError. A throwing hook never fails the
-   *   API call, its error is forwarded to `onHookError`.
-   * @param options.onHookError - Optional callback for errors thrown by hooks.
-   *
-   * @example Add a trace header to every request:
-   * ```ts
-   * const client = new StellarKitClient({
-   *   baseUrl: "https://api.stellarkit.io",
-   *   hooks: {
-   *     onRequest: ({ headers }) => { headers["x-trace-id"] = crypto.randomUUID(); },
-   *     onResponse: ({ status, durationMs }) => console.log(status, durationMs),
-   *   },
-   * });
-   * ```
+   * @param options.fetch - Optional fetch implementation for SSE streams (defaults to global fetch)
+   * @param options.WebSocket - Optional WebSocket implementation for WS streams (defaults to global WebSocket)
    */
   constructor({
     baseUrl,
     apiKey,
-    hooks = {},
-    onHookError,
+    fetch: fetchImpl,
+    WebSocket: WebSocketImpl,
   }: {
     baseUrl: string;
     apiKey?: string;
-    hooks?: ClientHooks;
-    onHookError?: HookErrorHandler;
+    fetch?: typeof fetch;
+    WebSocket?: WebSocketConstructor;
   }) {
     if (!baseUrl) {
       throw new Error("baseUrl is required");
     }
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
-    this.hooks = hooks;
-    this.onHookError = onHookError || hooks.onHookError;
-  }
-
-  /** @private Run hooks in registration order; swallow and report hook failures. */
-  private async runHooks<T>(hooks: Hook<T> | Array<Hook<T>> | undefined, value: T, name: string): Promise<void> {
-    if (!hooks) return;
-    for (const hook of Array.isArray(hooks) ? hooks : [hooks]) {
-      try {
-        await hook(value);
-      } catch (error) {
-        if (this.onHookError) {
-          try { this.onHookError(error, name); } catch { /* never fail the call */ }
-        }
-      }
-    }
+    this.stream = new StreamClient({
+      baseUrl: this.baseUrl,
+      apiKey,
+      fetch: fetchImpl,
+      WebSocket: WebSocketImpl,
+    });
   }
 
   /**
@@ -888,6 +884,16 @@ export class StellarKitClient {
     return this._request(`/soroban/contract/${contractId}`);
   }
 
+  /**
+   * Get the status and decoded return value of a Soroban transaction.
+   *
+   * @param hash - 64-character hex transaction hash
+   * @returns Transaction status, return value, and ledger metadata
+   */
+  async getSorobanTransaction(hash: string): Promise<unknown> {
+    return this._request(`/soroban/transactions/${hash}`);
+  }
+
   // ── Claimable Balances ─────────────────────────────────────────────────────
 
   /**
@@ -1001,6 +1007,10 @@ export class StellarKitClient {
 
 // CommonJS/UMD compatibility
 (StellarKitClient as any).default = StellarKitClient;
+// Keep the streaming exports reachable after module.exports is replaced below.
+(StellarKitClient as any).StreamClient = StreamClient;
+(StellarKitClient as any).StreamError = StreamError;
+(StellarKitClient as any).computeBackoffDelay = computeBackoffDelay;
 if (typeof module !== "undefined" && module.exports) {
   module.exports = StellarKitClient;
 } else if (typeof window !== "undefined") {

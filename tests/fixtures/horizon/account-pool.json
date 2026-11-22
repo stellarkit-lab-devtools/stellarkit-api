@@ -1,0 +1,45 @@
+{
+  "id": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H",
+  "account_id": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H",
+  "paging_token": "1234",
+  "sequence": "123456789",
+  "subentry_count": 5,
+  "last_modified_ledger": 1000,
+  "last_modified_time": "2024-01-01T00:00:00Z",
+  "home_domain": "example.com",
+  "thresholds": {
+    "low_threshold": 0,
+    "med_threshold": 0,
+    "high_threshold": 0
+  },
+  "flags": {
+    "auth_required": false,
+    "auth_revocable": false,
+    "auth_immutable": false
+  },
+  "balances": [
+    {
+      "asset_type": "native",
+      "balance": "500.0000000"
+    },
+    {
+      "asset_type": "liquidity_pool_shares",
+      "liquidity_pool_id": "dd7b1ab831c273310ddbec6f97870aa83c2fbd78ce22aded37ecbf4f3380fac7",
+      "balance": "100.0000000"
+    }
+  ],
+  "signers": [
+    {
+      "key": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H",
+      "weight": 1,
+      "type": "ed25519_public_key"
+    }
+  ],
+  "data": {},
+  "data_attr": {},
+  "_links": {
+    "self": {
+      "href": "/accounts/GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"
+    }
+  }
+}

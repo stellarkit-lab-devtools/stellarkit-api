@@ -5,6 +5,7 @@ const { Keypair } = require("@stellar/stellar-sdk");
 
 const app = require("../../src/index");
 const { server } = require("../../src/config/stellar");
+const cacheService = require("../../src/services/cache");
 
 const ASSET_CODE = "USDC";
 const ASSET_ISSUER = Keypair.random().publicKey();
@@ -40,6 +41,10 @@ function mockTrades(records) {
     call: jest.fn().mockResolvedValue({ records }),
   });
 }
+
+beforeEach(() => {
+  cacheService.flush();
+});
 
 afterEach(() => {
   jest.restoreAllMocks();
@@ -82,6 +87,8 @@ describe("GET /asset/:code/:issuer/trading-volume", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.volume24h).toBe("6.7500000");
     expect(res.body.data.tradeCount24h).toBe(3);
+    expect(res.body.data.volume7d).toBe("1005.7500000");
+    expect(res.body.data.tradeCount7d).toBe(4);
   });
 
   it("returns zero values when the asset has no recent trades", async () => {
@@ -103,6 +110,8 @@ describe("GET /asset/:code/:issuer/trading-volume", () => {
     expect(res.body.data.volume24h).toBe("0.0000000");
     expect(res.body.data.tradeCount24h).toBe(0);
     expect(res.body.data.uniqueTraders24h).toBe(0);
+    expect(res.body.data.volume7d).toBe("999.0000000");
+    expect(res.body.data.tradeCount7d).toBe(1);
   });
 
   it("counts distinct trader addresses rather than total trades", async () => {
@@ -147,5 +156,86 @@ describe("GET /asset/:code/:issuer/trading-volume", () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.type).toBe("InvalidAsset");
     expect(tradesSpy).not.toHaveBeenCalled();
+  });
+
+  it("sets X-Cache: MISS on first request", async () => {
+    mockTrades([
+      trade({
+        baseAmount: "1.0000000",
+        baseAccount: TRADER_A,
+        counterAccount: TRADER_B,
+        hoursAgo: 1,
+      }),
+    ]);
+
+    const res = await request(app).get(
+      `/asset/${ASSET_CODE}/${ASSET_ISSUER}/trading-volume`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.get("X-Cache")).toBe("MISS");
+  });
+
+  it("sets X-Cache: HIT on second request", async () => {
+    mockTrades([
+      trade({
+        baseAmount: "1.0000000",
+        baseAccount: TRADER_A,
+        counterAccount: TRADER_B,
+        hoursAgo: 1,
+      }),
+    ]);
+
+    const res1 = await request(app).get(
+      `/asset/${ASSET_CODE}/${ASSET_ISSUER}/trading-volume`,
+    );
+    expect(res1.get("X-Cache")).toBe("MISS");
+    const data1 = res1.body.data;
+
+    jest.clearAllMocks();
+
+    const res2 = await request(app).get(
+      `/asset/${ASSET_CODE}/${ASSET_ISSUER}/trading-volume`,
+    );
+    expect(res2.get("X-Cache")).toBe("HIT");
+    expect(res2.body.data).toEqual(data1);
+  });
+
+  it("?fresh=true forces a live recalculation returning X-Cache: MISS", async () => {
+    mockTrades([
+      trade({
+        baseAmount: "1.0000000",
+        baseAccount: TRADER_A,
+        counterAccount: TRADER_B,
+        hoursAgo: 1,
+      }),
+    ]);
+
+    const res1 = await request(app).get(
+      `/asset/${ASSET_CODE}/${ASSET_ISSUER}/trading-volume`,
+    );
+    expect(res1.get("X-Cache")).toBe("MISS");
+
+    jest.clearAllMocks();
+    mockTrades([
+      trade({
+        baseAmount: "1.0000000",
+        baseAccount: TRADER_A,
+        counterAccount: TRADER_B,
+        hoursAgo: 1,
+      }),
+      trade({
+        baseAmount: "5.0000000",
+        baseAccount: TRADER_C,
+        counterAccount: TRADER_D,
+        hoursAgo: 2,
+      }),
+    ]);
+
+    const res2 = await request(app).get(
+      `/asset/${ASSET_CODE}/${ASSET_ISSUER}/trading-volume?fresh=true`,
+    );
+    expect(res2.get("X-Cache")).toBe("MISS");
+    expect(res2.body.data.volume24h).toBe("6.0000000");
   });
 });

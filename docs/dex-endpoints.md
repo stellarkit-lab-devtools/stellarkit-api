@@ -504,3 +504,14 @@ All DEX endpoints return a consistent error envelope.
   }
 }
 ```
+## Offer detail
+
+`GET /dex/offers/:offerId?fillLimit=20` looks up a positive signed int64
+offer ID supplied as a string. `fillLimit` accepts 1–100. The response data
+contains `offerId`, `status`, `seller`, `selling`, `buying`, `amount`, `price`,
+`sponsor`, `lastModifiedLedger`, `fills`, and `totalFilledAmount`.
+Amounts and prices have seven decimals. Fills use the offer's selling asset;
+`totalFilledAmount` sums the returned fills, rather than lifetime history.
+Closed offers are recovered from trades, with unavailable current offer fields
+set to null. An unknown offer returns `404 OfferNotFound`.
+

@@ -10,6 +10,7 @@
  */
 
 const pino = require("pino");
+const redactSeeds = require("./redactSeeds");
 
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -40,6 +41,7 @@ const REDACT_PATHS = [
 ];
 
 const pinoConfig = {
+  hooks: { logMethod(args, method) { method.apply(this, args.map(redactSeeds)); } },
   level: LOG_LEVEL,
   enabled: true,
   redact: {

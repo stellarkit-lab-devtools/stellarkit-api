@@ -70,6 +70,13 @@ RATE_LIMIT_MAX=1000
 RATE_LIMIT_WINDOW_MS=60000
 
 # ============================================================================
+# REVERSE PROXY TRUST (set when running behind nginx / a load balancer / PaaS)
+# ============================================================================
+# Number of proxy hops, "loopback", or a comma-separated list of proxy CIDRs.
+# "true" is rejected at startup. See "Running Behind a Reverse Proxy" below.
+TRUST_PROXY=1
+
+# ============================================================================
 # API KEY AUTHENTICATION (recommended for production)
 # ============================================================================
 REQUIRE_API_KEY=true
@@ -97,7 +104,41 @@ API_KEYS=your-secure-api-key-1,your-secure-api-key-2
 | `LOG_LEVEL` | `info` | Balanced verbosity for production monitoring |
 | `REQUIRE_API_KEY` | `true` | Protects your endpoints from unauthorized access |
 | `RATE_LIMIT_MAX` | `1000` | Adjust based on expected concurrent users |
+| `TRUST_PROXY` | `1` (or your proxy CIDRs) | Required behind a proxy so rate limiting sees real client IPs — see [Running Behind a Reverse Proxy](#running-behind-a-reverse-proxy) |
 | `CACHE_TTL_MS` | `30000` | Longer TTLs reduce Horizon load in production |
+
+---
+
+## Running Behind a Reverse Proxy
+
+Rate limiting, logging and every other per-client feature identify callers by
+`req.ip`. `TRUST_PROXY` tells Express which proxies are allowed to set that value
+through `X-Forwarded-For`; it is applied with `app.set("trust proxy", ...)` at
+startup in `src/index.js` and parsed by `src/config/trustProxy.js`.
+
+| Value | Meaning | Use when |
+|-------|---------|----------|
+| `false` (default) | Ignore `X-Forwarded-For`; `req.ip` is the TCP peer | Clients connect to Node directly |
+| `1`, `2`, … | Trust that many proxy hops nearest the server | One load balancer / PaaS router → `1`; CDN + load balancer → `2` |
+| `loopback` | Trust proxies on `127.0.0.0/8` and `::1` | nginx/Caddy on the same machine |
+| `10.0.0.0/8,172.16.0.5` | Trust only these IPs / CIDR ranges | You know your proxies' addresses (most precise) |
+
+**The shared-IP pitfall.** If the API sits behind a proxy and `TRUST_PROXY` is
+left at `false`, every request appears to come from the proxy's IP. All clients
+then share a single rate-limit bucket, so one noisy client can exhaust the limit
+for everyone (and logs show only the proxy address).
+
+**Why `true` is rejected.** `TRUST_PROXY=true` trusts every hop, so `req.ip`
+becomes the left-most `X-Forwarded-For` entry — a value any client can set. A
+caller could send a fresh fake IP on each request and never be rate limited.
+The server refuses to start with that value and prints an explanation; use a hop
+count or an explicit list instead.
+
+Set the hop count to exactly the number of proxies you operate. A value that is
+too high lets clients spoof the extra hops; too low and you are back to the
+shared-IP pitfall. Pagination `Link` headers are also built from `req.protocol`,
+so with a correct setting they use the `https` scheme your proxy reports via
+`X-Forwarded-Proto`.
 
 ---
 
@@ -375,6 +416,10 @@ sudo ln -s /etc/nginx/sites-available/stellarkit-api /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
+
+With nginx on the same host, set `TRUST_PROXY=loopback` (or `TRUST_PROXY=1`) so
+the API reads the client IP from the `X-Forwarded-For` header nginx adds. See
+[Running Behind a Reverse Proxy](#running-behind-a-reverse-proxy).
 
 #### 9. Enable HTTPS (Let's Encrypt)
 

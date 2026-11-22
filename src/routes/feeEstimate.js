@@ -8,6 +8,7 @@ const cacheService = require("../services/cache");
 const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || "5000", 10) / 1000; // seconds
 const cacheTTL = require("../config/cacheConfig");
 const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 const { parseStellarAmount } = require("../utils/parseStellarAmount");
 const { mapFeeStats } = require("../utils/mapFeeEstimate");
@@ -36,10 +37,16 @@ const SURGE_STATUS_LEDGER_LIMIT = 10;
 router.get("/", async (req, res, next) => {
   try {
     const operations = Math.max(1, parseInt(req.query.operations) || 1);
-    const cacheKey = `fee-estimate:${operations}`;
-    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    // Key on the normalised operation count so ?operations=1, an omitted
+    // operations param and unknown extra params all share one entry.
+    const cacheKey = buildCacheKey(
+      { query: { operations } },
+      { namespace: "fee-estimate", allowedParams: ["operations"], defaults: { operations: 1 } }
+    );
+    const fresh = isFresh(req);
 
-    // Check cache first (unless fresh=true)
+    // Check cache first (unless fresh=true). A fresh request still repopulates
+    // the normal key below.
     if (!fresh) {
       const cached = cacheService.get(cacheKey);
       if (cached) {

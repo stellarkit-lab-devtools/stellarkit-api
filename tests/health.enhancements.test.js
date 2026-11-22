@@ -5,6 +5,11 @@
  *   - uptimeSeconds  — non-negative integer
  *   - nodeVersion    — matches the Node.js version string pattern (e.g. "v20.11.0")
  *   - startedAt      — valid ISO 8601 timestamp
+ *
+ * Also verifies the build info object added by issue #1197:
+ *   - build.commit   — 7-char string when GIT_SHA is set, null otherwise
+ *   - build.builtAt  — string when BUILD_TIME is set, null otherwise
+ *   - build.nodeEnv  — string
  */
 
 const request = require("supertest");
@@ -89,5 +94,55 @@ describe("GET /health — extended fields", () => {
     expect(typeof data.version).toBe("string");
     expect(typeof data.timestamp).toBe("string");
     expect(["testnet", "mainnet"]).toContain(data.network);
+  });
+
+  // ── build info (issue #1197) ───────────────────────────────────────────────
+
+  it("includes a build object with commit, builtAt, and nodeEnv", async () => {
+    const res = await request(app).get("/health");
+    const { build } = res.body.data;
+
+    expect(build).toBeDefined();
+    expect(typeof build).toBe("object");
+    expect(Object.prototype.hasOwnProperty.call(build, "commit")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(build, "builtAt")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(build, "nodeEnv")).toBe(true);
+  });
+
+  it("build.commit is null when GIT_SHA is not set", async () => {
+    const original = process.env.GIT_SHA;
+    delete process.env.GIT_SHA;
+
+    const res = await request(app).get("/health");
+    expect(res.body.data.build.commit).toBeNull();
+
+    if (original !== undefined) process.env.GIT_SHA = original;
+  });
+
+  it("build.commit is shortened to 7 characters when GIT_SHA is set", async () => {
+    const original = process.env.GIT_SHA;
+    process.env.GIT_SHA = "abc1234def5678901234567890";
+
+    const res = await request(app).get("/health");
+    expect(res.body.data.build.commit).toBe("abc1234");
+
+    if (original !== undefined) process.env.GIT_SHA = original;
+    else delete process.env.GIT_SHA;
+  });
+
+  it("build.builtAt is null when BUILD_TIME is not set", async () => {
+    const original = process.env.BUILD_TIME;
+    delete process.env.BUILD_TIME;
+
+    const res = await request(app).get("/health");
+    expect(res.body.data.build.builtAt).toBeNull();
+
+    if (original !== undefined) process.env.BUILD_TIME = original;
+  });
+
+  it("build.nodeEnv reflects NODE_ENV", async () => {
+    const res = await request(app).get("/health");
+    const expected = process.env.NODE_ENV || "development";
+    expect(res.body.data.build.nodeEnv).toBe(expected);
   });
 });

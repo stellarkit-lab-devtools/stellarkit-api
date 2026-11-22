@@ -10,7 +10,7 @@
 
 const request = require("supertest");
 const express = require("express");
-const restrictHttpMethods = require("../src/middleware/restrictHttpMethods");
+const restrictHttpMethods = require("../../src/middleware/restrictHttpMethods");
 
 function buildApp() {
   const app = express();
