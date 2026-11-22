@@ -1,33 +1,25 @@
-/**
- * tests/routes/account.trustlineLimits.test.js
- *
- * Tests for GET /account/:id/trustline-limits caching behaviour
- *
- * Verifies:
- *   1. First request returns X-Cache: MISS.
- *   2. Second identical request returns X-Cache: HIT.
- *   3. ?fresh=true bypasses the cache and returns X-Cache: MISS.
- *   4. Two different account IDs get separate cache entries.
- *
- * Uses the existing cache service mock. All Stellar SDK calls are mocked;
- * no real network requests are made.
- */
+const request = require('supertest');
 
-"use strict";
+jest.mock('../../src/config/stellar', () => ({
+  server: {
+    loadAccount: jest.fn(),
+  },
+}));
 
-const request = require("supertest");
-const app = require("../../src/index");
-const { server } = require("../../src/config/stellar");
-const cacheService = require("../../src/services/cache");
+const { server } = require('../../src/config/stellar');
+const app = require('../../src/index');
 
-jest.mock("../../src/config/stellar", () => {
-  const original = jest.requireActual("../../src/config/stellar");
-  return {
-    ...original,
-    server: {
-      loadAccount: jest.fn(),
-    },
-  };
+const NATIVE_BALANCE = {
+  balance: '1000.0000000',
+  asset_type: 'native',
+};
+
+const makeTrustline = (balance, limit, assetCode = 'USD') => ({
+  balance,
+  limit,
+  asset_type: 'credit_alphanum4',
+  asset_code: assetCode,
+  asset_issuer: 'GISSUER',
 });
 
 const ACCOUNT_A = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";

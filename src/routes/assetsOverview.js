@@ -13,7 +13,9 @@ async function fetchAllRecords(query) {
   records = records.concat(page.records);
 
   while (page.records.length > 0 && typeof page.next === "function") {
-    page = await page.next();
+    const cursor = page.records[page.records.length - 1].paging_token;
+    if (!cursor) break;
+    page = await query.cursor(cursor).call();
     if (page.records.length === 0) break;
     records = records.concat(page.records);
   }
