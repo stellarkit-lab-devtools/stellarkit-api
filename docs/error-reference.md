@@ -14,6 +14,8 @@ Every error response follows the same envelope:
 
 Some error types include additional fields such as `detail`, `suggestion`, `field`, `receivedValue`, `expectedFormat`, or Horizon-specific `extras`.
 
+Every error body also includes `error.docsUrl`, a link to the heading for that error type on this page (or to the top of the page for unknown types). The base URL can be overridden with the `DOCS_BASE_URL` environment variable.
+
 For a complete reference of HTTP status codes returned by the API, see [Error Codes](./error-codes.md).
 
 ---
@@ -355,3 +357,164 @@ Returned for unexpected errors not covered by another error type. In production,
 **Note:** In non-production environments, the `message` field contains the original error message for debugging. In production, it is replaced with a generic message.
 
 **Suggested fix:** Retry the request. If the error persists, report it with the `X-Request-ID` response header value for troubleshooting.
+
+---
+
+## Error type reference (continued)
+
+### AccountNotFound
+
+**Status:** `404`
+
+The requested Stellar account does not exist or has not been funded.
+
+### AssetNotFound
+
+**Status:** `404`
+
+The requested asset code/issuer pair was not found.
+
+### ConfigError
+
+**Status:** `500`
+
+The API is missing required configuration (for example SOROBAN_RPC_URL).
+
+### ContractNotFound
+
+**Status:** `404`
+
+The requested Soroban contract was not found on the configured network.
+
+### DuplicateParameter
+
+**Status:** `400`
+
+A query parameter was supplied more than once.
+
+### Forbidden
+
+**Status:** `403`
+
+The request is not permitted by the server policy.
+
+### Gone
+
+**Status:** `410`
+
+The requested resource is no longer available.
+
+### HorizonTimeout
+
+**Status:** `504`
+
+Horizon did not respond before the configured timeout.
+
+### HorizonUnavailable
+
+**Status:** `503`
+
+The configured Horizon node could not be reached.
+
+### InsufficientScope
+
+**Status:** `403`
+
+The API key lacks the scope required by the endpoint (admin).
+
+### InternalError
+
+**Status:** `500`
+
+An unexpected runtime error occurred while handling the request.
+
+### InvalidAccountId
+
+**Status:** `400`
+
+The supplied account address is not a valid Stellar public key.
+
+### InvalidContentType
+
+**Status:** `415`
+
+The request Content-Type is not supported.
+
+### InvalidHorizonResponse
+
+**Status:** `502`
+
+Horizon returned a response that could not be interpreted.
+
+### InvalidLimit
+
+**Status:** `400`
+
+The supplied pagination limit is outside the allowed range.
+
+### InvalidParameter
+
+**Status:** `400`
+
+A request parameter failed validation.
+
+### InvalidTransactionHash
+
+**Status:** `400`
+
+The supplied transaction hash is not a valid 64-character hex hash.
+
+### MethodNotAllowed
+
+**Status:** `405`
+
+The HTTP method is not allowed for this endpoint.
+
+### NoLedgerData
+
+**Status:** `404`
+
+No ledger data was available for the requested range.
+
+### NoPathFound
+
+**Status:** `404`
+
+No payment path was found between the requested assets.
+
+### NotFound
+
+**Status:** `404`
+
+The requested route or resource does not exist.
+
+### OrderBookEmpty
+
+**Status:** `404`
+
+No active offers exist for the requested asset pair.
+
+### RateLimitExceeded
+
+**Status:** `429`
+
+Too many requests were made within the rate-limit window.
+
+### TransactionSubmissionFailed
+
+**Status:** `409`
+
+The network accepted the transaction envelope but rejected the transaction itself.
+
+### UpstreamUnavailable
+
+**Status:** `503`
+
+An upstream service (such as Soroban RPC) is currently unreachable.
+
+### WebhookNotFound
+
+**Status:** `404`
+
+The requested webhook registration does not exist.
+

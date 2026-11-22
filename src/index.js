@@ -67,6 +67,7 @@ const assetRouter = require("./routes/asset");
 const dexRouter = require("./routes/dex");
 const { validateAccountId } = require("./utils/validators");
 const { success } = require("./utils/response");
+const { getDocsUrl } = require("./utils/errorTypes");
 const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
@@ -255,6 +256,9 @@ app.use((req, res, next) => {
 });
 
 // ── Metrics (excluded from rate limiting) ───────────────────────────────────
+// Enforce admin scope before the metrics router is mounted; the global API key
+// middleware below is mounted later in the chain.
+app.use("/metrics", apiKeyMiddleware);
 app.use("/metrics", metricsRouter);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
