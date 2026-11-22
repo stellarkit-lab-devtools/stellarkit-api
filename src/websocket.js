@@ -3,8 +3,15 @@ const logger = require("./utils/logger");
 const { streamingServer: stellarServer } = require("./config/stellar");
 const { formatLedgerSequence } = require("./utils/formatLedgerSequence");
 
+/** Ledger paging tokens are numeric; "now" starts from the live edge. */
+const LEDGER_CURSOR_PATTERN = /^(now|\d+)$/;
+
 /**
  * Sets up the WebSocket server attached to the existing HTTP server.
+ *
+ * WS /stream/ledgers[?cursor=<paging_token>] — streams ledger closes. Each
+ * message includes a `cursor` (the ledger paging token); reconnect with
+ * ?cursor=<last cursor> to resume without gaps or duplicates.
  *
  * @param {import("http").Server} server - The HTTP server instance.
  * @returns {import("ws").Server} The WebSocket server instance.
@@ -27,6 +34,20 @@ function setupWebSocket(server) {
   wss.on("connection", (ws, req) => {
     logger.info(`Client connected to /stream/ledgers from ${req.socket.remoteAddress}`);
 
+    // Optional ?cursor= lets a reconnecting client resume after the last
+    // ledger it received (each message carries its paging token as `cursor`).
+    let cursor = null;
+    try {
+      const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+      cursor = url.searchParams.get("cursor");
+    } catch (_) {
+      cursor = null;
+    }
+    if (cursor !== null && cursor !== "" && !LEDGER_CURSOR_PATTERN.test(cursor)) {
+      ws.close(1008, "Invalid cursor");
+      return;
+    }
+
     // isClosed is a race-condition guard. Both the "close" and "error" events can fire
     // in quick succession (or even concurrently in the event loop). Without this flag,
     // cleanup() could run twice: the second call would try to invoke closeHorizonStream
@@ -42,7 +63,10 @@ function setupWebSocket(server) {
     try {
       // Subscribe to Horizon live ledger stream. stellarServer.ledgers().stream() returns a
       // teardown function that stops the EventSource-style connection when called.
-      closeHorizonStream = stellarServer.ledgers().stream({
+      const ledgersQuery = cursor
+        ? stellarServer.ledgers().cursor(cursor)
+        : stellarServer.ledgers();
+      closeHorizonStream = ledgersQuery.stream({
         onmessage: (ledger) => {
           // Guard against messages arriving after the client has already disconnected.
           // Without this check, we would attempt to JSON.stringify and ws.send to a closed
@@ -50,12 +74,17 @@ function setupWebSocket(server) {
           if (isClosed) return;
           try {
             // Transform raw Horizon ledger structure into desired JSON schema
-            const payload = JSON.stringify({
+            const message = {
               sequence: formatLedgerSequence(ledger.sequence),
               closedAt: ledger.closed_at,
               baseFee: ledger.base_fee_in_stroops,
               transactionCount: ledger.successful_transaction_count,
-            });
+            };
+            // Paging token used by clients to resume via ?cursor=
+            if (ledger.paging_token !== undefined && ledger.paging_token !== null) {
+              message.cursor = String(ledger.paging_token);
+            }
+            const payload = JSON.stringify(message);
 
             // ws.readyState can transition to CLOSING or CLOSED between the isClosed check above
             // and this send call (e.g. if the client disconnects mid-message). Checking OPEN here

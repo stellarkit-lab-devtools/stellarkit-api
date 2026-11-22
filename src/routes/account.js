@@ -45,6 +45,7 @@ async function withHorizonTiming(req, fn) {
 
 const { buildAccountAgeResponse } = require("../utils/accountAge");
 const { parsePaginationParams } = require("../utils/pagination");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
 
 
@@ -1128,6 +1129,19 @@ router.get("/:id/payments", async (req, res, next) => {
       throw err;
     }
 
+    const cacheKey = buildCacheKey(req, {
+      namespace: `account-payments:${id}`,
+      allowedParams: ["limit", "order", "cursor", "assetCode", "assetIssuer", "startDate", "endDate"],
+      defaults: { limit: 20, order: "desc" },
+    });
+    if (!isFresh(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached.data, { meta: cached.meta });
+      }
+    }
+
     let query = server.payments().forAccount(id).limit(limit).order(order);
     if (cursor) query = query.cursor(cursor);
 
@@ -1229,9 +1243,8 @@ router.get("/:id/payments", async (req, res, next) => {
     const lastRecord = rawRecords[rawRecords.length - 1];
     const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
-    return success(res, {
-      payments,
-    }, {
+    const payload = {
+      data: { payments },
       meta: {
         count: payments.length,
         limit,
@@ -1239,7 +1252,11 @@ router.get("/:id/payments", async (req, res, next) => {
         nextCursor: payments.length ? nextCursor : null,
         hasMore: nextCursor !== null,
       },
-    });
+    };
+    cacheService.set(cacheKey, payload, cacheTTL.payments);
+
+    res.set("X-Cache", "MISS");
+    return success(res, payload.data, { meta: payload.meta });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -2862,10 +2879,13 @@ router.get("/:id", async (req, res, next) => {
     const { id } = req.params;
     validateAccountId(id);
 
-    const cacheKey = `account:${id}`;
-    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    // No query params change this response, so unknown params are dropped
+    // from the key and every variant shares the "account:<id>" entry.
+    const cacheKey = buildCacheKey(req, { namespace: `account:${id}`, allowedParams: [] });
+    const fresh = isFresh(req);
 
-    // Serve from cache unless caller requests a fresh fetch
+    // Serve from cache unless caller requests a fresh fetch. A fresh request
+    // still repopulates the normal key below.
     if (!fresh) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -6592,6 +6612,19 @@ router.get("/:id/transactions", async (req, res, next) => {
     const includeOperations = req.query.includeOperations === true;
     const { limit, order, cursor } = parsePaginationParams(req.query, 200);
 
+    const cacheKey = buildCacheKey(req, {
+      namespace: `account-transactions:${id}`,
+      allowedParams: ["limit", "order", "cursor", "type", "includeOperations"],
+      defaults: { limit: 20, order: "desc", includeOperations: false },
+    });
+    if (!isFresh(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
     // Helper to shape a Horizon transaction record into the API response format
     async function formatTx(tx) {
       const chargedInStroops = parseInt(tx.fee_charged, 10);
@@ -6691,13 +6724,17 @@ router.get("/:id/transactions", async (req, res, next) => {
       const lastOp = opRecords[opRecords.length - 1];
       const nextCursor = lastOp ? lastOp.paging_token : null;
 
-      return success(res, {
+      const typedData = {
         items: transactions,
         total: transactions.length,
         limit,
         cursor: opRecords.length > 0 ? nextCursor : null,
         filter: { type: normalizedType },
-      });
+      };
+      cacheService.set(cacheKey, typedData, cacheTTL.accountTransactions);
+
+      res.set("X-Cache", "MISS");
+      return success(res, typedData);
     }
 
     // No ?type= filter — standard paginated transaction history
@@ -6712,12 +6749,16 @@ router.get("/:id/transactions", async (req, res, next) => {
     const txResponse = await txQuery.call();
     const records = txResponse.records || [];
 
-    return success(res, {
+    const data = {
       items: await Promise.all(records.map(formatTx)),
       total: records.length,
       limit,
       cursor: records.length > 0 ? records[records.length - 1].paging_token : null,
-    });
+    };
+    cacheService.set(cacheKey, data, cacheTTL.accountTransactions);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }

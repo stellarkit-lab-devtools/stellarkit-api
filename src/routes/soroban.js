@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { scValToNative, xdr, TransactionBuilder, Networks, Operation, Contract, nativeToScVal, Account } = require("@stellar/stellar-sdk");
+const { scValToNative, xdr, TransactionBuilder, Networks, Operation, Contract, nativeToScVal, Account, Asset, StrKey } = require("@stellar/stellar-sdk");
 const { sorobanServer, NETWORK } = require("../config/stellar");
 const { validateContractId, validateLimit, validateTransactionHash } = require("../utils/validators");
 const { success } = require("../utils/response");
