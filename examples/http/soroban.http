@@ -1,0 +1,31 @@
+### Soroban Smart Contract Endpoints
+@baseUrl = http://localhost:3000
+@contractId = CCJZ5DGASBWQXR5MPFCJXMBI333XE5U3FSJTNQU7RIKE3P5GN2K2WYD2
+@apiKey = 
+
+### Get Contract Info
+GET {{baseUrl}}/soroban/contract/{{contractId}}
+X-API-Key: {{apiKey}}
+
+### Get Contract Storage
+GET {{baseUrl}}/soroban/contract/{{contractId}}/storage
+X-API-Key: {{apiKey}}
+
+### Get Contract Functions
+GET {{baseUrl}}/soroban/contract/{{contractId}}/functions
+X-API-Key: {{apiKey}}
+
+### Get Contract Expiry
+GET {{baseUrl}}/soroban/contract/{{contractId}}/expiry
+X-API-Key: {{apiKey}}
+
+### Simulate Contract Invocation
+POST {{baseUrl}}/soroban/simulate
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "contractId": "{{contractId}}",
+  "function": "balance",
+  "args": ["GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7"]
+}
