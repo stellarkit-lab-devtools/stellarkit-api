@@ -30,7 +30,7 @@ const compression = require("compression");
 const logger = require("./utils/logger");
 const { parseStellarAmount } = require("./utils/parseStellarAmount");
 const { setupWebSocket } = require("./websocket");
-const { server, horizonUrl, NETWORK } = require("./config/stellar");
+const { server, horizonUrl, NETWORK, getActiveHorizonHost } = require("./config/stellar");
 const cacheService = require("./services/cache");
 const networkStatusCache = cacheService;
 const feeEstimateCache = cacheService;
@@ -265,7 +265,15 @@ app.use((req, res, next) => {
 app.get("/health", async (req, res) => {
   const network = process.env.STELLAR_NETWORK || NETWORK || "testnet";
   const horizon = await getHorizonHealth({ server, network });
+  if (getActiveHorizonHost) horizon.host = getActiveHorizonHost();
   const status = horizon.status === "ok" ? "ok" : horizon.status;
+
+  const rawCommit = process.env.GIT_SHA || null;
+  const build = {
+    commit: rawCommit ? rawCommit.slice(0, 7) : null,
+    builtAt: process.env.BUILD_TIME || null,
+    nodeEnv: process.env.NODE_ENV || "development",
+  };
 
   res.json({
     success: true,
@@ -279,6 +287,7 @@ app.get("/health", async (req, res) => {
       nodeVersion: process.version,
       startedAt: SERVER_STARTED_AT,
       horizon,
+      build,
     },
   });
 });
@@ -822,8 +831,15 @@ function startServer({
   setupWebSocketHook = setupWebSocket,
 } = {}) {
   const httpServer = appInstance.listen(port, () => {
+    const pkg = require("../package.json");
+    const rawCommit = process.env.GIT_SHA || null;
+    const commit = rawCommit ? rawCommit.slice(0, 7) : null;
+    const builtAt = process.env.BUILD_TIME || null;
+
     logger.log(`\n🚀 StellarKit API running on port ${port}`);
     logger.log(`🌐 Network : ${process.env.STELLAR_NETWORK || "testnet"}`);
+    logger.log(`📦 Version : ${pkg.version}${commit ? ` (${commit})` : ""}`);
+    if (builtAt) logger.log(`🕐 Built   : ${builtAt}`);
     logger.log(`📖 Docs    : http://localhost:${port}/\n`);
 
     warmStartupCaches({ logger }).catch((err) => {

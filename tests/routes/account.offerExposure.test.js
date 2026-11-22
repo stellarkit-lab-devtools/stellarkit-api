@@ -2,21 +2,21 @@
 
 const request = require('supertest');
 
-jest.mock('../src/config/stellar', () => ({
+jest.mock('../../src/config/stellar', () => ({
   server: {
     loadAccount: jest.fn(),
     offers: jest.fn(),
   },
 }));
 
-jest.mock('../src/services/cache', () => ({
+jest.mock('../../src/services/cache', () => ({
   get: jest.fn().mockResolvedValue(null),
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(undefined),
 }));
 
-const { server } = require('../src/config/stellar');
-const app = require('../src/app');
+const { server } = require('../../src/config/stellar');
+const app = require('../../src/index');
 
 const ACCOUNT_ID = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 

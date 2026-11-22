@@ -1,5 +1,5 @@
 const request = require("supertest");
-const app = require("../../src/app");
+const app = require("../../src/index");
 const { server } = require("../../src/config/stellar");
 
 jest.mock("../../src/config/stellar");
