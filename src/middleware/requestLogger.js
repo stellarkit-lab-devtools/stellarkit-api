@@ -17,6 +17,7 @@
  *   stopHorizonTimer(req);
  */
 
+const redactSeeds = require("../utils/redactSeeds");
 const logger = require("../utils/logger");
 const metricsService = require("../services/metrics");
 
@@ -57,7 +58,7 @@ function requestLogger(req, res, next) {
 
     const requestId = req.requestId || "-";
     const method = req.method;
-    const path = req.originalUrl || req.url;
+    const path = redactSeeds(req.originalUrl || req.url);
     const statusCode = res.statusCode;
 
     const fields = { requestId, method, path, statusCode, responseTimeMs };

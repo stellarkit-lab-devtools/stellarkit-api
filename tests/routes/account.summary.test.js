@@ -324,7 +324,7 @@ describe("GET /account/:id/summary", () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.type).toBe("InvalidAccountId");
     expect(res.body.error.suggestion).toBe(
-      "Account addresses start with G and are 56 characters long."
+      "Use a G... account address exactly 56 characters long."
     );
   });
 });
