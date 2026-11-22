@@ -680,7 +680,6 @@ router.get("/ledger-stats", async (req, res, next) => {
 
 const SOROBAN_STATS_PERIOD = "24h";
 const SOROBAN_STATS_WINDOW_MS = 24 * 60 * 60 * 1000;
-const SOROBAN_STATS_PAGE_SIZE = 200;
 // Bounds the Horizon scan. On busy networks the scan budget runs out before
 // the 24h boundary is reached; `windowCovered` reports when that happens.
 const SOROBAN_STATS_MAX_PAGES = 10;
@@ -712,6 +711,109 @@ function getJoinedTransaction(op) {
   return null;
 }
 
+const FEE_HISTORY_DEFAULT_LEDGERS = 20;
+const FEE_HISTORY_MAX_LEDGERS = 100;
+const FEE_HISTORY_CACHE_TTL = 10;
+
+/**
+ * GET /network/fee-history
+ * Returns per-ledger fee statistics over a specified number of recent ledgers.
+ *
+ * Query params:
+ *   - ledgers (number, 1–100, default: 20) — Maximum number of ledgers to return.
+ *   - fresh (boolean, default: false) — bypasses cache when set to "true"
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       ledgers: [
+ *         {
+ *           sequence:      <number>,  // ledger sequence
+ *           closedAt:      <string>,  // ISO 8601 close time
+ *           baseFee:       <number>,  // base fee in stroops
+ *           p50Fee:        <number>,  // 50th percentile fee in stroops
+ *           p95Fee:        <number>,  // 95th percentile fee in stroops
+ *           capacityUsage: <number>   // 0–1, ledger operation capacity utilization
+ *         }
+ *       ],
+ *       count: <number>
+ *     }
+ *   }
+ *
+ * Ledgers are ordered by sequence descending (newest first).
+ *
+ * Errors:
+ *   400 — ledgers is not an integer between 1 and 100
+ *
+ * @example
+ * GET /network/fee-history
+ * GET /network/fee-history?ledgers=5
+ */
+router.get("/fee-history", async (req, res, next) => {
+  try {
+    const rawLimit =
+      req.query.ledgers !== undefined
+        ? req.query.ledgers
+        : FEE_HISTORY_DEFAULT_LEDGERS;
+    const parsed = parseInt(rawLimit, 10);
+
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > FEE_HISTORY_MAX_LEDGERS) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: `ledgers must be a positive integer between 1 and ${FEE_HISTORY_MAX_LEDGERS}.`,
+        },
+      });
+    }
+
+    const limit = parsed;
+    const fresh = isFreshRequest(req.query);
+    const cacheKey = `network-fee-history:${limit}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const ledgerResponse = await withHorizonTiming(req, () =>
+      server.ledgers().order("desc").limit(limit).call()
+    );
+    const records = ledgerResponse.records || [];
+
+    const ledgers = records.slice(0, limit).map((ledger) => {
+      const baseFee = parseInt(ledger.base_fee_in_stroops ?? ledger.base_fee ?? "0", 10);
+      const p50Fee = parseStroops(ledger.fee_charged?.p50 ?? String(baseFee));
+      const p95Fee = parseStroops(ledger.fee_charged?.p95 ?? String(baseFee));
+      const capacityUsage = parseFloat(ledger.capacity_usage ?? ledger.operation_count ?? 0) / 10000;
+
+      return {
+        sequence: formatLedgerSequence(ledger.sequence),
+        closedAt: ledger.closed_at || null,
+        baseFee: Number.isFinite(baseFee) ? baseFee : 0,
+        p50Fee: Number.isFinite(p50Fee) ? p50Fee : 0,
+        p95Fee: Number.isFinite(p95Fee) ? p95Fee : 0,
+        capacityUsage: Math.min(1, Math.max(0, capacityUsage)),
+      };
+    });
+
+    const data = {
+      ledgers,
+      count: ledgers.length,
+    };
+
+    cacheService.set(cacheKey, data, FEE_HISTORY_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * GET /network/soroban-stats
  *
@@ -726,12 +828,10 @@ function getJoinedTransaction(op) {
  *     success: true,
  *     data: {
  *       period:                  "24h",
- *       totalOperations:         <number>,  // operations scanned in the window
- *       sorobanOperations:       <number>,  // invoke_host_function + TTL extend/restore
  *       invocations24h:          <number>,  // invoke_host_function only
- *       sorobanOperationPercent: <number>,  // 0–100, two decimal places
+ *       uniqueContracts24h:      <number>,  // number of unique contract addresses
  *       sorobanFeeRevenueXLM:    <string>,  // seven-decimal XLM, fees charged on Soroban transactions
- *       windowCovered:           <boolean>  // false when the scan limit was hit before 24h
+ *       sorobanOperationPercent: <number>,  // 0–100, two decimal places
  *     }
  *   }
  *
@@ -757,6 +857,7 @@ router.get("/soroban-stats", async (req, res, next) => {
 
     const windowStart = Date.now() - SOROBAN_STATS_WINDOW_MS;
     const feeByTransaction = new Map();
+    const uniqueContracts = new Set();
     let totalOperations = 0;
     let sorobanOperations = 0;
     let invocations = 0;
@@ -786,7 +887,13 @@ router.get("/soroban-stats", async (req, res, next) => {
         if (!SOROBAN_OPERATION_TYPES.has(op.type)) continue;
 
         sorobanOperations += 1;
-        if (op.type === "invoke_host_function") invocations += 1;
+        if (op.type === "invoke_host_function") {
+          invocations += 1;
+          // Track unique contract addresses from invoke_host_function operations
+          if (op.invoke_host_function_details && op.invoke_host_function_details.address) {
+            uniqueContracts.add(op.invoke_host_function_details.address);
+          }
+        }
 
         // A Soroban transaction holds exactly one operation, so its whole fee
         // is Soroban revenue. Keyed by hash to never count a fee twice.
@@ -811,12 +918,10 @@ router.get("/soroban-stats", async (req, res, next) => {
 
     const data = {
       period: SOROBAN_STATS_PERIOD,
-      totalOperations,
-      sorobanOperations,
       invocations24h: invocations,
-      sorobanOperationPercent,
+      uniqueContracts24h: uniqueContracts.size,
       sorobanFeeRevenueXLM: parseStellarAmount(feeRevenueStroops),
-      windowCovered,
+      sorobanOperationPercent,
     };
 
     cacheService.set(cacheKey, data, cacheTTL.sorobanStats);
