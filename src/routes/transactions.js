@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
@@ -346,7 +348,7 @@ router.get("/:id/operations", async (req, res, next) => {
  * POST /transactions/batch-status
  * { "hashes": ["hash1", "hash2"] }
  */
-router.post("/batch-status", async (req, res, next) => {
+router.post("/batch-status", validateBody(schemas.transactionBatchStatus), async (req, res, next) => {
   try {
     const { hashes } = req.body;
 

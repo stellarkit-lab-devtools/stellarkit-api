@@ -252,10 +252,10 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("InvalidAccountId");
       expect(res.body.error.message).toBe(
-        "'NOT_A_VALID_KEY' is not a valid Stellar account address."
+        "The supplied value is not a valid Stellar account address."
       );
       expect(res.body.error.suggestion).toBe(
-        "Account addresses start with G and are 56 characters long."
+        "Use a public account address starting with G."
       );
     });
   });
@@ -381,7 +381,7 @@ image = "https://example.com/test.png"
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("InvalidAccountId");
       expect(res.body.error.message).toBe(
-        "'BADKEY123' is not a valid Stellar account address."
+        "The supplied value is not a valid Stellar account address."
       );
     });
 

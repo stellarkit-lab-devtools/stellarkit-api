@@ -5,13 +5,14 @@
   "main": "src/index.js",
   "types": "types/index.d.ts",
   "scripts": {
-      "start": "node src/index.js",
-      "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "test": "jest --coverage",
     "test:types": "tsd --files 'sdk/tests/types/**/*.test-d.ts'",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix",
     "seed": "node scripts/seed-testnet.js",
+    "doctor": "node scripts/doctor.js"
     "new:route": "node scripts/new-route.js"
   },
   "keywords": [
@@ -32,6 +33,7 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.3.0",
+    "ajv": "^8.20.0",
     "axios": "^1.7.2",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
@@ -54,6 +56,10 @@
     "restoreMocks": true,
     "detectOpenHandles": true,
     "forceExit": true
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.kilo/"
+    ]
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",

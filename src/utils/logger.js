@@ -10,6 +10,7 @@
  */
 
 const pino = require("pino");
+const redactSeeds = require("./redactSeeds");
 
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -40,6 +41,7 @@ const REDACT_PATHS = [
 ];
 
 const pinoConfig = {
+  hooks: { logMethod(args, method) { method.apply(this, args.map(redactSeeds)); } },
   level: LOG_LEVEL,
   enabled: true,
   redact: {
@@ -61,6 +63,35 @@ const transport = !IS_PRODUCTION
     }
   : undefined;
 
-const logger = pino(pinoConfig, transport ? pino.transport(transport) : undefined);
+const rawLogger = pino(pinoConfig, transport ? pino.transport(transport) : undefined);
+const { getRequestContext } = require("./requestContext");
+
+/**
+ * Merge the current AsyncLocalStorage request context into every log entry.
+ * Services without `req` therefore still emit requestId/method/route. Entries
+ * explicitly carrying a field take precedence over the inherited context.
+ */
+function withRequestContext(firstArg) {
+  const context = getRequestContext();
+  if (!context || Object.keys(context).length === 0) return firstArg;
+  return { ...context, ...(firstArg || {}) };
+}
+
+// Pino methods rely on `this`, so call them on the raw logger. The exported
+// object is a decorator, preserving the existing logger API/signatures.
+const logger = Object.create(rawLogger);
+for (const level of ["trace", "debug", "info", "warn", "error", "fatal"]) {
+  logger[level] = function logWithContext(...args) {
+    if (args[0] !== null && typeof args[0] === "object" && !Array.isArray(args[0]) && !(args[0] instanceof Error)) {
+      args[0] = withRequestContext(args[0]);
+    } else {
+      args.unshift(withRequestContext({}));
+    }
+    return rawLogger[level].apply(rawLogger, args);
+  };
+}
+
+// Exposed for tests that need to observe the final structured log entry.
+logger.__rawLogger = rawLogger;
 
 module.exports = logger;

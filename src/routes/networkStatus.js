@@ -39,9 +39,13 @@ router.get("/", async (req, res, next) => {
       }
     }
 
-    const data = await fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
-
-    cacheService.set(cacheKey, data, cacheTTL.networkStatus);
+    // Coalesce concurrent cache misses (and ?fresh=true requests) for the
+    // same key into a single Horizon call.
+    const data = await singleFlight(cacheKey, async () => {
+      const fetched = await fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
+      cacheService.set(cacheKey, fetched, cacheTTL.networkStatus);
+      return fetched;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);

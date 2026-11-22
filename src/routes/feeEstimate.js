@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
@@ -10,6 +12,7 @@ const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 const { parseStellarAmount } = require("../utils/parseStellarAmount");
 const { mapFeeStats } = require("../utils/mapFeeEstimate");
+const { singleFlight } = require("../utils/singleFlight");
 
 const LEDGER_HISTORY_LIMIT = 5;
 
@@ -53,7 +56,9 @@ router.get("/", async (req, res, next) => {
       }
     }
 
-    // Cache miss or fresh=true - fetch from Horizon
+    // Cache miss or fresh=true - fetch from Horizon, coalescing identical
+    // concurrent requests for the same key into one upstream call.
+    const data = await singleFlight(cacheKey, async () => {
     const feeStats = await server.feeStats();
     const ledgerHistory = await server
       .ledgers()
@@ -67,7 +72,7 @@ router.get("/", async (req, res, next) => {
     const priority = parseInt(feeStats.fee_charged.p95);
     const liveFees = mapFeeStats(feeStats);
 
-    const data = {
+    const result = {
       ...liveFees,
       note: `Fee estimates for a transaction with ${operations} operation(s). Fees are in stroops (1 XLM = 10,000,000 stroops).`,
       operationCount: operations,
@@ -150,7 +155,9 @@ router.get("/", async (req, res, next) => {
       })(),
     };
 
-    cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
+    cacheService.set(cacheKey, result, cacheTTL.feeEstimate);
+    return result;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -371,7 +378,7 @@ router.get("/trends", async (req, res, next) => {
  * POST /fee-estimate/batch
  * { "transactions": [{ "type": "payment", "operationCount": 1 }, { "type": "swap", "operationCount": 3 }] }
  */
-router.post("/batch", async (req, res, next) => {
+router.post("/batch", validateBody(schemas.feeBatch), async (req, res, next) => {
   try {
     const BATCH_MAX = 10;
     const { transactions } = req.body || {};

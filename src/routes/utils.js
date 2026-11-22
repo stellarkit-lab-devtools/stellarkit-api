@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const axios = require("axios");
 const router = express.Router();
 const registerParamValidation = require("../middleware/validateRouteParams");
@@ -6,6 +8,8 @@ registerParamValidation(router);
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const {
+  Account,
+  MuxedAccount,
   Transaction,
   TransactionBuilder,
   FeeBumpTransaction,
@@ -19,8 +23,24 @@ const {
 const { normalizeAsset } = require("../utils/asset");
 const { server } = require("../config/stellar");
 
+router.post("/muxed-address", (req, res, next) => {
+  try {
+    const { baseAccount, id } = req.body || {};
+    validateAccountId(baseAccount);
+    if (typeof id !== "string" || !/^[0-9]+$/.test(id) || BigInt(id) > 18446744073709551615n) {
+      throw createValidationError("id must be a string containing a uint64 from 0 to 18446744073709551615.");
+    }
+    const muxed = new MuxedAccount(new Account(baseAccount, "0"), BigInt(id).toString());
+    return success(res, { muxedAddress: muxed.accountId(), baseAccount, id });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const STROOPS_PER_XLM = 10000000n;
+const INT64_MAX = (1n << 63n) - 1n;
+const { xlmToStroops } = require("../utils/parseStellarAmount");
 const AVERAGE_LEDGER_CLOSE_SECONDS = 5;
 const { decodeMemo, validateMemo } = require("../utils/memo");
 
@@ -46,16 +66,13 @@ function parseXlmToStroops(value) {
     );
   }
 
-  const [whole, fractional = ""] = value.split(".");
-  const stroops =
-    BigInt(whole) * STROOPS_PER_XLM +
-    BigInt(fractional.padEnd(7, "0"));
+  const stroops = xlmToStroops(value);
 
-  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw createValidationError("Converted stroop value exceeds the safe integer range.");
+  if (stroops > INT64_MAX) {
+    throw createValidationError("Converted stroop value exceeds the int64 range.");
   }
 
-  return Number(stroops);
+  return stroops;
 }
 
 function parseStroops(value) {
@@ -72,11 +89,11 @@ function parseStroops(value) {
   }
 
   const stroops = BigInt(value);
-  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw createValidationError("Query parameter 'stroops' exceeds the safe integer range.");
+  if (stroops > INT64_MAX) {
+    throw createValidationError("Query parameter 'stroops' exceeds the int64 range.");
   }
 
-  return Number(stroops);
+  return stroops;
 }
 
 function formatStroopsToXlm(stroops) {
@@ -84,6 +101,12 @@ function formatStroopsToXlm(stroops) {
   const whole = stroopValue / STROOPS_PER_XLM;
   const fractional = (stroopValue % STROOPS_PER_XLM).toString().padStart(7, "0");
   return `${whole}.${fractional}`;
+}
+
+// Keep small values numeric for backwards compatibility; expose larger
+// int64 values as strings so JSON clients never lose precision.
+function serializeStroops(stroops) {
+  return stroops <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(stroops) : stroops.toString();
 }
 
 /**
@@ -182,7 +205,7 @@ router.get("/memo", (req, res, next) => {
  * { "type": "text", "value": "invoice-123" }
  * Validate a memo value before it is attached to a transaction.
  */
-router.post("/validate-memo", (req, res, next) => {
+router.post("/validate-memo", validateBody(schemas.validateMemo), (req, res, next) => {
   try {
     const { type, value } = req.body || {};
     const result = validateMemo(type, value);
@@ -269,14 +292,14 @@ router.get("/convert", (req, res, next) => {
       const convertedStroops = parseXlmToStroops(xlm);
       return success(res, {
         xlm: formatStroopsToXlm(convertedStroops),
-        stroops: convertedStroops,
+        stroops: serializeStroops(convertedStroops),
       });
     }
 
     const convertedStroops = parseStroops(stroops);
     return success(res, {
       xlm: formatStroopsToXlm(convertedStroops),
-      stroops: convertedStroops,
+      stroops: serializeStroops(convertedStroops),
     });
   } catch (err) {
     next(err);
@@ -493,7 +516,7 @@ router.get("/validate-hash", (req, res, next) => {
  * POST /utils/decode-xdr
  * { "xdr": "AAAAAgAAAAD..." }
  */
-router.post("/decode-xdr", (req, res, next) => {
+router.post("/decode-xdr", validateBody(schemas.decodeXdr), (req, res, next) => {
   try {
     const { xdr } = req.body;
 
@@ -745,7 +768,7 @@ function formatTimeBound(value) {
  * POST /utils/decode-transaction
  * { "xdr": "AAAAAgAAAAD..." }
  */
-router.post("/decode-transaction", (req, res, next) => {
+router.post("/decode-transaction", validateBody(schemas.decodeTransaction), (req, res, next) => {
   try {
     const { xdr: envelopeXdr } = req.body || {};
 
@@ -882,7 +905,7 @@ router.get("/keypair", (req, res, next) => {
  *
  * @returns {{ canSend: boolean, warnings: Array<{ type: string, message: string }> }}
  */
-router.post("/simulate-payment", async (req, res, next) => {
+router.post("/simulate-payment", validateBody(schemas.simulatePayment), async (req, res, next) => {
   try {
     const { source, destination, amount, assetCode, assetIssuer } = req.body || {};
     validateAccountId(source);

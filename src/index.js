@@ -46,6 +46,7 @@ const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
 const errorHandler = require("./middleware/errorHandler");
 const requestIdMiddleware = require("./middleware/requestId");
+const { requestContextMiddleware } = require("./utils/requestContext");
 const requestLogger = require("./middleware/requestLogger");
 const metricsCollector = require("./middleware/metricsCollector");
 const apiKeyMiddleware = require("./middleware/apiKeyAuth");
@@ -67,6 +68,7 @@ const assetRouter = require("./routes/asset");
 const dexRouter = require("./routes/dex");
 const { validateAccountId } = require("./utils/validators");
 const { success } = require("./utils/response");
+const { getDocsUrl } = require("./utils/errorTypes");
 const liquidityPoolRouter = require("./routes/liquidityPool");
 const streamRouter = require("./routes/stream");
 const utilsRouter = require("./routes/utils");
@@ -207,6 +209,7 @@ async function warmStartupCaches({
 
 // ── Security & Parsing ──────────────────────────────────────────────────────
 app.use(helmet());
+app.use(require("./routes/securityTxt"));
 // Reject TRACE/CONNECT/OPTIONS/PUT/HEAD/etc. before CORS or route handlers
 app.use(restrictHttpMethods);
 // Skip compression for responses smaller than 1 KB — gzip headers alone can exceed tiny payloads
@@ -254,6 +257,9 @@ app.use((req, res, next) => {
 });
 
 // ── Metrics (excluded from rate limiting) ───────────────────────────────────
+// Enforce admin scope before the metrics router is mounted; the global API key
+// middleware below is mounted later in the chain.
+app.use("/metrics", apiKeyMiddleware);
 app.use("/metrics", metricsRouter);
 
 // ── Rate Limiting ───────────────────────────────────────────────────────────
@@ -314,9 +320,11 @@ app.use("/fee-estimate", feeEstimateRouter);
 // Apply ETag middleware to cached endpoints
 app.use("/network-status", etagMiddleware, networkStatusRouter);
 app.use("/fee-estimate", etagMiddleware, feeEstimateRouter);
+const { validateBody } = require("./middleware/validateBody");
+const schemas = require("./middleware/bodySchemas");
 const accountCounterpartiesRouter = require("./routes/account.counterparties");
 const accountsBatchRouter = express.Router();
-accountsBatchRouter.post("/multisig-info", async (req, res, next) => {
+accountsBatchRouter.post("/multisig-info", validateBody(schemas.multisigInfo), async (req, res, next) => {
   try {
     const { accountIds } = req.body;
 

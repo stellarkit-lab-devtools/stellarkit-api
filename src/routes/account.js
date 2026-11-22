@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const { server, NETWORK, fetchAccountCreation } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
@@ -9,6 +11,7 @@ const {
 const cacheService = require("../services/cache");
 const watchlistService = require("../services/watchlistService");
 const cacheTTL = require("../config/cacheConfig");
+const { singleFlight } = require("../utils/singleFlight");
 const {
   validateAccountId,
   validateAssetCode,
@@ -53,11 +56,17 @@ const axios = require("axios");
 const { Asset, scValToNative, xdr } = require("@stellar/stellar-sdk");
 const { normalizeAsset, normalizeAssetFromString } = require("../utils/asset");
 const { isNativeAsset, isNonNativeAsset } = require("../utils/assetHelpers");
-const { getAssetMetadataFromToml, fetchStellarToml } = require("../utils/tomlResolver");
+const {
+  getAssetMetadataFromToml,
+  fetchStellarToml,
+  fetchStellarTomlResult,
+  normaliseStellarToml,
+} = require("../utils/tomlResolver");
 const { formatBalance } = require("../utils/formatBalance");
 const { parseStellarAmount } = require("../utils/parseStellarAmount");
 const { formatAmount } = require("../utils/formatAmount");
 const { mapAccountTrade } = require("../utils/mapAccountTrade");
+const { toCsv, parseExportFormat, csvAmount } = require("../utils/csv");
 
 // Cache TTL for account endpoint responses (in seconds)
 const CACHE_TTL_ACCOUNT = parseInt(process.env.CACHE_TTL_ACCOUNT_MS, 10) / 1000 || 10;
@@ -1099,6 +1108,7 @@ router.get("/:id/payments", async (req, res, next) => {
       return next();
     }
     validateAccountId(id);
+    const format = parseExportFormat(req.query.format);
 
     const { limit, order, cursor } = parsePaginationParams(req.query);
 
@@ -1286,6 +1296,7 @@ router.get("/:id/trades", async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
+    const format = parseExportFormat(req.query.format);
 
     const { limit, order, cursor } = parsePaginationParams(req.query);
     const fresh = req.query.fresh === true;
@@ -1357,6 +1368,26 @@ router.get("/:id/trades", async (req, res, next) => {
         hasMore: nextCursor !== null,
       },
     };
+
+    if (format === "csv") {
+      const headers = [
+        "tradeId", "ledgerCloseTime", "sellingAssetCode", "sellingAssetIssuer",
+        "sellingAssetType", "buyingAssetCode", "buyingAssetIssuer",
+        "buyingAssetType", "soldAmount", "boughtAmount", "price", "tradeType",
+        "offerId", "transactionHash",
+      ];
+      const rows = trades.map((t) => [
+        t.tradeId, t.ledgerCloseTime,
+        t.selling?.code ?? "", t.selling?.issuer ?? "", t.selling?.type ?? "",
+        t.buying?.code ?? "", t.buying?.issuer ?? "", t.buying?.type ?? "",
+        csvAmount(t.soldAmount), csvAmount(t.boughtAmount), csvAmount(t.price),
+        t.tradeType, t.offerId, t.transactionHash ?? "",
+      ]);
+      res.set("Content-Type", "text/csv; charset=utf-8");
+      res.set("Content-Disposition", 'attachment; filename="trades-.csv"');
+      if (trades.length && nextCursor) res.set("X-Next-Cursor", nextCursor);
+      return res.send(toCsv(headers, rows));
+    }
 
     cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.trades);
     res.set("X-Cache", "MISS");
@@ -1570,6 +1601,99 @@ router.get("/:id/offers", async (req, res, next) => {
   }
 });
 
+
+const SIGNER_CHANGE_EFFECT_TYPES = new Set([
+  "signer_created",
+  "signer_removed",
+  "signer_updated",
+  "account_thresholds_updated",
+]);
+
+/**
+ * GET /account/:id/signer-changes
+ *
+ * Lists recent signer and threshold effects for takeover monitoring. A newly
+ * created signer whose weight meets the account's current high threshold is
+ * flagged with `controlCapable: true`.
+ */
+router.get("/:id/signer-changes", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const rawDays = req.query.days === undefined ? 30 : Number(req.query.days);
+    if (!Number.isFinite(rawDays) || rawDays < 1) {
+      const err = new Error("Query param 'days' must be a positive number.");
+      err.isValidation = true;
+      err.field = "days";
+      err.status = 400;
+      throw err;
+    }
+    const days = Math.min(Math.floor(rawDays), 365);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const cutoff = Date.now() - days * MS_PER_DAY;
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+    const currentThresholds = {
+      low: Number(account.thresholds?.low_threshold ?? 0),
+      med: Number(account.thresholds?.med_threshold ?? 0),
+      high: Number(account.thresholds?.high_threshold ?? 0),
+    };
+
+    let query = server.effects().forAccount(id).limit(limit).order(order);
+    if (cursor) query = query.cursor(cursor);
+    const effectResponse = await query.call();
+    const effects = (effectResponse.records || []).filter((effect) => {
+      const type = effect.type === "account_thresholds_updated" ? "thresholds_updated" : effect.type;
+      if (!SIGNER_CHANGE_EFFECT_TYPES.has(effect.type)) return false;
+      const timestamp = Date.parse(effect.created_at);
+      return Number.isNaN(timestamp) || timestamp >= cutoff;
+    });
+
+    const changes = effects.map((effect) => {
+      const type = effect.type === "account_thresholds_updated" ? "thresholds_updated" : effect.type;
+      const weight = effect.weight != null ? Number(effect.weight) : null;
+      const thresholds =
+        type === "thresholds_updated"
+          ? {
+              low: Number(effect.low_threshold ?? currentThresholds.low),
+              med: Number(effect.med_threshold ?? currentThresholds.med),
+              high: Number(effect.high_threshold ?? currentThresholds.high),
+            }
+          : currentThresholds;
+
+      return {
+        type,
+        signerKey: effect.public_key || effect.key || effect.signer?.key || null,
+        weight,
+        thresholds,
+        controlCapable:
+          type === "signer_created" &&
+          weight !== null &&
+          currentThresholds.high > 0 &&
+          weight >= currentThresholds.high,
+        ledger: effect.ledger_sequence ?? effect.ledger ?? null,
+        timestamp: toISOTimestamp(effect.created_at),
+        transactionHash: effect.transaction_hash || null,
+      };
+    });
+
+    return success(res, {
+      accountId: id,
+      changes,
+      total: changes.length,
+    }, {
+      meta: {
+        limit,
+        order,
+        days,
+        cursor: cursor || null,
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
 
 /**
  * GET /account/:id/history
@@ -2894,7 +3018,9 @@ router.get("/:id", async (req, res, next) => {
       }
     }
 
-    // Fetch live account data from Horizon
+    // Fetch live account data from Horizon. Concurrent misses (or ?fresh=true
+    // requests) for the same account share a single upstream call.
+    const data = await singleFlight(cacheKey, async () => {
     const account = await withHorizonTiming(req, () => server.loadAccount(id));
 
     // --- Balances -----------------------------------------------------------
@@ -2946,7 +3072,7 @@ router.get("/:id", async (req, res, next) => {
       clawbackEnabled: rawFlags.auth_clawback_enabled === true,
     };
 
-    const data = {
+    const accountData = {
       accountId: account.id,
       sequence: account.sequence,
       subentryCount: account.subentry_count,
@@ -2983,7 +3109,9 @@ router.get("/:id", async (req, res, next) => {
     };
 
     // Cache the normalised response
-    cacheService.set(cacheKey, data, CACHE_TTL_ACCOUNT);
+    cacheService.set(cacheKey, accountData, CACHE_TTL_ACCOUNT);
+    return accountData;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -4176,34 +4304,6 @@ router.get(
 /** Largest amount a Stellar balance can hold: INT64_MAX stroops. */
 const MAX_BALANCE_STROOPS = 9223372036854775807n;
 const STROOPS_PER_UNIT = 10_000_000n;
-
-/**
- * Converts a Horizon decimal amount string (up to seven decimals) to BigInt
- * stroops so capacity arithmetic stays exact across the full int64 range.
- *
- * @param {string|undefined} amount
- * @returns {bigint}
- */
-function amountToStroops(amount) {
-  const match = String(amount ?? "0").trim().match(/^(-?)(\d+)(?:\.(\d{1,7}))?$/);
-  if (!match) return 0n;
-  const [, sign, whole, fraction = ""] = match;
-  const stroops = BigInt(whole) * STROOPS_PER_UNIT + BigInt(fraction.padEnd(7, "0"));
-  return sign === "-" ? -stroops : stroops;
-}
-
-/**
- * Formats BigInt stroops as a seven-decimal amount string.
- *
- * @param {bigint} stroops
- * @returns {string}
- */
-function stroopsToAmount(stroops) {
-  const sign = stroops < 0n ? "-" : "";
-  const abs = stroops < 0n ? -stroops : stroops;
-  const fraction = (abs % STROOPS_PER_UNIT).toString().padStart(7, "0");
-  return `${sign}${abs / STROOPS_PER_UNIT}.${fraction}`;
-}
 
 /**
  * Builds one receive-capacity entry. Incoming amounts are bounded by
@@ -5829,7 +5929,7 @@ router.get("/:id/transaction-stats", async (req, res, next) => {
   }
 });
 
-router.post("/:id/multisig-plan", async (req, res, next) => {
+router.post("/:id/multisig-plan", validateBody(schemas.multisigPlan), async (req, res, next) => {
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -6155,6 +6255,76 @@ router.get("/:id/home-domain", async (req, res, next) => {
     });
   } catch (err) {
     handleAccountNotFound(err, next);
+  }
+});
+
+/**
+ * GET /account/:id/home-domain-check
+ *
+ * Verifies that an account and the stellar.toml at its own home domain
+ * vouch for each other: the TOML must list the account in [[ACCOUNTS]].
+ * Currencies issued by this account are returned in the standard shape.
+ * Cached for five minutes; TOML failures are reported in `reason`, never 500.
+ */
+const HOME_DOMAIN_CHECK_TTL_SECONDS = 300;
+router.get("/:id/home-domain-check", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const cacheKey = `account-home-domain-check:${id}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    // Unknown accounts must still 404 before any TOML lookup is attempted.
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+    const homeDomain = account.home_domain || null;
+
+    let tomlFound = false;
+    let accountListedInToml = false;
+    let currencies = [];
+    let reason = null;
+
+    if (!homeDomain) {
+      reason = "no_home_domain";
+    } else {
+      const { toml, reason: fetchReason } = await fetchStellarTomlResult(homeDomain);
+      if (fetchReason) {
+        reason = fetchReason;
+      } else {
+        tomlFound = true;
+        const rawCurrencies = toml.CURRENCIES || toml.currencies || [];
+        const matched = (Array.isArray(rawCurrencies) ? rawCurrencies : [])
+          .filter((currency) => currency && currency.issuer === id);
+        currencies = matched.length
+          ? normaliseStellarToml({ CURRENCIES: matched }).currencies || []
+          : [];
+
+        const rawAccounts = toml.ACCOUNTS || toml.accounts || [];
+        accountListedInToml = (Array.isArray(rawAccounts) ? rawAccounts : [])
+          .some((entry) => entry && (entry.account === id || entry.key === id || entry.id === id));
+        reason = accountListedInToml ? null : "account_not_listed";
+      }
+    }
+
+    const data = {
+      accountId: id,
+      homeDomain,
+      tomlFound,
+      accountListedInToml,
+      currencies,
+      reason,
+      checkedAt: new Date().toISOString(),
+    };
+
+    cacheService.set(cacheKey, data, HOME_DOMAIN_CHECK_TTL_SECONDS);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
   }
 });
 
@@ -7083,7 +7253,7 @@ router.get("/:id/transactions", async (req, res, next) => {
  *
  * Returns 400 when addresses array exceeds 20 entries or input is invalid.
  */
-router.post("/freeze-status", async (req, res, next) => {
+router.post("/freeze-status", validateBody(schemas.accountFreezeStatus), async (req, res, next) => {
   try {
     const { addresses, asset } = req.body || {};
 
@@ -7764,32 +7934,6 @@ const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // every open offer.
 const OFFERS_SUMMARY_MAX_PAGES = 5;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/**
- * Parses a Horizon decimal amount ("12.5000000") into integer stroops so that
- * totals can be summed without floating-point drift.
- *
- * @param {string} amount
- * @returns {bigint} Stroops, or 0n when the value is not a decimal amount.
- */
-function amountToStroops(amount) {
-  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(String(amount ?? "").trim());
-  if (!match) return 0n;
-  const [, whole, fraction = ""] = match;
-  return BigInt(whole) * STROOPS_PER_UNIT + BigInt(fraction.padEnd(7, "0"));
-}
-
-/**
- * Formats integer stroops as a seven-decimal amount string.
- *
- * @param {bigint} stroops
- * @returns {string}
- */
-function stroopsToAmount(stroops) {
-  const whole = stroops / STROOPS_PER_UNIT;
-  const fraction = (stroops % STROOPS_PER_UNIT).toString().padStart(7, "0");
-  return `${whole}.${fraction}`;
-}
 
 /**
  * Returns an offer's price (units of buying asset per unit of selling asset)

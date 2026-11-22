@@ -1,3 +1,4 @@
+const { getDocsUrl } = require("../src/utils/errorTypes");
 const errorHandler = require("../src/middleware/errorHandler");
 
 describe("ErrorHandler Middleware", () => {
@@ -38,8 +39,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(409);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "TransactionSubmissionFailed",
+        error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
           title: "Transaction Failed",
           detail: "The transaction failed due to bad sequence.",
           message: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
@@ -72,8 +72,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "TransactionSubmissionFailed",
+        error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
           title: "Transaction Failed",
           detail: "The destination account was not found.",
           message: "The destination account does not exist. Create the account first with a createAccount operation.",
@@ -105,8 +104,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(418);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonError",
+        error: { type: "HorizonError", docsUrl: getDocsUrl("HorizonError"),
           title: "Teapot",
           detail: "An unknown result code was returned.",
           status: 418,
@@ -133,8 +131,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(402);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonError",
+        error: { type: "HorizonError", docsUrl: getDocsUrl("HorizonError"),
           title: "Payment Required",
           detail: "Horizon responded with payment required.",
           status: 402,
@@ -281,8 +278,7 @@ describe("ErrorHandler Middleware", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({
           success: false,
-          error: {
-            type: "TransactionSubmissionFailed",
+          error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
             title: "Transaction Failed",
             detail: "Merge operation failed.",
             message: "Merge operation failed.",
@@ -311,8 +307,7 @@ describe("ErrorHandler Middleware", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({
           success: false,
-          error: {
-            type: "TransactionSubmissionFailed",
+          error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
             title: "Transaction Failed",
             detail: "Malformed operation.",
             message: "The operation is malformed or contains invalid parameters.",
@@ -341,8 +336,7 @@ describe("ErrorHandler Middleware", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({
           success: false,
-          error: {
-            type: "TransactionSubmissionFailed",
+          error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
             title: "Transaction Failed",
             detail: "Destination full.",
             message: "Destination full.",
@@ -358,8 +352,7 @@ describe("ErrorHandler Middleware", () => {
   describe("Horizon Timeout Errors", () => {
     const horizonTimeoutBody = {
       success: false,
-      error: {
-        type: "HorizonTimeout",
+      error: { type: "HorizonTimeout", docsUrl: getDocsUrl("HorizonTimeout"),
         message: "The Stellar Horizon node did not respond in time.",
         suggestion:
           "Try again in a few seconds. If the issue persists check the Stellar network status at https://status.stellar.org.",
@@ -429,8 +422,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(503);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonUnavailable",
+        error: { type: "HorizonUnavailable", docsUrl: getDocsUrl("HorizonUnavailable"),
           message: "Unable to connect to the Stellar Horizon node.",
           suggestion: "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status.",
         },
@@ -456,8 +448,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "OfferNotFound",
+        error: { type: "OfferNotFound", docsUrl: getDocsUrl("OfferNotFound"),
           message: "Offer '123' was not found on the Stellar testnet network.",
           suggestion: "The offer may have already been filled, cancelled, or the offer ID may be incorrect.",
         },
@@ -481,8 +472,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ValidationError",
+        error: { type: "ValidationError", docsUrl: getDocsUrl("ValidationError"),
           message: "Invalid Account ID format",
           field: "accountId",
           receivedValue: "G12345",
@@ -511,8 +501,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ServerError",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: err.message,
           suggestion: err.suggestion,
         },
@@ -535,8 +524,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ServerError",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: err.message,
         },
         requestId: null,
@@ -553,8 +541,7 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ServerError",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: "Database connection failed",
         },
         requestId: null,
