@@ -61,6 +61,7 @@ This project is ideal for:
 - [Streaming Guide](docs/streaming.md) - SSE and WebSocket streaming endpoints, event payloads, reconnection, and clean close handling
 - [Advanced Streaming Patterns](docs/streaming-advanced.md) - Production streaming patterns: exponential backoff reconnection, multi-stream management, client-side filtering, graceful shutdown, and memory management
 - [Real-Time Guide](docs/real-time-guide.md) - Build real-time Stellar apps by combining SSE/WebSocket streams with REST calls and polling, handling interruptions, and a complete Node.js balance monitor
+- [Browser Integration Guide](docs/BROWSER_INTEGRATION.md) - Secure browser app setup: CORS configuration, API key safety, server-side proxy, EventSource and WebSocket limitations, and rate limiting behavior
 - [Webhooks Guide](docs/webhooks.md) - Register webhooks, available events, payload shapes, signature verification, retries, and unregistration
 - [Webhook Security Guide](docs/webhook-security.md) - Verify HMAC-SHA256 delivery signatures in Node.js/Python/Go, handle invalid signatures, store secrets safely, and rotate with the dual-secret pattern
 - [Webhook Receiver Implementation Guide](docs/webhook-implementation.md) - Build an Express endpoint that verifies signatures, responds with 200 at the right time, de-duplicates retried deliveries, and handles errors, with a complete Node.js example
