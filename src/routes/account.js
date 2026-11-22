@@ -6796,6 +6796,294 @@ router.get("/:id/payment-counterparty-risk", async (req, res, next) => {
   }
 });
 
+const PAYMENT_HISTORY_PAGE_SIZE = 200;
+// Bounds the history scan for payment aggregation endpoints (2,000 records).
+const PAYMENT_HISTORY_MAX_PAGES = 10;
+
+/**
+ * Formats signed integer stroops as a seven-decimal amount string, keeping
+ * the sign for negative values (e.g. -15000000n → "-1.5000000").
+ *
+ * @param {bigint} stroops
+ * @returns {string}
+ */
+function signedStroopsToAmount(stroops) {
+  return stroops < 0n ? `-${stroopsToAmount(-stroops)}` : stroopsToAmount(stroops);
+}
+
+/**
+ * Classifies a payment-like operation relative to `accountId`.
+ *
+ * @param {object} op - Horizon payment record
+ * @param {string} accountId
+ * @returns {{ counterparty: string|null, isOutbound: boolean, stroops: bigint }}
+ */
+function classifyPayment(op, accountId) {
+  let isOutbound;
+  if (op.type === "create_account") {
+    isOutbound = op.funder === accountId;
+  } else if (op.type === "account_merge") {
+    isOutbound = op.account === accountId;
+  } else {
+    isOutbound = op.from === accountId;
+  }
+  return {
+    counterparty: getPaymentCounterparty(op, accountId),
+    isOutbound,
+    stroops: amountToStroops(op.amount ?? op.starting_balance),
+  };
+}
+
+/**
+ * Pages through an account's payment history (oldest first) and calls
+ * `onRecord` for every successful payment-like operation.
+ *
+ * @param {import('express').Request} req
+ * @param {string} accountId
+ * @param {(op: object) => void} onRecord
+ */
+async function scanPaymentHistory(req, accountId, onRecord) {
+  let cursor;
+  for (let page = 0; page < PAYMENT_HISTORY_MAX_PAGES; page++) {
+    let query = server
+      .payments()
+      .forAccount(accountId)
+      .limit(PAYMENT_HISTORY_PAGE_SIZE)
+      .order("asc");
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await withHorizonTiming(req, () => query.call());
+    const records = (response && response.records) || [];
+
+    for (const op of records) {
+      cursor = op.paging_token;
+      if (op.transaction_successful === false) continue;
+      onRecord(op);
+    }
+
+    if (records.length < PAYMENT_HISTORY_PAGE_SIZE) break;
+  }
+}
+
+/**
+ * GET /account/:id/counterparty-summary?limit=20
+ *
+ * Groups the account's payment history by counterparty and returns the
+ * relationship summary for each one.
+ *
+ * Query params:
+ *   - limit (integer, 1–100, default: 20) — maximum counterparties to return
+ *
+ * Response:
+ *   {
+ *     accountId,
+ *     counterparties: [{
+ *       address,
+ *       totalSent,          // seven-decimal string
+ *       totalReceived,      // seven-decimal string
+ *       netPosition,        // totalReceived − totalSent, seven-decimal string
+ *       firstInteractionAt, // ISO 8601 timestamp
+ *       lastInteractionAt,  // ISO 8601 timestamp
+ *       txCount
+ *     }]
+ *   }
+ *
+ * Counterparties are sorted by txCount descending. Amounts are summed across
+ * all assets as reported by Horizon. Returns 404 when the account does not
+ * exist.
+ *
+ * @example
+ * GET /account/GABC.../counterparty-summary?limit=10
+ */
+router.get("/:id/counterparty-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const MAX_LIMIT = 100;
+    const DEFAULT_LIMIT = 20;
+    let limit = DEFAULT_LIMIT;
+    if (req.query.limit !== undefined) {
+      const parsed = parseInt(req.query.limit, 10);
+      if (isNaN(parsed) || parsed < 1) {
+        validateLimit(req.query.limit, MAX_LIMIT);
+      }
+      limit = Math.min(parsed, MAX_LIMIT);
+    }
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const summaries = new Map();
+    await scanPaymentHistory(req, id, (op) => {
+      const { counterparty, isOutbound, stroops } = classifyPayment(op, id);
+      if (!counterparty) return;
+
+      let entry = summaries.get(counterparty);
+      if (!entry) {
+        entry = {
+          address: counterparty,
+          sent: 0n,
+          received: 0n,
+          firstInteractionAt: op.created_at,
+          lastInteractionAt: op.created_at,
+          txCount: 0,
+        };
+        summaries.set(counterparty, entry);
+      }
+
+      if (isOutbound) entry.sent += stroops;
+      else entry.received += stroops;
+      entry.txCount += 1;
+      if (op.created_at < entry.firstInteractionAt) entry.firstInteractionAt = op.created_at;
+      if (op.created_at > entry.lastInteractionAt) entry.lastInteractionAt = op.created_at;
+    });
+
+    const counterparties = Array.from(summaries.values())
+      .sort((a, b) => b.txCount - a.txCount)
+      .slice(0, limit)
+      .map((entry) => ({
+        address: entry.address,
+        totalSent: stroopsToAmount(entry.sent),
+        totalReceived: stroopsToAmount(entry.received),
+        netPosition: signedStroopsToAmount(entry.received - entry.sent),
+        firstInteractionAt: toISOTimestamp(entry.firstInteractionAt),
+        lastInteractionAt: toISOTimestamp(entry.lastInteractionAt),
+        txCount: entry.txCount,
+      }));
+
+    return success(res, {
+      accountId: id,
+      counterparties,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+const LARGEST_TRANSACTION_DIRECTIONS = new Set(["sent", "received", "both"]);
+
+/**
+ * GET /account/:id/largest-transactions?direction=both&limit=10
+ *
+ * Groups the account's XLM payment operations by transaction and returns the
+ * transactions that moved the most XLM, largest first.
+ *
+ * Query params:
+ *   - direction ("sent" | "received" | "both", default: "both")
+ *       sent     — only XLM sent by the account (the account is the source)
+ *       received — only XLM received by the account
+ *       both     — XLM moved in either direction
+ *   - limit (integer, 1–50, default: 10) — maximum transactions to return
+ *
+ * Response:
+ *   {
+ *     accountId,
+ *     direction,
+ *     transactions: [{
+ *       transactionHash,
+ *       direction,       // "sent", "received" or "mixed" for this transaction
+ *       totalValueXLM,   // seven-decimal string for the requested direction
+ *       operationCount,
+ *       createdAt
+ *     }]
+ *   }
+ *
+ * Only native XLM amounts count towards totalValueXLM. Returns 404 when the
+ * account does not exist.
+ *
+ * @example
+ * GET /account/GABC.../largest-transactions?direction=sent&limit=5
+ */
+router.get("/:id/largest-transactions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const direction =
+      req.query.direction === undefined
+        ? "both"
+        : String(req.query.direction).toLowerCase();
+    if (!LARGEST_TRANSACTION_DIRECTIONS.has(direction)) {
+      const err = new Error(
+        "Query parameter 'direction': must be one of sent, received, both.",
+      );
+      err.isValidation = true;
+      err.field = "direction";
+      err.receivedValue = String(req.query.direction);
+      err.expectedFormat = "sent | received | both";
+      throw err;
+    }
+
+    const limit =
+      req.query.limit !== undefined ? validateLimit(req.query.limit, 50) : 10;
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const byTransaction = new Map();
+    await scanPaymentHistory(req, id, (op) => {
+      const isNativeXlm =
+        op.type === "create_account" || op.asset_type === "native";
+      if (!isNativeXlm || !op.transaction_hash) return;
+
+      const { isOutbound, stroops } = classifyPayment(op, id);
+      const isInbound =
+        !isOutbound &&
+        (op.to === id || op.account === id || op.into === id);
+      if (!isOutbound && !isInbound) return;
+      // Self-payments do not move value in or out.
+      if (op.from === id && op.to === id) return;
+
+      let entry = byTransaction.get(op.transaction_hash);
+      if (!entry) {
+        entry = {
+          transactionHash: op.transaction_hash,
+          sent: 0n,
+          received: 0n,
+          operationCount: 0,
+          createdAt: op.created_at,
+        };
+        byTransaction.set(op.transaction_hash, entry);
+      }
+
+      if (isOutbound) entry.sent += stroops;
+      else entry.received += stroops;
+      entry.operationCount += 1;
+    });
+
+    const transactions = Array.from(byTransaction.values())
+      .map((entry) => {
+        let value;
+        if (direction === "sent") value = entry.sent;
+        else if (direction === "received") value = entry.received;
+        else value = entry.sent + entry.received;
+
+        let txDirection = "mixed";
+        if (entry.received === 0n) txDirection = "sent";
+        else if (entry.sent === 0n) txDirection = "received";
+
+        return { entry, value, txDirection };
+      })
+      .filter(({ value }) => value > 0n)
+      .sort((a, b) => (b.value > a.value ? 1 : b.value < a.value ? -1 : 0))
+      .slice(0, limit)
+      .map(({ entry, value, txDirection }) => ({
+        transactionHash: entry.transactionHash,
+        direction: txDirection,
+        totalValueXLM: stroopsToAmount(value),
+        operationCount: entry.operationCount,
+        createdAt: toISOTimestamp(entry.createdAt),
+      }));
+
+    return success(res, {
+      accountId: id,
+      direction,
+      transactions,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // An account holds at most 1,000 subentries, so five full pages always cover
 // every open offer.

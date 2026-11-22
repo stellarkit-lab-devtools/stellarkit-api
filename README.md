@@ -151,6 +151,8 @@ This project is ideal for:
 | GET | `/account/:id/historical-balances` | Balance snapshots over time reconstructed from payment and trade history | `asset` (`CODE:ISSUER`, default XLM), `resolution` (`7d`\|`30d`, default `7d`) |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
 | GET | `/account/:id/payment-counterparty-risk` | Top payment counterparties by txCount with a risk level (`low`/`medium`/`high`) and risk factors for each | `limit` (default 10, max 20) |
+| GET | `/account/:id/counterparty-summary` | Per-counterparty totals sent/received, net position, first/last interaction and txCount, sorted by txCount | `limit` (default 20, max 100) |
+| GET | `/account/:id/largest-transactions` | Transactions that moved the most XLM, sorted by totalValueXLM descending | `direction` (`sent`\|`received`\|`both`, default `both`), `limit` (default 10, max 50) |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
 | POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
 
@@ -183,6 +185,7 @@ This project is ideal for:
 | GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
 | GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
+| GET | `/dex/liquidity-concentration/:baseAsset/:counterAsset` | Percentage of bid and ask volume within 1%, 2% and 5% of the mid price (30 s cache) | `fresh` |
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
 | GET | `/dex/top-markets` | Top markets ranked by recent trade activity | `limit` |
 | GET | `/dex/volume-leaders` | Top assets ranked by 24h trading volume against XLM (5 min cache) | `limit` (default 10, max 50) |
