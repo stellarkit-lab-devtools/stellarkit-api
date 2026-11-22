@@ -13,6 +13,33 @@ const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { makeOrderBookEmptyError } = require("../utils/errors");
 const StellarKitError = require("../utils/StellarKitError");
+const { offerDetail } = require("../utils/offerDetail");
+
+router.get("/offers/:offerId", async (req, res, next) => {
+  try {
+    const { offerId } = req.params;
+    if (!/^[0-9]+$/.test(offerId) || BigInt(offerId) <= 0n || BigInt(offerId) > 9223372036854775807n) {
+      throw new StellarKitError("offerId must be a positive int64 integer.", 400, "ValidationError");
+    }
+    const rawLimit = req.query.fillLimit === undefined ? "20" : String(req.query.fillLimit);
+    if (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100) {
+      throw new StellarKitError("fillLimit must be an integer between 1 and 100.", 400, "ValidationError");
+    }
+    const id = BigInt(offerId).toString();
+    const offer = await server.offers().offer(id).call().catch((err) => {
+      if (err.response?.status === 404 || err.status === 404) return null;
+      throw err;
+    });
+    const history = await server.trades().forOffer(id).order("desc").limit(Number(rawLimit)).call();
+    const trades = history.records || [];
+    if (!offer && !trades.length) {
+      throw new StellarKitError(`Offer ${id} was not found.`, 404, "OfferNotFound");
+    }
+    return success(res, offerDetail(id, offer, trades));
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * @route GET /dex/arbitrage/:assetCode/:assetIssuer

@@ -10,6 +10,21 @@ const StellarKitError = require("../utils/StellarKitError");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { parseFunctionsFromWasm } = require("../utils/contractSpec");
+const { loadResourceLimits } = require("../utils/resourceLimits");
+
+router.get("/resource-limits", async (req, res, next) => {
+  const key = `soroban:resource-limits:${NETWORK}`;
+  const cached = cacheService.get(key);
+  if (cached) return success(res, cached);
+  try {
+    if (!sorobanServer) throw new Error("RPC unavailable");
+    const data = await loadResourceLimits(sorobanServer);
+    cacheService.set(key, data, 300);
+    return success(res, data);
+  } catch (err) {
+    return next(new StellarKitError("Unable to read network resource limits from Soroban RPC.", 503, "ServiceUnavailable"));
+  }
+});
 
 const EXECUTABLE_TYPES = {
   contractExecutableWasm: "wasm",

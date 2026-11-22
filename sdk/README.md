@@ -185,3 +185,12 @@ Every endpoint in the StellarKit API has a corresponding method. All methods ret
 | | `decodeXdr(xdr)` | Decode transaction XDR to JSON |
 
 ... and many more. See `sdk/stellarkit-client.js` for the full list and JSDoc documentation.
+# Exact amount helpers
+
+Import `amounts` from `./index`, or import individual helpers from `./amounts`.
+`amounts.toStroops("0.1")` returns `1000000n` and
+`amounts.add("0.1", "0.2")` returns `"0.3000000"`.
+`fromStroops`, `add`, `sub`, `min`, `max`, and `sum` return seven-decimal
+strings. `cmp` returns -1, 0, or 1. Negative net amounts are supported.
+Malformed input and signed int64 overflow throw `InvalidAmount`.
+
