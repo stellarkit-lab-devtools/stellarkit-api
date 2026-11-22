@@ -57,6 +57,7 @@ This project is ideal for:
 - [Production Deployment Guide](docs/deployment.md) - Deploy to production with Node.js, Docker, Railway, Render, or Fly.io
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
 - [Response Format Guide](docs/response-format.md) - Standard response envelopes, pagination, and data formats
+- [Amounts and Precision Guide](docs/amounts-and-precision.md) - Why amounts are seven-decimal strings, stroops/int64, the 2^53 boundary, rounding behaviour, and safe handling in JS/Python/Go
 - [Streaming Guide](docs/streaming.md) - SSE and WebSocket streaming endpoints, event payloads, reconnection, and clean close handling
 - [Advanced Streaming Patterns](docs/streaming-advanced.md) - Production streaming patterns: exponential backoff reconnection, multi-stream management, client-side filtering, graceful shutdown, and memory management
 - [Real-Time Guide](docs/real-time-guide.md) - Build real-time Stellar apps by combining SSE/WebSocket streams with REST calls and polling, handling interruptions, and a complete Node.js balance monitor
@@ -3780,3 +3781,15 @@ describe("GET /asset/:code/:issuer/market-cap", () => {
     });
   });
 });
+
+### Local setup diagnostics
+
+Run `npm run doctor` to check Node, required .env values (STELLAR_NETWORK and PORT), network configuration, Horizon and its passphrase, Soroban RPC health, port availability, testnet Friendbot, and installed dependencies against the lockfile. Each line includes PASS, WARN, or FAIL and an action. Any FAIL exits with code 1. Use `npm run doctor -- --json` for a structured report. Mainnet requires SOROBAN_RPC_URL; Friendbot is skipped there.
+
+### Compose a muxed address
+
+`POST /utils/muxed-address` accepts `{ "baseAccount": "G...", "id": "18446744073709551615" }` and returns `data: { muxedAddress, baseAccount, id }`. Supply id as a decimal string from 0 through 18446744073709551615; JSON numbers are rejected to prevent precision loss.
+
+### Security contact
+
+Set SECURITY_CONTACT (for example, `mailto:security@example.com`) to serve the public `/.well-known/security.txt` endpoint. SECURITY_TXT_EXPIRES overrides the default expiry of one year ahead; SECURITY_POLICY_URL adds a disclosure policy link. Without a contact, the endpoint returns 404.

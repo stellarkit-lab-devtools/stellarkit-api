@@ -1,0 +1,30 @@
+{
+  "_embedded": {
+    "records": [
+      {
+        "id": "100-0",
+        "paging_token": "100-0",
+        "offer_id": "12345",
+        "created_at": "2024-01-01T00:00:00Z",
+        "seller": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H",
+        "base_account": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H",
+        "base_asset_type": "native",
+        "base_amount": "10.0000000",
+        "counter_account": "GACQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKG7N",
+        "counter_asset_type": "credit_alphanum4",
+        "counter_asset_code": "USDC",
+        "counter_asset_issuer": "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA",
+        "counter_amount": "10.0000000",
+        "price": {
+          "n": 1,
+          "d": 1
+        }
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "/trades?limit=1"
+    }
+  }
+}

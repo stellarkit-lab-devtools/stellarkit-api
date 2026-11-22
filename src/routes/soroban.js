@@ -31,6 +31,76 @@ const EXECUTABLE_TYPES = {
   contractExecutableStellarAsset: "stellar_asset",
 };
 
+/** Default event/ledger retention exposed by Soroban RPC (~24h at 5s per ledger). */
+const SOROBAN_RETENTION_WINDOW_LEDGERS = 17280;
+/** Average ledger close time in seconds, used for the retention hours estimate. */
+const RPC_STATUS_AVG_CLOSE_TIME_SECONDS = 5;
+/** /rpc-status is a fast-moving health snapshot; cache it for 10 seconds. */
+const RPC_STATUS_CACHE_TTL_SECONDS = 10;
+const RPC_STATUS_CACHE_KEY = "soroban-rpc-status";
+
+/**
+ * GET /soroban/rpc-status
+ *
+ * Reports Soroban RPC health together with the event/ledger retention window,
+ * so callers know how far back getEvents can see. Version details are null
+ * when the RPC does not implement getVersionInfo.
+ */
+router.get("/rpc-status", async (req, res, next) => {
+  try {
+    const cached = cacheService.get(RPC_STATUS_CACHE_KEY);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    const rpcServer = requireSorobanServer();
+
+    let latestLedger;
+    try {
+      const response = await rpcServer.getLatestLedger();
+      latestLedger = response.sequence;
+    } catch (err) {
+      throw new StellarKitError(
+        "Soroban RPC is currently unavailable.",
+        503,
+        "UpstreamUnavailable",
+        null,
+        "Check SOROBAN_RPC_URL and verify the Soroban RPC endpoint is reachable."
+      );
+    }
+
+    let versionInfo = null;
+    if (typeof rpcServer.getVersionInfo === "function") {
+      try {
+        versionInfo = await rpcServer.getVersionInfo();
+      } catch (err) {
+        // Older RPC nodes do not implement getVersionInfo — treat as unsupported.
+        versionInfo = null;
+      }
+    }
+
+    const retentionWindowLedgers = SOROBAN_RETENTION_WINDOW_LEDGERS;
+    const data = {
+      status: "ok",
+      latestLedger,
+      oldestLedger: Math.max(1, latestLedger - retentionWindowLedgers),
+      retentionWindowLedgers,
+      retentionWindowApproxHours:
+        (retentionWindowLedgers * RPC_STATUS_AVG_CLOSE_TIME_SECONDS) / 3600,
+      version: versionInfo?.version ?? null,
+      protocolVersion: versionInfo?.protocolVersion ?? null,
+      networkPassphrase: versionInfo?.networkPassphrase ?? null,
+    };
+
+    cacheService.set(RPC_STATUS_CACHE_KEY, data, RPC_STATUS_CACHE_TTL_SECONDS);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * Recursively converts scValToNative() output into JSON-safe values:
  * BigInt (from u64/i128/u256 etc.) -> string, Buffer (from bytes) -> hex string.

@@ -17,6 +17,7 @@ const app = require("../../src/index");
 const { server } = require("../../src/config/stellar");
 const { Keypair } = require("@stellar/stellar-sdk");
 const cacheService = require("../../src/services/cache");
+const { loadFixture } = require("../fixtures");
 
 jest.mock("../../src/config/stellar", () => {
   const original = jest.requireActual("../../src/config/stellar");
@@ -35,19 +36,16 @@ const ACCOUNT_ID = Keypair.random().publicKey();
 
 /** Minimal Horizon account record that satisfies loadAccount */
 function buildHorizonAccount(id = ACCOUNT_ID) {
-  return {
+  const account = loadFixture("account-funded", {
     id,
     sequence: "123456789",
     subentry_count: 0,
-    last_modified_ledger: 1000,
     home_domain: null,
-    balances: [{ asset_type: "native", balance: "10.0000000" }],
-    signers: [{ key: id, weight: 1, type: "ed25519_public_key" }],
-    thresholds: { low_threshold: 0, med_threshold: 0, high_threshold: 0 },
-    flags: {},
-    data: {},
-    data_attr: {},
-  };
+  });
+  account.balances = [account.balances[0]];
+  account.balances[0].balance = "10.0000000";
+  account.signers = [{ key: id, weight: 1, type: "ed25519_public_key" }];
+  return account;
 }
 
 /**

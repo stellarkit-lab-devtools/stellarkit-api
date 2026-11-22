@@ -19,15 +19,29 @@ function qp(param, msg) {
  * @returns {Error}
  */
 function makeInvalidAccountIdError(accountId) {
-  const err = new Error(
-    `""${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
-  );
+  const value = typeof accountId === "string" ? accountId : "";
+  let reason;
+  if (value.startsWith("S")) reason = "secret_seed";
+  else if (value.startsWith("M")) reason = "muxed_address";
+  else if (value.startsWith("C")) reason = "contract_address";
+  else if (!value.startsWith("G")) reason = "wrong_prefix";
+  else if (value.length !== 56) reason = "wrong_length";
+  else if (!/^[A-Z2-7]+$/.test(value)) reason = "invalid_characters";
+  else reason = "bad_checksum";
+  const suggestions = {
+    wrong_prefix: "Use a public account address starting with G.",
+    wrong_length: "Use a G... account address exactly 56 characters long.",
+    invalid_characters: "Use uppercase Base32 characters A-Z and 2-7 only.",
+    bad_checksum: "Check for a typo and copy the account address again.",
+    muxed_address: "Use the base G... account instead of the muxed M... address.",
+    contract_address: "Use a G... account address instead of a C... contract address.",
+    secret_seed: "Never share a secret seed. Use the public G... account address instead.",
+  };
+  const err = new Error("The supplied value is not a valid Stellar account address.");
   err.isInvalidAccountId = true;
-  // Stable marker used by the minResponseTime middleware to identify
-  // synchronous format rejections (which never touch Horizon).
   err.type = "InvalidAccountId";
-  err.accountId = accountId;
-  err.suggestion = "Account addresses start with G and are 56 characters long.";
+  err.details = { reason };
+  err.suggestion = suggestions[reason];
   err.status = 400;
   return err;
 }

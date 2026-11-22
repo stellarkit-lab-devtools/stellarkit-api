@@ -3,6 +3,7 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
+const redactSeeds = require("../utils/redactSeeds");
 const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
@@ -14,6 +15,7 @@ const {
 } = require("../utils/errors");
 const { NETWORK } = require("../config/stellar");
 const metrics = require("../services/metrics");
+const { withDocsUrl } = require("../utils/errorTypes");
 
 /**
  * Returns true when the application is running in production mode.
@@ -66,7 +68,7 @@ function logError(status, req, message) {
       {
         requestId,
         method: req.method,
-        path: req.path,
+        path: redactSeeds(req.path),
         status,
       },
       message
@@ -83,6 +85,9 @@ function logError(status, req, message) {
  * @param {object} body
  */
 function errorResponse(res, status, body) {
+  // Every error body gets a docs link; all other fields remain unchanged.
+  withDocsUrl(body && body.error);
+
   metrics.incrementError(status);
 
   // Track error per endpoint (route + method combination)
@@ -429,6 +434,7 @@ function errorHandler(err, req, res, next) {
         type: "InvalidAccountId",
         message: err.message,
         suggestion: err.suggestion,
+        details: err.details,
       },
     }, req));
   }
@@ -467,6 +473,7 @@ function errorHandler(err, req, res, next) {
       error: {
         type: "ValidationError",
         message: err.message,
+        details: err.details,
         field: err.field,
         receivedValue: err.receivedValue,
         expectedFormat: err.expectedFormat,

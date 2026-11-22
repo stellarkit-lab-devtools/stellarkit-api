@@ -12,6 +12,7 @@
  * Attaches finish hook once to prevent double logging.
  */
 
+const redactSeeds = require("../utils/redactSeeds");
 const logger = require("../utils/logger");
 const metricsService = require("../services/metrics");
 
@@ -50,6 +51,10 @@ function requestLogger(req, res, next) {
     try {
       const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
       const responseTimeMs = Math.round(elapsedMs * 1000) / 1000;
+    const requestId = req.requestId || "-";
+    const method = req.method;
+    const path = redactSeeds(req.originalUrl || req.url);
+    const statusCode = res.statusCode;
 
       const requestId = safeGet(req, ["requestId"]) || "-";
       const method = safeGet(req, ["method"]) || "UNKNOWN";
