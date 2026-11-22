@@ -6,6 +6,8 @@ registerParamValidation(router);
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const {
+  Account,
+  MuxedAccount,
   Transaction,
   TransactionBuilder,
   FeeBumpTransaction,
@@ -18,6 +20,20 @@ const {
 } = require("@stellar/stellar-sdk");
 const { normalizeAsset } = require("../utils/asset");
 const { server } = require("../config/stellar");
+
+router.post("/muxed-address", (req, res, next) => {
+  try {
+    const { baseAccount, id } = req.body || {};
+    validateAccountId(baseAccount);
+    if (typeof id !== "string" || !/^[0-9]+$/.test(id) || BigInt(id) > 18446744073709551615n) {
+      throw createValidationError("id must be a string containing a uint64 from 0 to 18446744073709551615.");
+    }
+    const muxed = new MuxedAccount(new Account(baseAccount, "0"), BigInt(id).toString());
+    return success(res, { muxedAddress: muxed.accountId(), baseAccount, id });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const STROOPS_PER_XLM = 10000000n;
@@ -971,6 +987,127 @@ router.post("/simulate-payment", async (req, res, next) => {
     });
   } catch (err) {
     return next(err);
+  }
+});
+
+/**
+ * GET /utils/asset-contract-id
+ * Derive the Soroban contract ID for any Stellar asset
+ *
+ * Query params:
+ *   - asset: Asset string ("XLM" for native, or "CODE:ISSUER" for credit assets)
+ *   - network: Optional network override ("testnet" or "mainnet")
+ *
+ * @returns {{ asset, contractId, network, networkPassphrase }}
+ * @throws {Error} 400 for invalid assets or unknown networks
+ *
+ * @example
+ * GET /utils/asset-contract-id?asset=XLM
+ * GET /utils/asset-contract-id?asset=USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ * GET /utils/asset-contract-id?asset=XLM&network=mainnet
+ */
+router.get("/asset-contract-id", (req, res, next) => {
+  try {
+    const { asset, network: networkOverride } = req.query;
+
+    if (!asset || typeof asset !== "string" || asset.trim() === "") {
+      const err = new Error("Query parameter 'asset' is required (e.g. 'XLM' or 'USDC:ISSUER').");
+      err.statusCode = 400;
+      err.isValidation = true;
+      throw err;
+    }
+
+    const assetStr = asset.trim();
+    let stellarAsset;
+    let assetDisplay;
+
+    // Parse asset string
+    if (assetStr.toUpperCase() === "XLM") {
+      stellarAsset = Asset.native();
+      assetDisplay = "XLM";
+    } else {
+      const parts = assetStr.split(":");
+      if (parts.length !== 2) {
+        const err = new Error(
+          `Invalid asset format. Use "XLM" for native or "CODE:ISSUER" for credit assets.`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      const [code, issuer] = parts;
+
+      // Validate asset code
+      if (!code || code.length === 0 || code.length > 12) {
+        const err = new Error(
+          `Invalid asset code "${code}". Asset codes must be 1-12 alphanumeric characters.`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      if (!/^[A-Za-z0-9]+$/.test(code)) {
+        const err = new Error(
+          `Invalid asset code "${code}". Only alphanumeric characters are allowed.`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      // Validate issuer
+      const { StrKey } = require("@stellar/stellar-sdk");
+      if (!issuer || !StrKey.isValidEd25519PublicKey(issuer)) {
+        const err = new Error(
+          `Invalid issuer address "${issuer}". Must be a valid Stellar public key (G...).`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      stellarAsset = new Asset(code, issuer);
+      assetDisplay = `${code}:${issuer}`;
+    }
+
+    // Determine network
+    let network, passphrase;
+    if (networkOverride) {
+      const lowerNetwork = networkOverride.toLowerCase();
+      if (lowerNetwork === "testnet") {
+        network = "testnet";
+        passphrase = Networks.TESTNET;
+      } else if (lowerNetwork === "mainnet") {
+        network = "mainnet";
+        passphrase = Networks.PUBLIC;
+      } else {
+        const err = new Error(
+          `Unknown network "${networkOverride}". Valid values: "testnet", "mainnet".`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+    } else {
+      // Use configured network
+      const configuredNetwork = process.env.STELLAR_NETWORK || "testnet";
+      network = configuredNetwork;
+      passphrase = configuredNetwork === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+    }
+
+    // Derive contract ID
+    const contractId = stellarAsset.contractId(passphrase);
+
+    return success(res, {
+      asset: assetDisplay,
+      contractId,
+      network,
+      networkPassphrase: passphrase,
+    });
+  } catch (err) {
+    next(err);
   }
 });
 

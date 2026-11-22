@@ -1,0 +1,102 @@
+### Utility Endpoints
+@baseUrl = http://localhost:3000
+@account = GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7
+@assetCode = USDC
+@assetIssuer = GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+@apiKey = 
+
+### Validate Account Address
+GET {{baseUrl}}/utils/validate-account?id={{account}}
+X-API-Key: {{apiKey}}
+
+### Validate Asset Code
+GET {{baseUrl}}/utils/validate-asset?code={{assetCode}}
+X-API-Key: {{apiKey}}
+
+### Validate Transaction Hash
+GET {{baseUrl}}/utils/validate-hash?hash=3389e9f0f1a65f19736cacf544c2e825313e8447f569233bb8db39aa607c8889
+X-API-Key: {{apiKey}}
+
+### Convert XLM to Stroops
+GET {{baseUrl}}/utils/convert?xlm=100
+X-API-Key: {{apiKey}}
+
+### Convert Stroops to XLM
+GET {{baseUrl}}/utils/convert?stroops=1000000000
+X-API-Key: {{apiKey}}
+
+### Get Network Passphrase
+GET {{baseUrl}}/utils/network-passphrase
+X-API-Key: {{apiKey}}
+
+### Generate Keypair (Testnet Only)
+GET {{baseUrl}}/utils/keypair
+X-API-Key: {{apiKey}}
+
+### Decode Memo
+GET {{baseUrl}}/utils/memo?type=text&value=invoice-123
+X-API-Key: {{apiKey}}
+
+### Validate Memo
+POST {{baseUrl}}/utils/validate-memo
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "type": "text",
+  "value": "payment-ref-456"
+}
+
+### Base64 Encode
+GET {{baseUrl}}/utils/base64?encode=Hello World
+X-API-Key: {{apiKey}}
+
+### Base64 Decode
+GET {{baseUrl}}/utils/base64?decode=SGVsbG8gV29ybGQ=
+X-API-Key: {{apiKey}}
+
+### Get Ledger Date Estimate
+GET {{baseUrl}}/utils/ledger-date?sequence=50000000
+X-API-Key: {{apiKey}}
+
+### Decode Transaction XDR
+POST {{baseUrl}}/utils/decode-transaction
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "xdr": "AAAAAgAAAABexSIg06FtXzmFBQQtHZsrnyWxUzmthkBAoc/DodyypQAAAGQAAAAAAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAF7FIiDToW1fOYUFBC0dmyufJbFTOa2GQEChz8Oh3LKlAAAAAAAAAADpKb3jh9MwcNiGF6DSR/YCv0oVWb7HDj73BrnPgMM7qAAAAAACVAvkAAAAAAAAAAHcsqWlAAAAQO74R/nWsF11+KRKfthm1Ow82n7XPbYrw4i7Y4xkN8P2gJpjN9vD5lFKCPbX1vCvzX+4D8WuJBzUZ3F2TvCCKQo="
+}
+
+### Decode XDR Envelope
+POST {{baseUrl}}/utils/decode-xdr
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "xdr": "AAAAAgAAAABexSIg06FtXzmFBQQtHZsrnyWxUzmthkBAoc/DodyypQAAAGQAAAAAAAAAAgAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAF7FIiDToW1fOYUFBC0dmyufJbFTOa2GQEChz8Oh3LKlAAAAAAAAAADpKb3jh9MwcNiGF6DSR/YCv0oVWb7HDj73BrnPgMM7qAAAAAACVAvkAAAAAAAAAAHcsqWlAAAAQO74R/nWsF11+KRKfthm1Ow82n7XPbYrw4i7Y4xkN8P2gJpjN9vD5lFKCPbX1vCvzX+4D8WuJBzUZ3F2TvCCKQo="
+}
+
+### Simulate Payment
+POST {{baseUrl}}/utils/simulate-payment
+Content-Type: application/json
+X-API-Key: {{apiKey}}
+
+{
+  "source": "{{account}}",
+  "destination": "GAXVHSPPNQLPFXQJPZUEJPQKWRH7LXASVDVDJ6QFCCQ2BQVHMN3XKJYY",
+  "amount": "100",
+  "assetCode": "XLM"
+}
+
+### Get Asset Contract ID (Native XLM)
+GET {{baseUrl}}/utils/asset-contract-id?asset=XLM
+X-API-Key: {{apiKey}}
+
+### Get Asset Contract ID (Credit Asset)
+GET {{baseUrl}}/utils/asset-contract-id?asset={{assetCode}}:{{assetIssuer}}
+X-API-Key: {{apiKey}}
+
+### Get Asset Contract ID with Network Override
+GET {{baseUrl}}/utils/asset-contract-id?asset=XLM&network=mainnet
+X-API-Key: {{apiKey}}

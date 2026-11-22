@@ -13,6 +13,7 @@
 
 const request = require("supertest");
 const { Keypair } = require("@stellar/stellar-sdk");
+const { loadFixture } = require("./fixtures");
 
 jest.mock("../src/config/stellar", () => ({
   ...jest.requireActual("../src/config/stellar"),
@@ -39,19 +40,17 @@ function makeAccountWithTrustline(opts = {}) {
     isAuthorizedToMaintainLiabilities = true,
   } = opts;
 
-  return {
+  const account = loadFixture("account-trustlines", {
     id: opts.accountId || accountId,
-    balances: [
-      {
-        asset_type: "credit_alphanum4",
-        asset_code: assetCode,
-        asset_issuer: assetIssuer,
-        balance: "10.0000000",
-        is_authorized: isAuthorized,
-        is_authorized_to_maintain_liabilities: isAuthorizedToMaintainLiabilities,
-      },
-    ],
-  };
+  });
+  const trustline = account.balances[1];
+  trustline.asset_code = assetCode;
+  trustline.asset_issuer = assetIssuer;
+  trustline.balance = "10.0000000";
+  trustline.is_authorized = isAuthorized;
+  trustline.is_authorized_to_maintain_liabilities = isAuthorizedToMaintainLiabilities;
+  account.balances = [trustline];
+  return account;
 }
 
 // ---------- Tests ------------------------------------------------------------
@@ -256,7 +255,7 @@ describe("GET /account/:id/freeze-status/:assetCode/:assetIssuer — caching", (
   // ── Error paths are not cached ─────────────────────────────────────────────
 
   it("does not cache 404 responses (account does not hold asset)", async () => {
-    server.loadAccount.mockResolvedValue({ id: accountId, balances: [] });
+    server.loadAccount.mockResolvedValue(loadFixture("account-funded", { id: accountId, balances: [] }));
 
     const url = `/account/${accountId}/freeze-status/USDC/${issuerA}`;
     const res1 = await request(app).get(url);

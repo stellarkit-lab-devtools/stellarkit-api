@@ -1,0 +1,37 @@
+### Asset Endpoints
+@baseUrl = http://localhost:3000
+@assetCode = USDC
+@assetIssuer = GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+@apiKey = 
+
+### Get Asset Info
+GET {{baseUrl}}/asset/{{assetCode}}/{{assetIssuer}}
+X-API-Key: {{apiKey}}
+
+### Get Asset Price
+GET {{baseUrl}}/asset/{{assetCode}}/{{assetIssuer}}/price
+X-API-Key: {{apiKey}}
+
+### Get Asset Price History
+GET {{baseUrl}}/asset/{{assetCode}}/{{assetIssuer}}/price-history?days=30
+X-API-Key: {{apiKey}}
+
+### Get Asset Holders
+GET {{baseUrl}}/asset/{{assetCode}}/{{assetIssuer}}/holders?limit=20
+X-API-Key: {{apiKey}}
+
+### Get Asset Distribution
+GET {{baseUrl}}/asset/{{assetCode}}/{{assetIssuer}}/distribution
+X-API-Key: {{apiKey}}
+
+### Get Assets Overview
+GET {{baseUrl}}/assets?limit=20
+X-API-Key: {{apiKey}}
+
+### Get Assets by Issuer
+GET {{baseUrl}}/assets?issuer={{assetIssuer}}
+X-API-Key: {{apiKey}}
+
+### Get Assets by Code
+GET {{baseUrl}}/assets?code={{assetCode}}
+X-API-Key: {{apiKey}}

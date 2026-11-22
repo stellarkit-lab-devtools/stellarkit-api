@@ -21,6 +21,10 @@
  *   CACHE_TTL_FREEZE_CHECK_MS   — /account/:id/freeze-status     (default: 30 000 ms)
  *   CACHE_TTL_SIGNING_KEYS_MS   — /account/:id/signing-keys      (default: 20 000 ms)
  *   CACHE_TTL_SOROBAN_STATS_MS  — /network/soroban-stats         (default: 60 000 ms)
+ *   CACHE_TTL_PAYMENTS_MS       — /account/:id/payments          (default: CACHE_TTL_MS / 5 000 ms)
+ *   CACHE_TTL_ACCOUNT_TRANSACTIONS_MS — /account/:id/transactions (default: CACHE_TTL_MS / 5 000 ms)
+ *   CACHE_TTL_TOKEN_INFO_MS     — /soroban/contract/:id/token-info (default: 60 000 ms)
+ *   CACHE_TTL_POOL_ACTIVITY_MS  — /liquidity-pools/:id/activity  (default: CACHE_TTL_MS / 5 000 ms)
  *
  * The legacy CACHE_TTL_MS variable is still respected as a global fallback so
  * existing deployments are not broken.
@@ -190,10 +194,37 @@ const cacheTTL = {
     60000
   ),
 
+  /** /soroban/transactions/:hash — transaction results are immutable once finalized */
+  sorobanTransaction: msToSeconds(
+    process.env.CACHE_TTL_SOROBAN_TX_MS,
   /** /network/soroban-stats — scans up to 2,000 operations, so cache for 60 s */
   sorobanStats: msToSeconds(
     process.env.CACHE_TTL_SOROBAN_STATS_MS,
     60000
+  ),
+
+  /** /account/:id/payments — paginated payment history */
+  payments: msToSeconds(
+    process.env.CACHE_TTL_PAYMENTS_MS,
+    globalFallbackMs
+  ),
+
+  /** /account/:id/transactions — paginated transaction history */
+  accountTransactions: msToSeconds(
+    process.env.CACHE_TTL_ACCOUNT_TRANSACTIONS_MS,
+    globalFallbackMs
+  ),
+
+  /** /soroban/contract/:id/token-info — token metadata is effectively immutable, 60 s default */
+  tokenInfo: msToSeconds(
+    process.env.CACHE_TTL_TOKEN_INFO_MS,
+    60000
+  ),
+
+  /** /liquidity-pools/:id/activity — pool deposit/withdraw/lifecycle events */
+  poolActivity: msToSeconds(
+    process.env.CACHE_TTL_POOL_ACTIVITY_MS,
+    globalFallbackMs
   ),
 
   /** /account/:id/balance-velocity — payment history analysis, 30 s default */

@@ -1,40 +1,39 @@
-# API Versioning
+# API and SDK versioning
 
-StellarKit keeps existing endpoint behaviour stable for as long as possible. When
-an endpoint must be replaced, maintainers announce the change with the standard
-`Deprecation`, `Sunset`, and `Link` response headers before optionally enforcing
-a shutdown date.
+The API version is the root `package.json` version, exposed as
+`data.version` by `GET /health`. The SDK has its own package version when
+published. API and SDK version numbers need not match.
 
-## Deprecating an endpoint in practice
+For releases at or above 1.0.0:
 
-Use the `deprecate` route wrapper in `src/middleware/deprecation.js`. Apply it as
-middleware immediately before the handler you are retiring:
+- **Major:** removed endpoints/fields, renamed fields or error identifiers,
+  changed JSON types/envelopes, incompatible validation or authentication,
+  or other changes that require consumers to change working code.
+- **Minor:** compatible new endpoints, opt-in features, or optional fields.
+  Consumers should tolerate additional object fields and documented enum growth.
+- **Patch:** fixes that preserve the documented contract, including documentation
+  corrections. Calling a breaking response change a fix does not make it a patch.
 
-```js
-const express = require("express");
-const deprecate = require("../middleware/deprecation");
+Apply the same rules to SDK public methods, exports, parameters, return types and
+error behavior. An API change may require a separate SDK release. A breaking
+change in either product requires a major release of that product.
 
-const router = express.Router();
+## Deprecations
 
-router.get(
-  "/old-endpoint",
-  deprecate({
-    since: "2026-01-01T00:00:00Z",
-    sunset: "2026-07-01T00:00:00Z",
-    replacement: "/v2/new-endpoint",
-    enforce: true,
-  }),
-  (req, res) => res.json({ ok: true }),
-);
-```
+Before retiring a supported endpoint or field, maintainers should publish the
+replacement and a migration example, mark the old contract deprecated in the
+README/API reference and changelog, and announce its planned removal release.
+Retain working deprecated behavior throughout the current major version; remove
+it only in a major release. If a retirement date is announced, record it with
+the replacement and give consumers at least one minor release to migrate.
+Do not replace a successful endpoint with HTTP 410 in a patch or minor release.
 
-Every response from that route includes:
+Historical checkouts have not consistently followed these rules. Consult
+[response migrations](migrations.md) for confirmed changes since 1.0.0, including
+the existing sponsorship HTTP 410 response. This policy does not imply that
+those historical changes were already assigned new release numbers.
 
-- `Deprecation: @<unix-seconds-of-since>` — when deprecation started.
-- `Sunset: <HTTP-date>` — when the endpoint is scheduled to stop working.
-- `Link: </v2/new-endpoint>; rel="successor-version"` — the replacement.
-
-Successful response bodies are unchanged. With `enforce: true`, requests made on
-or after the sunset date receive `410 Gone` naming the replacement; before that
-date the handler runs normally. Omit `enforce` (or set it to `false`) to publish
-the headers without ever blocking traffic.
+Every future breaking change must add a migration entry with before/after JSON,
+the introducing PR, affected endpoints, and a consumer fix. Move its changelog
+entry into the version that actually ships it. Follow the
+[manual release checklist](release-process.md).

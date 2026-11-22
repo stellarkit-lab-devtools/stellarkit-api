@@ -6,6 +6,10 @@
 const request = require("supertest");
 const { Keypair } = require("@stellar/stellar-sdk");
 const app = require("../src/index");
+const cacheService = require("../src/services/cache");
+
+// Payments and transactions responses are cached; start every test cold.
+beforeEach(() => cacheService.flush());
 const { server, fetchAccountCreation } = require("../src/config/stellar");
 
 // Generate a cryptographically valid (but unfunded) account ID for each run

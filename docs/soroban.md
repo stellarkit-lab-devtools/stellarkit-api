@@ -219,3 +219,12 @@ SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 ```
 
 If `SOROBAN_RPC_URL` is unset and `STELLAR_NETWORK=mainnet`, these endpoints return a `500 ConfigError` telling you to set it.
+## Network resource limits
+
+`GET /soroban/resource-limits` reads on-chain config settings through RPC
+`getLedgerEntries`. Response data contains `compute`, `ledgerAccess`,
+`bandwidth`, `events`, and `contractSizes`, with camelCase XDR limit fields.
+Missing settings are null. Int64 values exceeding JavaScript's safe integer
+range are decimal strings. Successful results are cached for 300 seconds;
+an unavailable RPC returns 503.
+

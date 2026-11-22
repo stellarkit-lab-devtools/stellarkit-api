@@ -2,8 +2,9 @@
 
 const request = require('supertest');
 const StellarSdk = require('@stellar/stellar-sdk');
+const { loadFixture } = require('../fixtures');
 
-const app = require('../../src/app');
+const app = require('../../src/index');
 
 const FUNDED_ADDRESS = 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI';
 const UNFUNDED_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF5';
@@ -23,7 +24,7 @@ describe('GET /utils/validate-account', () => {
   });
 
   it('returns { valid: true, exists: true } for a valid funded testnet address', async () => {
-    mockServer({ accountId: FUNDED_ADDRESS, balances: [] });
+    mockServer(loadFixture('account-funded', { accountId: FUNDED_ADDRESS }));
 
     const res = await request(app)
       .get('/utils/validate-account')

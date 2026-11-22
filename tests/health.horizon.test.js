@@ -21,7 +21,7 @@ jest.mock("../src/config/stellar", () => {
 });
 
 const app = require("../src/index");
-const { server, NETWORK } = require("../src/config/stellar");
+const { server, NETWORK, getActiveHorizonHost } = require("../src/config/stellar");
 
 describe("GET /health — Horizon connectivity", () => {
   afterEach(() => {
@@ -41,6 +41,7 @@ describe("GET /health — Horizon connectivity", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe("ok");
     expect(res.body.data.horizon).toEqual({
+      host: getActiveHorizonHost(),
       status: "ok",
       responseTimeMs: expect.any(Number),
       network: NETWORK,

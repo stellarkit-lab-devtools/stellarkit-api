@@ -50,7 +50,7 @@ describe("GET /network/protocol-version", () => {
     });
     expect(response.get("X-Cache")).toBe("MISS");
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(global.fetch).toHaveBeenCalledWith(horizonUrl);
+    expect(global.fetch).toHaveBeenCalledWith(`${horizonUrl}/`, expect.objectContaining({ signal: expect.anything() }));
   });
 
   it("serves repeated requests from the 60-second cache", async () => {
@@ -101,10 +101,8 @@ describe("GET /network/protocol-version", () => {
     expect(response.body).toEqual({
       success: false,
       error: {
-        type: "HorizonUnavailable",
-        message: "Unable to connect to the Stellar Horizon node.",
-        suggestion:
-          "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status.",
+        type: "UpstreamUnavailable",
+        message: "Stellar Horizon is unavailable. Please try again.",
       },
       requestId: expect.any(String),
     });

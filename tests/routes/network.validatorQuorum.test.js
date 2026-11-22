@@ -5,7 +5,7 @@ const request = require("supertest");
 const originalFetch = global.fetch;
 
 // Mock Stellar SDK validator response with controlled agreeing/total counts
-jest.mock("../src/config/stellar", () => {
+jest.mock("../../src/config/stellar", () => {
   const mockServer = {
     validators: jest.fn(() => ({
       call: jest.fn(),
@@ -20,8 +20,8 @@ jest.mock("../src/config/stellar", () => {
   };
 });
 
-const app = require("../src/index");
-const { server } = require("../src/config/stellar");
+const app = require("../../src/index");
+const { server } = require("../../src/config/stellar");
 
 describe("GET /network/validator-quorum", () => {
   let mockValidatorsCall;
@@ -34,7 +34,7 @@ describe("GET /network/validator-quorum", () => {
       call: mockValidatorsCall,
     }));
 
-    const cacheService = require("../src/services/cache");
+    const cacheService = require("../../src/services/cache");
     if (cacheService.flush) cacheService.flush();
     else if (cacheService.flushAll) cacheService.flushAll();
   });
