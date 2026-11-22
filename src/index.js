@@ -80,6 +80,8 @@ const assetsOverviewRouter = require("./routes/assetsOverview");
 const app = express();
 // Disable server identification header for security
 app.disable("x-powered-by");
+app.use(requestIdMiddleware);
+app.use(require("./middleware/urlLimits"));
 const { normalizeAmountFields } = require("./utils/response");
 
 const PORT = process.env.PORT || 3000;
@@ -225,7 +227,6 @@ if (allowedOriginsEnv) {
 } else {
   app.use(cors());
 }
-app.use(requestIdMiddleware);
 app.use(requestLogger);
 app.use(metricsCollector);
 app.use(contentTypeValidator);
