@@ -315,6 +315,53 @@ curl "http://localhost:3000/account/GAAZI4TCR3.../effects?type=account_credited"
 
 ---
 
+### `GET /account/:id/trustline-history`
+
+The lifecycle of an account's trustlines — when each was created, removed, had its limit changed, or had its authorisation changed. Useful for asset issuers and compliance teams who need history rather than the current state from `/trustlines`.
+
+**Query params:** `type` (one of the event types below), `asset` (`CODE:ISSUER`), `limit` (default 20, max 100), `order`, `cursor`.
+
+Each event is `{ type, asset, limit, timestamp, transactionHash }`:
+
+| `type` | Horizon effect |
+| --- | --- |
+| `created` | `trustline_created` |
+| `removed` | `trustline_removed` |
+| `limit_updated` | `trustline_updated` |
+| `authorized` | `trustline_authorized`, or `trustline_flags_updated` with `authorized_flag: true` |
+| `deauthorized` | `trustline_deauthorized`, or `trustline_flags_updated` clearing authorisation |
+| `authorized_to_maintain_liabilities` | `trustline_authorized_to_maintain_liabilities`, or `trustline_flags_updated` setting that flag |
+
+`asset` uses the standard `{ code, issuer, type }` shape, `limit` is a seven-decimal string (or `null` when Horizon does not report one) and `timestamp` is ISO 8601. Liquidity-pool share trustlines are not included.
+
+Horizon cannot filter effects by type, so the endpoint scans up to 10 pages of 200 effects. If that cap is reached before `limit` matching events are found, `meta.partial` is `true`; `meta.nextCursor` then resumes the scan where it stopped. Returns `404` for unknown accounts.
+
+```bash
+# Every trustline event
+curl "http://localhost:3000/account/GAAZI4TCR3.../trustline-history"
+
+# Only authorisation changes for one asset
+curl "http://localhost:3000/account/GAAZI4TCR3.../trustline-history?type=authorized&asset=USDC:GA5ZSEJYB37J..."
+```
+
+```json
+{
+  "success": true,
+  "meta": { "count": 1, "limit": 20, "order": "desc", "nextCursor": null, "hasMore": false, "partial": false, "pagesScanned": 1 },
+  "data": [
+    {
+      "type": "created",
+      "asset": { "code": "USDC", "issuer": "GA5ZSEJYB37J...", "type": "credit_alphanum4" },
+      "limit": "922337203685.4775807",
+      "timestamp": "2024-03-01T12:00:00.000Z",
+      "transactionHash": "3389e9f0f1a65f19736cacf544c2e825313e8447f569233bb8db39aa607c8889"
+    }
+  ]
+}
+```
+
+---
+
 ### `GET /account/:id/pending-effects`
 
 Lists operations the account has submitted that have not yet produced confirmed effects. Each entry has `operationType`, `estimatedLedger` and `submittedAt`; `pendingEffects` is empty when nothing is pending. Returns `404` for unknown accounts. Never cached — the response is sent with `Cache-Control: no-store`.

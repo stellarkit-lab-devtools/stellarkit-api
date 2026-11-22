@@ -1,5 +1,6 @@
 require("dotenv").config();
 const { Horizon, rpc, xdr } = require("@stellar/stellar-sdk");
+const { configuredUrls, createHorizonFailover } = require("../utils/horizonFailover");
 const {
   makeAccountNotFoundError,
   makeHorizonTimeoutError,
@@ -13,17 +14,43 @@ const HORIZON_URLS = {
   mainnet: "https://horizon.stellar.org",
 };
 
-const horizonUrl =
-  process.env.HORIZON_URL || HORIZON_URLS[NETWORK] || HORIZON_URLS.testnet;
+const urls = configuredUrls(process.env, HORIZON_URLS[NETWORK] || HORIZON_URLS.testnet);
+const parsedStickyMs = Number(process.env.HORIZON_FAILOVER_STICKY_MS ?? 60000);
+const failover = createHorizonFailover({
+  urls,
+  stickyMs: Number.isFinite(parsedStickyMs) && parsedStickyMs >= 0 ? parsedStickyMs : 60000,
+  createServer: (url) => {
+    let client;
+    try { client = new Horizon.Server(url, { timeout: 5000 }); }
+    catch { throw new Error("Unable to configure Horizon endpoint. Check the Horizon URL settings."); }
+    if (typeof client.serverInfo !== "function") client.serverInfo = () => client.root();
+    return client;
+  },
+});
+const server = failover.server;
+// Public metadata must never expose the configured credentials.
+const publicUrl = new URL(urls[0]);
+publicUrl.username = "";
+publicUrl.password = "";
+const horizonUrl = publicUrl.toString().replace(/\/$/, "");
 
-const server = new Horizon.Server(horizonUrl);
-
-// Horizon JS SDK exposes GET / as Server#root. StellarKit calls this
-// serverInfo() so routes and tests can mock a single, named method.
-if (typeof server.serverInfo !== "function") {
-  server.serverInfo = function serverInfo() {
-    return server.root();
-  };
+async function fetchHorizon(path = "", options = {}) {
+  return failover.request(async (_client, base) => {
+    const url = new URL(`${base.replace(/\/$/, "")}/${path.replace(/^\//, "")}`);
+    const headers = { ...options.headers };
+    if (url.username || url.password) {
+      headers.Authorization = `Basic ${Buffer.from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`).toString("base64")}`;
+      url.username = "";
+      url.password = "";
+    }
+    const response = await fetch(url.toString(), { ...options, headers, signal: options.signal || AbortSignal.timeout(5000) });
+    if (response.status >= 500) {
+      const error = new Error("Horizon request failed.");
+      error.status = response.status;
+      throw error;
+    }
+    return response;
+  });
 }
 
 // Soroban RPC has no free SDF-hosted mainnet endpoint, so there is no mainnet
@@ -183,7 +210,10 @@ async function fetchContract(contractId) {
 module.exports = {
   fetchContract,
   server,
+  streamingServer: failover.streamingServer,
   horizonUrl,
+  fetchHorizon,
+  getActiveHorizonHost: failover.getActiveHost,
   NETWORK,
   NETWORKS: HORIZON_URLS,
   fetchAccountCreation,

@@ -59,8 +59,32 @@ export interface ContractStorageData {
   cursor: string | null;
 }
 
+/** Transaction data returned by GET /soroban/transactions/:hash */
+export interface SorobanTransactionData {
+  /** The transaction hash. */
+  hash: string;
+  /** Transaction status: "SUCCESS" | "FAILED" | "NOT_FOUND". */
+  status: string;
+  /** Ledger sequence in which the transaction was included, or null. */
+  ledger: number | null;
+  /** ISO 8601 timestamp of the ledger close, or null. */
+  createdAt: string | null;
+  /** Order of the transaction within the ledger, or null. */
+  applicationOrder: number | null;
+  /** Whether this was a fee-bump transaction, or null. */
+  feeBump: boolean | null;
+  /** Decoded return value from the contract call (BigInt values are strings), or null. */
+  returnValue: unknown | null;
+  /** Error code extracted from result XDR on FAILED transactions, or null. */
+  errorCode: string | null;
+  /** Sequence number of the latest ledger known to the RPC node. */
+  latestLedger: number;
+  /** Sequence number of the oldest ledger tracked by the RPC node. */
+  oldestLedger: number;
+}
+
 /**
- * SorobanModule wraps all `/contract/*` (Soroban) routes of the StellarKit API
+ * SorobanModule wraps all `/soroban/*` routes of the StellarKit API
  * into fully-typed async methods.
  *
  * @example
@@ -68,6 +92,7 @@ export interface ContractStorageData {
  * const soroban = new SorobanModule({ baseUrl: "http://localhost:3000" });
  * const contract = await soroban.getContract("CABC123...");
  * const storage = await soroban.getContractStorage("CABC123...", { limit: 50 });
+ * const tx = await soroban.getTransaction("abc123...");
  * ```
  */
 export class SorobanModule {
@@ -119,7 +144,7 @@ export class SorobanModule {
   }
 
   /**
-   * Get the storage entries (instance and persistent) for a deployed Soroban contract.
+   * Get the storage entries for a deployed Soroban contract.
    *
    * @param id - Soroban contract ID (C... address).
    * @param options - Optional query options.
@@ -142,7 +167,26 @@ export class SorobanModule {
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     const query = params.toString();
-    const path = `/contract/${id}/storage${query ? `?${query}` : ""}`;
+    const path = `/soroban/contract/${id}/storage${query ? `?${query}` : ""}`;
     return this._get<ContractStorageData>(path);
+  }
+
+  /**
+   * Get the status and decoded return value of a Soroban transaction.
+   *
+   * @param hash - 64-character hex transaction hash.
+   * @returns Transaction status, return value, and ledger metadata.
+   * @throws {StellarKitError} On 400 (bad hash) or 404 (not found), or other non-2xx responses.
+   *
+   * @example
+   * const soroban = new SorobanModule({ baseUrl: "http://localhost:3000" });
+   * const tx = await soroban.getTransaction("abc1234...");
+   * console.log(tx.status, tx.returnValue);
+   */
+  async getTransaction(hash: string): Promise<SorobanTransactionData> {
+    if (!hash || typeof hash !== "string" || hash.trim() === "") {
+      throw new StellarKitError("hash is required and must be a non-empty string", 400, "ValidationError");
+    }
+    return this._get<SorobanTransactionData>(`/soroban/transactions/${hash}`);
   }
 }

@@ -16,7 +16,7 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 const { Horizon } = require('@stellar/stellar-sdk');
 
-const app = require('../../src/app');
+const app = require('../../src/index');
 
 const DAY_KEYS = [
   'monday',

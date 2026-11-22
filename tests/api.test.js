@@ -70,7 +70,7 @@ describe("StellarKit API", () => {
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(networkStatusCache.get("network-status")).toBeTruthy();
-      expect(feeEstimateCache.get("fee-estimate:1")).toBeTruthy();
+      expect(feeEstimateCache.get("fee-estimate?operations=1")).toBeTruthy();
       expect(logger.log).toHaveBeenCalledWith(expect.stringContaining("[CACHE WARM]"));
 
       const warmReq = await request(httpServer).get("/network-status");

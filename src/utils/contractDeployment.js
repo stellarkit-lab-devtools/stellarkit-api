@@ -1,4 +1,4 @@
-const { horizonUrl } = require("../config/stellar");
+const { fetchHorizon } = require("../config/stellar");
 const { toISOTimestamp } = require("./response");
 
 const CREATE_FUNCTION_MARKERS = ["CreateContract", "UploadWasm"];
@@ -11,8 +11,7 @@ const CREATE_FUNCTION_MARKERS = ["CreateContract", "UploadWasm"];
  */
 async function fetchContractDeployment(contractId) {
   try {
-    const opsUrl = `${horizonUrl}/operations?contract=${encodeURIComponent(contractId)}&order=asc&limit=50`;
-    const opsResponse = await fetch(opsUrl);
+    const opsResponse = await fetchHorizon(`/operations?contract=${encodeURIComponent(contractId)}&order=asc&limit=50`);
     if (!opsResponse.ok) {
       return { deployer: null, deployedAt: null, deployedLedger: null };
     }
@@ -34,7 +33,7 @@ async function fetchContractDeployment(contractId) {
       return { deployer: null, deployedAt: null, deployedLedger: null };
     }
 
-    const txResponse = await fetch(`${horizonUrl}/transactions/${deployOp.transaction_hash}`);
+    const txResponse = await fetchHorizon(`/transactions/${deployOp.transaction_hash}`);
     if (!txResponse.ok) {
       return {
         deployer: deployOp.source_account || null,
@@ -49,7 +48,8 @@ async function fetchContractDeployment(contractId) {
       deployedAt: toISOTimestamp(deployOp.created_at || tx.created_at),
       deployedLedger: typeof tx.ledger === "number" ? tx.ledger : null,
     };
-  } catch {
+  } catch (error) {
+    if (error.type === "UpstreamUnavailable") throw error;
     return { deployer: null, deployedAt: null, deployedLedger: null };
   }
 }
