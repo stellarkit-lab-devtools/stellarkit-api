@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "types": "types/index.d.ts",
   "scripts": {
-      "start": "node src/index.js",
-      "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "test": "jest --coverage",
     "test:types": "tsd --files 'sdk/tests/types/**/*.test-d.ts'",
     "lint": "eslint src/**/*.js",
@@ -49,7 +49,10 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testPathIgnorePatterns": ["/node_modules/", "/.kilo/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.kilo/"
+    ]
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",

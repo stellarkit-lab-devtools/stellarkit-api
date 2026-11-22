@@ -37,6 +37,8 @@ router.post("/muxed-address", (req, res, next) => {
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const STROOPS_PER_XLM = 10000000n;
+const INT64_MAX = (1n << 63n) - 1n;
+const { xlmToStroops } = require("../utils/parseStellarAmount");
 const AVERAGE_LEDGER_CLOSE_SECONDS = 5;
 const { decodeMemo, validateMemo } = require("../utils/memo");
 
@@ -62,16 +64,13 @@ function parseXlmToStroops(value) {
     );
   }
 
-  const [whole, fractional = ""] = value.split(".");
-  const stroops =
-    BigInt(whole) * STROOPS_PER_XLM +
-    BigInt(fractional.padEnd(7, "0"));
+  const stroops = xlmToStroops(value);
 
-  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw createValidationError("Converted stroop value exceeds the safe integer range.");
+  if (stroops > INT64_MAX) {
+    throw createValidationError("Converted stroop value exceeds the int64 range.");
   }
 
-  return Number(stroops);
+  return stroops;
 }
 
 function parseStroops(value) {
@@ -88,11 +87,11 @@ function parseStroops(value) {
   }
 
   const stroops = BigInt(value);
-  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw createValidationError("Query parameter 'stroops' exceeds the safe integer range.");
+  if (stroops > INT64_MAX) {
+    throw createValidationError("Query parameter 'stroops' exceeds the int64 range.");
   }
 
-  return Number(stroops);
+  return stroops;
 }
 
 function formatStroopsToXlm(stroops) {
@@ -100,6 +99,12 @@ function formatStroopsToXlm(stroops) {
   const whole = stroopValue / STROOPS_PER_XLM;
   const fractional = (stroopValue % STROOPS_PER_XLM).toString().padStart(7, "0");
   return `${whole}.${fractional}`;
+}
+
+// Keep small values numeric for backwards compatibility; expose larger
+// int64 values as strings so JSON clients never lose precision.
+function serializeStroops(stroops) {
+  return stroops <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(stroops) : stroops.toString();
 }
 
 /**
@@ -285,14 +290,14 @@ router.get("/convert", (req, res, next) => {
       const convertedStroops = parseXlmToStroops(xlm);
       return success(res, {
         xlm: formatStroopsToXlm(convertedStroops),
-        stroops: convertedStroops,
+        stroops: serializeStroops(convertedStroops),
       });
     }
 
     const convertedStroops = parseStroops(stroops);
     return success(res, {
       xlm: formatStroopsToXlm(convertedStroops),
-      stroops: convertedStroops,
+      stroops: serializeStroops(convertedStroops),
     });
   } catch (err) {
     next(err);
