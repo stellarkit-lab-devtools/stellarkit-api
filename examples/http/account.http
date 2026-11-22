@@ -1,0 +1,77 @@
+### Account Endpoints
+### Variables can be set at the top of the file or in settings
+@baseUrl = http://localhost:3000
+@account = GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7
+@apiKey = 
+
+### Get Account Info
+GET {{baseUrl}}/account/{{account}}
+X-API-Key: {{apiKey}}
+
+### Get Account Balances
+GET {{baseUrl}}/account/{{account}}/balances
+X-API-Key: {{apiKey}}
+
+### Get Account Payments
+GET {{baseUrl}}/account/{{account}}/payments?limit=10&order=desc
+X-API-Key: {{apiKey}}
+
+### Get Account Transactions
+GET {{baseUrl}}/account/{{account}}/transactions?limit=10
+X-API-Key: {{apiKey}}
+
+### Get Account Operations
+GET {{baseUrl}}/account/{{account}}/operations?limit=10
+X-API-Key: {{apiKey}}
+
+### Get Account Trades
+GET {{baseUrl}}/account/{{account}}/trades?limit=10
+X-API-Key: {{apiKey}}
+
+### Get Account Effects
+GET {{baseUrl}}/account/{{account}}/effects?limit=10
+X-API-Key: {{apiKey}}
+
+### Get Account Offers
+GET {{baseUrl}}/account/{{account}}/offers
+X-API-Key: {{apiKey}}
+
+### Get Account Signers
+GET {{baseUrl}}/account/{{account}}/signers
+X-API-Key: {{apiKey}}
+
+### Get Account Risk Assessment
+GET {{baseUrl}}/account/{{account}}/risk
+X-API-Key: {{apiKey}}
+
+### Get Account Multisig Info
+GET {{baseUrl}}/account/{{account}}/multisig
+X-API-Key: {{apiKey}}
+
+### Get Account Multisig Plan
+GET {{baseUrl}}/account/{{account}}/multisig-plan
+X-API-Key: {{apiKey}}
+
+### Get Account Data
+GET {{baseUrl}}/account/{{account}}/data
+X-API-Key: {{apiKey}}
+
+### Get Account Pool Positions
+GET {{baseUrl}}/account/{{account}}/pool-positions
+X-API-Key: {{apiKey}}
+
+### Get Account Sponsorships
+GET {{baseUrl}}/account/{{account}}/sponsorships
+X-API-Key: {{apiKey}}
+
+### Get Account Claimable Balances
+GET {{baseUrl}}/account/{{account}}/claimable-balances
+X-API-Key: {{apiKey}}
+
+### Get Account Timeline
+GET {{baseUrl}}/account/{{account}}/timeline?limit=20
+X-API-Key: {{apiKey}}
+
+### Get Account Transaction Count
+GET {{baseUrl}}/account/{{account}}/transaction-count
+X-API-Key: {{apiKey}}

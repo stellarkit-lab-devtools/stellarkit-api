@@ -1,6 +1,6 @@
 const request = require("supertest");
 const app = require("../../src/index");
-const { server } = require("../../src/config/stellar");
+const { streamingServer: server } = require("../../src/config/stellar");
 
 describe("GET /stream/transactions/:id — SSE Endpoint", () => {
   const VALID_KEY = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";

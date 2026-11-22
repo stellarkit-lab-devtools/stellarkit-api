@@ -1,4 +1,5 @@
 const { StrKey } = require("@stellar/stellar-sdk");
+const { parseUTCDate } = require("./date");
 
 /**
  * Format a query-parameter validation message.
@@ -297,9 +298,11 @@ function validateCursor(cursor) {
 /**
  * Validate and parse an ISO 8601 date string supplied as a query parameter.
  *
- * Accepts any string that JavaScript's Date constructor recognises as a valid
- * date (e.g. "2024-01-15", "2024-01-15T12:00:00Z"). Empty strings and values
- * that produce an invalid Date are rejected with a structured 400 error.
+ * Accepts ISO 8601 dates and date-times (e.g. "2024-01-15",
+ * "2024-01-15T12:00:00Z", "2024-01-15T12:00:00+02:00"). Values without a zone
+ * designator are interpreted as UTC, never as server-local time. Empty strings
+ * and values that are not valid ISO 8601 dates are rejected with a structured
+ * 400 error.
  *
  * @param {string} value - Raw query-parameter value to validate.
  * @param {string} field - Parameter name used in error messages (e.g. "startDate").
@@ -315,7 +318,9 @@ function validateISODate(value, field) {
       "ISO 8601 date string"
     );
   }
-  const date = new Date(value);
+  // Parse as UTC: a zone-less "2024-01-15T12:00:00" must mean the same instant
+  // on every server, not the server's local time.
+  const date = parseUTCDate(value);
   if (isNaN(date.getTime())) {
     throw makeValidationError(
       `Query param '${field}' is not a valid date: "${String(value).slice(0, 50)}".`,

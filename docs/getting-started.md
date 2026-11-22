@@ -1,6 +1,6 @@
 # Getting Started with StellarKit API
 
-Welcome to StellarKit API! This guide will help you set up the project, understand the basics, and make your first API calls. If you encounter unfamiliar Stellar terminology, check the [Glossary](glossary.md).
+Welcome to StellarKit API! This guide will help you set up the project, understand the basics, and make your first API calls. If you encounter unfamiliar Stellar terminology, check the [Glossary](glossary.md) or the [Stellar Concepts Guide](stellar-concepts.md) to understand how each concept maps to StellarKit endpoints.
 
 ---
 

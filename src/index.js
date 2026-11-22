@@ -30,7 +30,7 @@ const compression = require("compression");
 const logger = require("./utils/logger");
 const { parseStellarAmount } = require("./utils/parseStellarAmount");
 const { setupWebSocket } = require("./websocket");
-const { server, horizonUrl, NETWORK } = require("./config/stellar");
+const { server, horizonUrl, NETWORK, getActiveHorizonHost } = require("./config/stellar");
 const cacheService = require("./services/cache");
 const networkStatusCache = cacheService;
 const feeEstimateCache = cacheService;
@@ -264,6 +264,7 @@ app.use((req, res, next) => {
 app.get("/health", async (req, res) => {
   const network = process.env.STELLAR_NETWORK || NETWORK || "testnet";
   const horizon = await getHorizonHealth({ server, network });
+  if (getActiveHorizonHost) horizon.host = getActiveHorizonHost();
   const status = horizon.status === "ok" ? "ok" : horizon.status;
 
   const rawCommit = process.env.GIT_SHA || null;
