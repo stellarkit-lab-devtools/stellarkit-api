@@ -368,6 +368,78 @@ router.get("/:id/trustlines", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/trustline-limits
+ *
+ * Returns trustline limit information for an account, including capacity
+ * utilization and whether each trustline is near its limit.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses the cache when set to "true"
+ *
+ * Response headers:
+ *   - X-Cache: HIT  — served from cache
+ *   - X-Cache: MISS — fetched live from Horizon and cached
+ *
+ * Returns:
+ *   { success: true, data: { accountId, trustlines: [{ asset, balance, limit, usedPercent, nearLimit }] } }
+ *   - usedPercent: percentage of the limit that is currently used (0-100)
+ *   - nearLimit: true if usedPercent >= 95
+ */
+router.get("/:id/trustline-limits", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `trustline-limits:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const trustlineBalances = (account.balances || []).filter(
+      (b) => isNonNativeAsset(b),
+    );
+
+    const trustlines = trustlineBalances.map((b) => {
+      const balance = parseFloat(b.balance);
+      const limit = parseFloat(b.limit);
+      const usedPercent = limit > 0 ? (balance / limit) * 100 : 0;
+      const nearLimit = usedPercent >= 95;
+
+      return {
+        asset: {
+          code: b.asset_code,
+          issuer: b.asset_issuer,
+          type: b.asset_type,
+        },
+        balance: b.balance,
+        limit: b.limit,
+        usedPercent,
+        nearLimit,
+      };
+    });
+
+    const data = {
+      accountId: id,
+      trustlines,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.trustlines);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/balances
  *
  * Returns XLM and asset balances for an account.
@@ -3741,6 +3813,135 @@ router.get("/:id/transaction-velocity", async (req, res, next) => {
       peakCount,
       averagePerHour,
       velocityScore,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/largest-transactions
+ *
+ * Returns the top N transactions by total operation value for an account,
+ * sorted by value descending.
+ *
+ * Query params:
+ *   - direction (string, default: "both") — "sent", "received", or "both"
+ *   - limit (number, default: 10, max: 50) — number of transactions to return
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId,
+ *       transactions: [
+ *         {
+ *           hash,
+ *           totalValueXLM,
+ *           operationCount,
+ *           direction,
+ *           timestamp
+ *         }
+ *       ],
+ *       period: { from, to }
+ *     }
+ *   }
+ *
+ * Returns 404 if the account does not exist.
+ */
+router.get("/:id/largest-transactions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Validate account exists
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Validate direction parameter
+    let direction = (req.query.direction || "both").toLowerCase();
+    if (!["sent", "received", "both"].includes(direction)) {
+      const err = new Error(`Invalid direction "${req.query.direction}". Must be "sent", "received", or "both".`);
+      err.isValidation = true;
+      err.field = "direction";
+      err.receivedValue = req.query.direction;
+      err.expectedFormat = "sent|received|both";
+      return next(err);
+    }
+
+    // Validate limit parameter
+    const rawLimit = req.query.limit || "10";
+    const limitNum = parseInt(rawLimit, 10);
+    if (!Number.isInteger(limitNum) || limitNum < 1 || limitNum > 50) {
+      const err = new Error("Query parameter 'limit': must be an integer between 1 and 50.");
+      err.isValidation = true;
+      err.field = "limit";
+      err.receivedValue = String(rawLimit);
+      err.expectedFormat = "1–50";
+      return next(err);
+    }
+
+    // Fetch payments for the account
+    const paymentsResponse = await withHorizonTiming(req, () =>
+      server.payments().forAccount(id).limit(200).order("desc").call()
+    );
+    const payments = paymentsResponse.records || [];
+
+    // Group payments by transaction hash and sum values
+    const txMap = new Map();
+    for (const payment of payments) {
+      if (payment.transaction_successful === false) continue;
+
+      const txHash = payment.transaction_hash;
+      const amount = parseFloat(payment.amount || "0");
+      const isNative = payment.asset_type === "native";
+
+      // Determine direction
+      let paymentDirection = "both";
+      if (payment.from === id) paymentDirection = "sent";
+      else if (payment.to === id) paymentDirection = "received";
+
+      // Filter by direction
+      if (direction === "sent" && paymentDirection !== "sent") continue;
+      if (direction === "received" && paymentDirection !== "received") continue;
+
+      if (!txMap.has(txHash)) {
+        txMap.set(txHash, {
+          hash: txHash,
+          totalValueXLM: 0,
+          operationCount: 0,
+          direction: paymentDirection,
+          timestamp: payment.created_at,
+        });
+      }
+
+      const txRecord = txMap.get(txHash);
+      if (isNative) {
+        txRecord.totalValueXLM += amount;
+      }
+      txRecord.operationCount += 1;
+    }
+
+    // Sort by total value descending and take top limit
+    const sorted = Array.from(txMap.values())
+      .sort((a, b) => b.totalValueXLM - a.totalValueXLM)
+      .slice(0, limitNum);
+
+    // Convert values to 7-decimal strings
+    const transactions = sorted.map((tx) => ({
+      ...tx,
+      totalValueXLM: toSevenDecimalString(tx.totalValueXLM),
+    }));
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    return success(res, {
+      accountId: id,
+      transactions,
+      period: {
+        from: thirtyDaysAgo.toISOString(),
+        to: now.toISOString(),
+      },
     });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);

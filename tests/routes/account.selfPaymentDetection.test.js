@@ -150,4 +150,47 @@ describe("GET /account/:id/self-payment-detection", () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.type).toBe("AccountNotFound");
   });
+
+  it("does not flag chains longer than 10 hops as circular", async () => {
+    // Build a chain: ACCOUNT_ID → A → B → C → D → E → F → G → H → I → J → ACCOUNT_ID (11 hops)
+    // The detector should stop at 10 hops and not flag it
+    server.loadAccount.mockImplementation((id) => Promise.resolve(buildAccount(id)));
+
+    const accounts = [ACCOUNT_ID, OTHER_ID, THIRD_ID];
+    for (let i = 0; i < 9; i++) {
+      accounts.push(Keypair.random().publicKey());
+    }
+
+    const payments = [];
+    for (let i = 0; i < accounts.length - 1; i++) {
+      payments.push(
+        paymentOp({
+          from: accounts[i],
+          to: accounts[i + 1],
+          txHash: `tx_leg${i}`,
+          amount: "10.0000000",
+        })
+      );
+    }
+    // Final leg that would close the circle (but won't be detected due to 10-hop limit)
+    payments.push(
+      paymentOp({
+        from: accounts[accounts.length - 1],
+        to: ACCOUNT_ID,
+        txHash: `tx_leg_final`,
+        amount: "10.0000000",
+      })
+    );
+
+    mockPayments(payments);
+
+    const res = await request(app).get(`/account/${ACCOUNT_ID}/self-payment-detection`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // The chain has 11 hops total, so it should NOT be flagged as circular
+    const circularPatterns = res.body.data.patterns.filter((p) => p.type === "circular_chain");
+    expect(circularPatterns.length).toBe(0);
+  });
 });
