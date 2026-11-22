@@ -5,7 +5,7 @@ const request = require("supertest");
 const originalFetch = global.fetch;
 
 // Mock Stellar SDK payments response with controlled direction data
-jest.mock("../src/config/stellar", () => {
+jest.mock("../../src/config/stellar", () => {
   const mockPayments = {
     call: jest.fn(),
   };
@@ -40,8 +40,8 @@ jest.mock("../src/config/stellar", () => {
   };
 });
 
-const app = require("../src/index");
-const { server } = require("../src/config/stellar");
+const app = require("../../src/index");
+const { server } = require("../../src/config/stellar");
 
 describe("GET /account/:id/payment-channels", () => {
   let mockPayments;
@@ -61,7 +61,7 @@ describe("GET /account/:id/payment-channels", () => {
       })),
     }));
 
-    const cacheService = require("../src/services/cache");
+    const cacheService = require("../../src/services/cache");
     if (cacheService.flush) cacheService.flush();
     else if (cacheService.flushAll) cacheService.flushAll();
   });

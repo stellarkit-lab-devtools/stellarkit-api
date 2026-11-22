@@ -13,6 +13,33 @@ const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { makeOrderBookEmptyError } = require("../utils/errors");
 const StellarKitError = require("../utils/StellarKitError");
+const { offerDetail } = require("../utils/offerDetail");
+
+router.get("/offers/:offerId", async (req, res, next) => {
+  try {
+    const { offerId } = req.params;
+    if (!/^[0-9]+$/.test(offerId) || BigInt(offerId) <= 0n || BigInt(offerId) > 9223372036854775807n) {
+      throw new StellarKitError("offerId must be a positive int64 integer.", 400, "ValidationError");
+    }
+    const rawLimit = req.query.fillLimit === undefined ? "20" : String(req.query.fillLimit);
+    if (!/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100) {
+      throw new StellarKitError("fillLimit must be an integer between 1 and 100.", 400, "ValidationError");
+    }
+    const id = BigInt(offerId).toString();
+    const offer = await server.offers().offer(id).call().catch((err) => {
+      if (err.response?.status === 404 || err.status === 404) return null;
+      throw err;
+    });
+    const history = await server.trades().forOffer(id).order("desc").limit(Number(rawLimit)).call();
+    const trades = history.records || [];
+    if (!offer && !trades.length) {
+      throw new StellarKitError(`Offer ${id} was not found.`, 404, "OfferNotFound");
+    }
+    return success(res, offerDetail(id, offer, trades));
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * @route GET /dex/arbitrage/:assetCode/:assetIssuer
@@ -1507,6 +1534,136 @@ router.get("/liquidity-depth/:baseAsset/:counterAsset", async (req, res, next) =
       midPrice,
     };
 
+    return success(res, data);
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(req.params.baseAsset, req.params.counterAsset),
+      });
+    }
+    next(err);
+  }
+});
+
+const LIQUIDITY_CONCENTRATION_CACHE_TTL = 30; // seconds
+const LIQUIDITY_CONCENTRATION_BANDS = [
+  { key: "within1Pct", pct: 1 },
+  { key: "within2Pct", pct: 2 },
+  { key: "within5Pct", pct: 5 },
+];
+
+/**
+ * Computes the share (0–100) of one side's volume that sits within each
+ * band of the mid price.
+ *
+ * @param {Array<{ price: string, amount: string }>} entries - Order book side
+ * @param {number} midPrice
+ * @param {"bid"|"ask"} side
+ * @returns {{ within1Pct: number, within2Pct: number, within5Pct: number }}
+ */
+function computeLiquidityConcentration(entries, midPrice, side) {
+  const totalVolume = entries.reduce((sum, e) => sum + parseFloat(e.amount || "0"), 0);
+  const result = {};
+
+  for (const { key, pct } of LIQUIDITY_CONCENTRATION_BANDS) {
+    if (totalVolume <= 0 || midPrice <= 0) {
+      result[key] = 0;
+      continue;
+    }
+    const bound =
+      side === "bid" ? midPrice * (1 - pct / 100) : midPrice * (1 + pct / 100);
+    const bandVolume = entries.reduce((sum, e) => {
+      const price = parseFloat(e.price);
+      const inBand = side === "bid" ? price >= bound : price <= bound;
+      return inBand ? sum + parseFloat(e.amount || "0") : sum;
+    }, 0);
+    const share = Math.min(100, Math.max(0, (bandVolume / totalVolume) * 100));
+    result[key] = Number(share.toFixed(2));
+  }
+
+  return result;
+}
+
+/**
+ * GET /dex/liquidity-concentration/:baseAsset/:counterAsset
+ *
+ * Measures how concentrated order book liquidity is around the mid price:
+ * the percentage (0–100) of total bid and ask volume that sits within 1%, 2%
+ * and 5% of the mid price.
+ *
+ * Response:
+ *   {
+ *     pair,
+ *     midPrice,  // seven-decimal string
+ *     bidConcentration: { within1Pct, within2Pct, within5Pct },
+ *     askConcentration: { within1Pct, within2Pct, within5Pct }
+ *   }
+ *
+ * Returns 404 OrderBookEmpty when the pair has no orders. Responses are
+ * cached for 30 seconds; pass ?fresh=true to bypass the cache.
+ *
+ * @example
+ * GET /dex/liquidity-concentration/XLM:native/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ */
+router.get("/liquidity-concentration/:baseAsset/:counterAsset", async (req, res, next) => {
+  try {
+    const { baseAsset, counterAsset } = req.params;
+
+    let selling, buying;
+    try {
+      selling = parseDexAssetParam(baseAsset);
+      buying = parseDexAssetParam(counterAsset);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: { type: "ValidationError", message: err.message },
+      });
+    }
+
+    const cacheKey = `dex:liquidity-concentration:${baseAsset}:${counterAsset}`;
+    if (req.query.fresh !== "true") {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+    res.set("X-Cache", "MISS");
+
+    const orderBookResponse = await server
+      .orderbook(selling, buying)
+      .limit(200)
+      .call();
+
+    const rawBids = orderBookResponse.bids || [];
+    const rawAsks = orderBookResponse.asks || [];
+
+    if (rawBids.length === 0 && rawAsks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(
+          selling.isNative() ? "XLM" : selling.getCode(),
+          buying.isNative() ? "XLM" : buying.getCode(),
+        ),
+      });
+    }
+
+    const bestBid = rawBids.length > 0 ? parseFloat(rawBids[0].price) : null;
+    const bestAsk = rawAsks.length > 0 ? parseFloat(rawAsks[0].price) : null;
+    const midPrice =
+      bestBid !== null && bestAsk !== null
+        ? (bestBid + bestAsk) / 2
+        : bestBid ?? bestAsk ?? 0;
+
+    const data = {
+      pair: `${baseAsset}/${counterAsset}`,
+      midPrice: midPrice.toFixed(7),
+      bidConcentration: computeLiquidityConcentration(rawBids, midPrice, "bid"),
+      askConcentration: computeLiquidityConcentration(rawAsks, midPrice, "ask"),
+    };
+
+    cacheService.set(cacheKey, data, LIQUIDITY_CONCENTRATION_CACHE_TTL);
     return success(res, data);
   } catch (err) {
     if (err.response && err.response.status === 404) {

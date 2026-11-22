@@ -5,7 +5,7 @@ const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { fetchNetworkStatus } = require("../utils/mapNetworkStatus");
-const { singleFlight } = require("../utils/singleFlight");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 /**
  * GET /network-status
@@ -24,10 +24,13 @@ const { singleFlight } = require("../utils/singleFlight");
  */
 router.get("/", async (req, res, next) => {
   try {
-    const cacheKey = "network-status";
-    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    // No query params affect this response, so every variant (?x=1, ?x=2 ...)
+    // collapses onto the single "network-status" entry.
+    const cacheKey = buildCacheKey(req, { namespace: "network-status", allowedParams: [] });
+    const fresh = isFresh(req);
 
-    // Check cache first (unless fresh=true)
+    // Check cache first (unless fresh=true). A fresh request still repopulates
+    // the normal key below.
     if (!fresh) {
       const cached = cacheService.get(cacheKey);
       if (cached) {

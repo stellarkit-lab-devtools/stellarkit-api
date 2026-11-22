@@ -43,6 +43,38 @@ Both variables are optional; the server falls back to the defaults above when th
 
 ---
 
+## Client IPs Behind a Reverse Proxy (`TRUST_PROXY`)
+
+Limits are bucketed by `req.ip`. When the API runs behind nginx, a load balancer
+or a PaaS router, the TCP peer is the proxy, not the client — so `TRUST_PROXY`
+must tell Express which proxies may report the real client IP via
+`X-Forwarded-For`.
+
+| Value | Effect |
+| --- | --- |
+| `false` (default) | `X-Forwarded-For` is ignored. A spoofed header cannot change a client's bucket. |
+| `1` (hop count) | The address added by the nearest proxy is used. Set it to the number of proxies you run. |
+| `loopback` | Proxies on `127.0.0.0/8` / `::1` are trusted (proxy on the same host). |
+| `10.0.0.0/8,192.168.1.10` | Only the listed IPs / CIDR ranges are trusted as proxies. |
+
+```bash
+# Single load balancer in front of the API
+TRUST_PROXY=1
+```
+
+> **Shared-IP pitfall:** behind a proxy with `TRUST_PROXY=false`, every client
+> appears to have the proxy's IP and they all share **one** bucket of
+> `RATE_LIMIT_MAX` requests. One noisy client can then rate-limit everyone.
+
+> **`TRUST_PROXY=true` is rejected at startup.** Trusting every hop means the
+> left-most `X-Forwarded-For` entry — which any client can set — becomes
+> `req.ip`, so a caller could choose a new bucket on every request. Use a hop
+> count or explicit CIDRs instead.
+
+See [Running Behind a Reverse Proxy](deployment.md#running-behind-a-reverse-proxy) for deployment examples.
+
+---
+
 ## Response Headers
 
 Because of how the limiter is configured, StellarKit API does **not** send `X-RateLimit-*` headers on ordinary, successful requests — only when a request is rejected for exceeding the limit. When that happens, the `429` response includes:
