@@ -47,6 +47,7 @@ This project is ideal for:
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [Stellar Concepts Guide](docs/stellar-concepts.md) - Map Stellar concepts (account, ledger, transaction, operation, effect, payment, trustline, reserve, sequence, claimable balance, sponsorship, liquidity pool, DEX offer, fees, Soroban) to StellarKit endpoints
 - [SEP Integration Guide](docs/sep-integration.md) - Use StellarKit discovery, account, asset, fee, and monitoring endpoints in SEP-10, SEP-24, and SEP-31 workflows
 - [Anchor Integration Guide](docs/anchor-integration.md) - Complete anchor discovery and integration workflow: discover anchors via `/network/anchor-directory`, fetch anchor info, check SEP support, and initiate deposit/withdrawal flows
 - [Soroban Integration Guide](docs/soroban-integration.md) - End-to-end workflow for querying contract state, monitoring events, checking expiry, and simulating invocations
