@@ -5,11 +5,11 @@ const request = require("supertest");
 const originalFetch = global.fetch;
 
 // Mock the watchlist lookup service
-jest.mock("../src/services/watchlistService", () => ({
+jest.mock("../../src/services/watchlistService", () => ({
   checkWatchlist: jest.fn(),
 }));
 
-jest.mock("../src/config/stellar", () => {
+jest.mock("../../src/config/stellar", () => {
   const mockServer = {
     loadAccount: jest.fn((id) => {
       if (id === "GAAAAAAAACK4") {
@@ -33,13 +33,13 @@ jest.mock("../src/config/stellar", () => {
   };
 });
 
-const app = require("../src/index");
-const watchlistService = require("../src/services/watchlistService");
+const app = require("../../src/index");
+const watchlistService = require("../../src/services/watchlistService");
 
 describe("GET /account/:id/watchlist-status", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    const cacheService = require("../src/services/cache");
+    const cacheService = require("../../src/services/cache");
     if (cacheService.flush) cacheService.flush();
     else if (cacheService.flushAll) cacheService.flushAll();
   });

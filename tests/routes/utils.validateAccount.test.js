@@ -3,7 +3,7 @@
 const request = require('supertest');
 const StellarSdk = require('@stellar/stellar-sdk');
 
-const app = require('../../src/app');
+const app = require('../../src/index');
 
 const FUNDED_ADDRESS = 'GBZXN7PIRZGNMHGA7MUUUF4GWPY5AYPV6LY4UV2GL6VJGIQRXFDNMADI';
 const UNFUNDED_ADDRESS = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF5';
