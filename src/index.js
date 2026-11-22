@@ -267,6 +267,13 @@ app.get("/health", async (req, res) => {
   if (getActiveHorizonHost) horizon.host = getActiveHorizonHost();
   const status = horizon.status === "ok" ? "ok" : horizon.status;
 
+  const rawCommit = process.env.GIT_SHA || null;
+  const build = {
+    commit: rawCommit ? rawCommit.slice(0, 7) : null,
+    builtAt: process.env.BUILD_TIME || null,
+    nodeEnv: process.env.NODE_ENV || "development",
+  };
+
   res.json({
     success: true,
     data: {
@@ -279,6 +286,7 @@ app.get("/health", async (req, res) => {
       nodeVersion: process.version,
       startedAt: SERVER_STARTED_AT,
       horizon,
+      build,
     },
   });
 });
@@ -822,8 +830,15 @@ function startServer({
   setupWebSocketHook = setupWebSocket,
 } = {}) {
   const httpServer = appInstance.listen(port, () => {
+    const pkg = require("../package.json");
+    const rawCommit = process.env.GIT_SHA || null;
+    const commit = rawCommit ? rawCommit.slice(0, 7) : null;
+    const builtAt = process.env.BUILD_TIME || null;
+
     logger.log(`\n🚀 StellarKit API running on port ${port}`);
     logger.log(`🌐 Network : ${process.env.STELLAR_NETWORK || "testnet"}`);
+    logger.log(`📦 Version : ${pkg.version}${commit ? ` (${commit})` : ""}`);
+    if (builtAt) logger.log(`🕐 Built   : ${builtAt}`);
     logger.log(`📖 Docs    : http://localhost:${port}/\n`);
 
     warmStartupCaches({ logger }).catch((err) => {
