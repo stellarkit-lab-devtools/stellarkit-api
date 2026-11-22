@@ -1,0 +1,37 @@
+### DEX Endpoints
+@baseUrl = http://localhost:3000
+@assetCode = USDC
+@assetIssuer = GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+@apiKey = 
+
+### Get Orderbook
+GET {{baseUrl}}/dex/orderbook?selling={{assetCode}}:{{assetIssuer}}&buying=XLM&limit=10
+X-API-Key: {{apiKey}}
+
+### Get Spread
+GET {{baseUrl}}/dex/spread?base={{assetCode}}:{{assetIssuer}}&counter=XLM
+X-API-Key: {{apiKey}}
+
+### Get DEX Depth
+GET {{baseUrl}}/dex/depth?base={{assetCode}}:{{assetIssuer}}&counter=XLM
+X-API-Key: {{apiKey}}
+
+### Get Top Markets
+GET {{baseUrl}}/dex/top-markets?limit=10
+X-API-Key: {{apiKey}}
+
+### Get DEX Trades
+GET {{baseUrl}}/dex/trades?base={{assetCode}}:{{assetIssuer}}&counter=XLM&limit=20
+X-API-Key: {{apiKey}}
+
+### Get Price History
+GET {{baseUrl}}/dex/price-history?base={{assetCode}}:{{assetIssuer}}&counter=XLM&resolution=900&limit=100
+X-API-Key: {{apiKey}}
+
+### Get Arbitrage Opportunities
+GET {{baseUrl}}/dex/arbitrage-opportunities?asset={{assetCode}}:{{assetIssuer}}
+X-API-Key: {{apiKey}}
+
+### Get Market Imbalance
+GET {{baseUrl}}/dex/imbalance?base={{assetCode}}:{{assetIssuer}}&counter=XLM
+X-API-Key: {{apiKey}}

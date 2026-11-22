@@ -194,6 +194,9 @@ const cacheTTL = {
     60000
   ),
 
+  /** /soroban/transactions/:hash — transaction results are immutable once finalized */
+  sorobanTransaction: msToSeconds(
+    process.env.CACHE_TTL_SOROBAN_TX_MS,
   /** /network/soroban-stats — scans up to 2,000 operations, so cache for 60 s */
   sorobanStats: msToSeconds(
     process.env.CACHE_TTL_SOROBAN_STATS_MS,

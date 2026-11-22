@@ -3,7 +3,7 @@ const router = express.Router();
 const logger = require("../utils/logger");
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
-const { server } = require("../config/stellar");
+const { streamingServer: server } = require("../config/stellar");
 const { StrKey } = require("@stellar/stellar-sdk");
 const { formatTransaction } = require("../utils/formatTransaction");
 const { normalizeAsset } = require("../utils/asset");

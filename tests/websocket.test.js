@@ -2,7 +2,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const app = require("../src/index");
 const { setupWebSocket } = require("../src/websocket");
-const { server: stellarServer } = require("../src/config/stellar");
+const { streamingServer: stellarServer } = require("../src/config/stellar");
 
 describe("WebSocket Ledger Stream", () => {
   let server;

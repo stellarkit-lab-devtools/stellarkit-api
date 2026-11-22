@@ -826,6 +826,16 @@ export class StellarKitClient {
     return this._request(`/soroban/contract/${contractId}`);
   }
 
+  /**
+   * Get the status and decoded return value of a Soroban transaction.
+   *
+   * @param hash - 64-character hex transaction hash
+   * @returns Transaction status, return value, and ledger metadata
+   */
+  async getSorobanTransaction(hash: string): Promise<unknown> {
+    return this._request(`/soroban/transactions/${hash}`);
+  }
+
   // ── Claimable Balances ─────────────────────────────────────────────────────
 
   /**

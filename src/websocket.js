@@ -1,6 +1,6 @@
 const { WebSocketServer } = require("ws");
 const logger = require("./utils/logger");
-const { server: stellarServer } = require("./config/stellar");
+const { streamingServer: stellarServer } = require("./config/stellar");
 const { formatLedgerSequence } = require("./utils/formatLedgerSequence");
 
 /** Ledger paging tokens are numeric; "now" starts from the live edge. */

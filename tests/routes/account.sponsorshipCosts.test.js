@@ -39,7 +39,7 @@ let app;
 beforeEach(() => {
   jest.resetModules();
   jest.clearAllMocks();
-  app = require('../../src/app');
+  app = require('../../src/index');
 });
 
 describe('GET /account/:id/sponsorship-costs', () => {

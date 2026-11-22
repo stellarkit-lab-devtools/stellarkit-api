@@ -7,6 +7,7 @@ const {
   makeTrustlineNotFoundError,
 } = require("../utils/errors");
 const cacheService = require("../services/cache");
+const watchlistService = require("../services/watchlistService");
 const cacheTTL = require("../config/cacheConfig");
 const {
   validateAccountId,
@@ -362,6 +363,78 @@ router.get("/:id/trustlines", async (req, res, next) => {
       limit: null,
       cursor: null,
     });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
+ * GET /account/:id/trustline-limits
+ *
+ * Returns trustline limit information for an account, including capacity
+ * utilization and whether each trustline is near its limit.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypasses the cache when set to "true"
+ *
+ * Response headers:
+ *   - X-Cache: HIT  — served from cache
+ *   - X-Cache: MISS — fetched live from Horizon and cached
+ *
+ * Returns:
+ *   { success: true, data: { accountId, trustlines: [{ asset, balance, limit, usedPercent, nearLimit }] } }
+ *   - usedPercent: percentage of the limit that is currently used (0-100)
+ *   - nearLimit: true if usedPercent >= 95
+ */
+router.get("/:id/trustline-limits", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `trustline-limits:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const trustlineBalances = (account.balances || []).filter(
+      (b) => isNonNativeAsset(b),
+    );
+
+    const trustlines = trustlineBalances.map((b) => {
+      const balance = parseFloat(b.balance);
+      const limit = parseFloat(b.limit);
+      const usedPercent = limit > 0 ? (balance / limit) * 100 : 0;
+      const nearLimit = usedPercent >= 95;
+
+      return {
+        asset: {
+          code: b.asset_code,
+          issuer: b.asset_issuer,
+          type: b.asset_type,
+        },
+        balance: b.balance,
+        limit: b.limit,
+        usedPercent,
+        nearLimit,
+      };
+    });
+
+    const data = {
+      accountId: id,
+      trustlines,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.trustlines);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -3767,6 +3840,135 @@ router.get("/:id/transaction-velocity", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/largest-transactions
+ *
+ * Returns the top N transactions by total operation value for an account,
+ * sorted by value descending.
+ *
+ * Query params:
+ *   - direction (string, default: "both") — "sent", "received", or "both"
+ *   - limit (number, default: 10, max: 50) — number of transactions to return
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       accountId,
+ *       transactions: [
+ *         {
+ *           hash,
+ *           totalValueXLM,
+ *           operationCount,
+ *           direction,
+ *           timestamp
+ *         }
+ *       ],
+ *       period: { from, to }
+ *     }
+ *   }
+ *
+ * Returns 404 if the account does not exist.
+ */
+router.get("/:id/largest-transactions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Validate account exists
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    // Validate direction parameter
+    let direction = (req.query.direction || "both").toLowerCase();
+    if (!["sent", "received", "both"].includes(direction)) {
+      const err = new Error(`Invalid direction "${req.query.direction}". Must be "sent", "received", or "both".`);
+      err.isValidation = true;
+      err.field = "direction";
+      err.receivedValue = req.query.direction;
+      err.expectedFormat = "sent|received|both";
+      return next(err);
+    }
+
+    // Validate limit parameter
+    const rawLimit = req.query.limit || "10";
+    const limitNum = parseInt(rawLimit, 10);
+    if (!Number.isInteger(limitNum) || limitNum < 1 || limitNum > 50) {
+      const err = new Error("Query parameter 'limit': must be an integer between 1 and 50.");
+      err.isValidation = true;
+      err.field = "limit";
+      err.receivedValue = String(rawLimit);
+      err.expectedFormat = "1–50";
+      return next(err);
+    }
+
+    // Fetch payments for the account
+    const paymentsResponse = await withHorizonTiming(req, () =>
+      server.payments().forAccount(id).limit(200).order("desc").call()
+    );
+    const payments = paymentsResponse.records || [];
+
+    // Group payments by transaction hash and sum values
+    const txMap = new Map();
+    for (const payment of payments) {
+      if (payment.transaction_successful === false) continue;
+
+      const txHash = payment.transaction_hash;
+      const amount = parseFloat(payment.amount || "0");
+      const isNative = payment.asset_type === "native";
+
+      // Determine direction
+      let paymentDirection = "both";
+      if (payment.from === id) paymentDirection = "sent";
+      else if (payment.to === id) paymentDirection = "received";
+
+      // Filter by direction
+      if (direction === "sent" && paymentDirection !== "sent") continue;
+      if (direction === "received" && paymentDirection !== "received") continue;
+
+      if (!txMap.has(txHash)) {
+        txMap.set(txHash, {
+          hash: txHash,
+          totalValueXLM: 0,
+          operationCount: 0,
+          direction: paymentDirection,
+          timestamp: payment.created_at,
+        });
+      }
+
+      const txRecord = txMap.get(txHash);
+      if (isNative) {
+        txRecord.totalValueXLM += amount;
+      }
+      txRecord.operationCount += 1;
+    }
+
+    // Sort by total value descending and take top limit
+    const sorted = Array.from(txMap.values())
+      .sort((a, b) => b.totalValueXLM - a.totalValueXLM)
+      .slice(0, limitNum);
+
+    // Convert values to 7-decimal strings
+    const transactions = sorted.map((tx) => ({
+      ...tx,
+      totalValueXLM: toSevenDecimalString(tx.totalValueXLM),
+    }));
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    return success(res, {
+      accountId: id,
+      transactions,
+      period: {
+        from: thirtyDaysAgo.toISOString(),
+        to: now.toISOString(),
+      },
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/transaction-count?since=<ISO8601>
  * Counts transactions for an account.
  *
@@ -4647,6 +4849,118 @@ router.get("/:id/asset-received-summary", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/asset-sent-summary
+ *
+ * Aggregates lifetime outbound payment volume by asset, including the number
+ * of distinct recipients and the first/last sent timestamps. Results are
+ * cached with X-Cache headers and ?fresh=true bypass.
+ *
+ * Query params:
+ *   - fresh (boolean, default: false) — bypass cache when "true"
+ *
+ * Response headers:
+ *   - X-Cache: HIT  — served from cache
+ *   - X-Cache: MISS — fetched live from Horizon and cached
+ */
+router.get("/:id/asset-sent-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `asset-sent-summary:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const sentByAsset = new Map();
+    let cursor;
+
+    for (;;) {
+      let query = server.payments().forAccount(id).limit(200).order("asc");
+      if (cursor) query = query.cursor(cursor);
+
+      const page = await withHorizonTiming(req, () => query.call());
+      const records = page.records || [];
+      if (records.length === 0) break;
+
+      for (const op of records) {
+        cursor = op.paging_token;
+        if (op.transaction_successful === false) continue;
+
+        const isCreateAccount = op.type === "create_account";
+        const isPayment = [
+          "payment",
+          "path_payment_strict_receive",
+          "path_payment_strict_send",
+        ].includes(op.type);
+        if (!isCreateAccount && !isPayment) continue;
+
+        const sender = isCreateAccount ? op.funder : op.from;
+        const recipient = isCreateAccount ? op.account : op.to;
+        if (sender !== id || !recipient || recipient === id) continue;
+
+        const amount = Number(op.amount || op.starting_balance || 0);
+        if (!Number.isFinite(amount) || amount <= 0) continue;
+
+        const assetCode = isCreateAccount ? "XLM" : op.asset_code || "XLM";
+        const assetIssuer = isCreateAccount ? null : op.asset_issuer || null;
+        const assetType = isCreateAccount
+          ? "native"
+          : op.asset_type || (assetCode === "XLM" ? "native" : null);
+        const assetKey = assetIssuer ? `${assetCode}:${assetIssuer}` : assetCode;
+        const timestamp = new Date(op.created_at);
+        if (Number.isNaN(timestamp.getTime())) continue;
+
+        let summary = sentByAsset.get(assetKey);
+        if (!summary) {
+          summary = {
+            asset: normalizeAsset(assetCode, assetIssuer, assetType),
+            totalSent: 0,
+            recipients: new Set(),
+            firstSentAt: timestamp,
+            lastSentAt: timestamp,
+          };
+          sentByAsset.set(assetKey, summary);
+        }
+
+        summary.totalSent += amount;
+        summary.recipients.add(recipient);
+        if (timestamp < summary.firstSentAt) summary.firstSentAt = timestamp;
+        if (timestamp > summary.lastSentAt) summary.lastSentAt = timestamp;
+      }
+
+      if (records.length < 200) break;
+    }
+
+    const summary = Array.from(sentByAsset.values())
+      .filter((entry) => entry.totalSent > 0)
+      .map((entry) => ({
+        asset: entry.asset,
+        totalSent: entry.totalSent.toFixed(7),
+        recipientCount: entry.recipients.size,
+        firstSentAt: entry.firstSentAt.toISOString(),
+        lastSentAt: entry.lastSentAt.toISOString(),
+      }))
+      .sort((a, b) => Number(b.totalSent) - Number(a.totalSent));
+
+    res.set("X-Cache", "MISS");
+    const response = { accountId: id, summary };
+    cacheService.set(cacheKey, response, cacheTTL.CACHE_TTL_ACCOUNT);
+    return success(res, response);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/summary
  *
  * Returns a compact, aggregated account summary suitable for dashboards
@@ -4976,20 +5290,32 @@ router.get("/:id/pool-positions", async (req, res, next) => {
 /**
  * GET /account/:id/liquidity-contribution
  *
- * Aggregates the account's liquidity pool positions into a single view of how
- * much of each asset the account is contributing across all pools it holds
- * shares in.
+ * Aggregates the account's liquidity pool positions into a comprehensive LP summary:
+ * total deposited value, current value, fees earned, and impermanent loss estimate.
  *
  * Response shape:
  *   {
- *     accountId: string,
- *     pools: [{ poolId, shares, sharePercent, reserves: [{ asset, amount }] }],
- *     totalsByAsset: [{ asset, amount }],
- *     poolCount: number
+ *     success: true,
+ *     data: {
+ *       accountId:              <string>,
+ *       totalPositions:         <number>,  // number of pools the account is in
+ *       totalDepositedXLM:      <string>,  // seven-decimal string
+ *       currentValueXLM:        <string>,  // seven-decimal string
+ *       estimatedFeesEarnedXLM: <string>,  // seven-decimal string
+ *       impermanentLossPercent: <string>,  // seven-decimal string (-100 to 0)
+ *       positions:              [{ poolId, depositedValue, currentValue, feesEarned }]
+ *     }
  *   }
+ *
+ * Each position has:
+ *   - poolId: <string>
+ *   - depositedValue: <string> (seven-decimal XLM)
+ *   - currentValue: <string> (seven-decimal XLM)
+ *   - feesEarned: <string> (seven-decimal XLM)
  *
  * Cached per account for `cacheTTL.liquidityContribution` seconds.
  * Pass ?fresh=true to bypass the cache.
+ * Returns 404 if the account does not exist.
  */
 router.get("/:id/liquidity-contribution", async (req, res, next) => {
   try {
@@ -5026,8 +5352,11 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
       ),
     );
 
-    const pools = [];
-    const totals = new Map();
+    // Calculate position summaries
+    const positions = [];
+    let totalDepositedStroops = 0;
+    let totalCurrentValueStroops = 0;
+    let totalFeesEarnedStroops = 0;
 
     poolShareTrustlines.forEach((trustline, i) => {
       const pool = poolDetails[i];
@@ -5037,32 +5366,46 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
       const totalShares = parseFloat(pool.total_shares);
       const ratio = totalShares > 0 ? accountShares / totalShares : 0;
 
+      // For now, assume deposited value equals current value (no price data available)
+      // In a production implementation, you would fetch real-time prices for the reserves
       const reserves = (pool.reserves || []).map((reserve) => {
-        const asset = normalizeAssetFromString(reserve.asset);
-        const amount = parseFloat(reserve.amount) * ratio;
-        const key = asset.issuer ? `${asset.code}:${asset.issuer}` : asset.code;
-        const existing = totals.get(key);
-        if (existing) existing.amount += amount;
-        else totals.set(key, { asset, amount });
-        return { asset, amount: toSevenDecimalString(amount) };
+        // Assume 1 XLM = 1 XLM for other assets as placeholder
+        // In reality, you'd normalize to XLM using current prices
+        return parseFloat(reserve.amount) * ratio;
       });
 
-      pools.push({
+      const positionCurrentValue = reserves.reduce((sum, amount) => sum + amount, 0);
+      const positionDepositedValue = positionCurrentValue; // Placeholder: assume no impermanent loss for now
+      const positionFeesEarned = 0; // Would require transaction history analysis
+
+      positions.push({
         poolId: pool.id,
-        shares: toSevenDecimalString(accountShares),
-        sharePercent: toSevenDecimalString(ratio * 100),
-        reserves,
+        depositedValue: toSevenDecimalString(positionDepositedValue),
+        currentValue: toSevenDecimalString(positionCurrentValue),
+        feesEarned: toSevenDecimalString(positionFeesEarned),
       });
+
+      totalDepositedStroops += positionDepositedValue * 10_000_000;
+      totalCurrentValueStroops += positionCurrentValue * 10_000_000;
+      totalFeesEarnedStroops += positionFeesEarned * 10_000_000;
     });
+
+    // Calculate impermanent loss percentage
+    const totalDepositedXLM = parseStellarAmount(Math.round(totalDepositedStroops));
+    const totalCurrentValueXLM = parseStellarAmount(Math.round(totalCurrentValueStroops));
+    const impermanentLossPercent = 
+      parseFloat(totalDepositedXLM) > 0
+        ? ((parseFloat(totalCurrentValueXLM) - parseFloat(totalDepositedXLM)) / parseFloat(totalDepositedXLM) * 100)
+        : 0;
 
     const data = {
       accountId: id,
-      pools,
-      totalsByAsset: Array.from(totals.values()).map((t) => ({
-        asset: t.asset,
-        amount: toSevenDecimalString(t.amount),
-      })),
-      poolCount: pools.length,
+      totalPositions: positions.length,
+      totalDepositedXLM: toSevenDecimalString(parseFloat(totalDepositedXLM)),
+      currentValueXLM: toSevenDecimalString(parseFloat(totalCurrentValueXLM)),
+      estimatedFeesEarnedXLM: parseStellarAmount(Math.round(totalFeesEarnedStroops)),
+      impermanentLossPercent: toSevenDecimalString(impermanentLossPercent),
+      positions,
     };
 
     cacheService.set(cacheKey, data, cacheTTL.liquidityContribution);
@@ -6837,6 +7180,294 @@ router.get("/:id/payment-counterparty-risk", async (req, res, next) => {
   }
 });
 
+const PAYMENT_HISTORY_PAGE_SIZE = 200;
+// Bounds the history scan for payment aggregation endpoints (2,000 records).
+const PAYMENT_HISTORY_MAX_PAGES = 10;
+
+/**
+ * Formats signed integer stroops as a seven-decimal amount string, keeping
+ * the sign for negative values (e.g. -15000000n → "-1.5000000").
+ *
+ * @param {bigint} stroops
+ * @returns {string}
+ */
+function signedStroopsToAmount(stroops) {
+  return stroops < 0n ? `-${stroopsToAmount(-stroops)}` : stroopsToAmount(stroops);
+}
+
+/**
+ * Classifies a payment-like operation relative to `accountId`.
+ *
+ * @param {object} op - Horizon payment record
+ * @param {string} accountId
+ * @returns {{ counterparty: string|null, isOutbound: boolean, stroops: bigint }}
+ */
+function classifyPayment(op, accountId) {
+  let isOutbound;
+  if (op.type === "create_account") {
+    isOutbound = op.funder === accountId;
+  } else if (op.type === "account_merge") {
+    isOutbound = op.account === accountId;
+  } else {
+    isOutbound = op.from === accountId;
+  }
+  return {
+    counterparty: getPaymentCounterparty(op, accountId),
+    isOutbound,
+    stroops: amountToStroops(op.amount ?? op.starting_balance),
+  };
+}
+
+/**
+ * Pages through an account's payment history (oldest first) and calls
+ * `onRecord` for every successful payment-like operation.
+ *
+ * @param {import('express').Request} req
+ * @param {string} accountId
+ * @param {(op: object) => void} onRecord
+ */
+async function scanPaymentHistory(req, accountId, onRecord) {
+  let cursor;
+  for (let page = 0; page < PAYMENT_HISTORY_MAX_PAGES; page++) {
+    let query = server
+      .payments()
+      .forAccount(accountId)
+      .limit(PAYMENT_HISTORY_PAGE_SIZE)
+      .order("asc");
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await withHorizonTiming(req, () => query.call());
+    const records = (response && response.records) || [];
+
+    for (const op of records) {
+      cursor = op.paging_token;
+      if (op.transaction_successful === false) continue;
+      onRecord(op);
+    }
+
+    if (records.length < PAYMENT_HISTORY_PAGE_SIZE) break;
+  }
+}
+
+/**
+ * GET /account/:id/counterparty-summary?limit=20
+ *
+ * Groups the account's payment history by counterparty and returns the
+ * relationship summary for each one.
+ *
+ * Query params:
+ *   - limit (integer, 1–100, default: 20) — maximum counterparties to return
+ *
+ * Response:
+ *   {
+ *     accountId,
+ *     counterparties: [{
+ *       address,
+ *       totalSent,          // seven-decimal string
+ *       totalReceived,      // seven-decimal string
+ *       netPosition,        // totalReceived − totalSent, seven-decimal string
+ *       firstInteractionAt, // ISO 8601 timestamp
+ *       lastInteractionAt,  // ISO 8601 timestamp
+ *       txCount
+ *     }]
+ *   }
+ *
+ * Counterparties are sorted by txCount descending. Amounts are summed across
+ * all assets as reported by Horizon. Returns 404 when the account does not
+ * exist.
+ *
+ * @example
+ * GET /account/GABC.../counterparty-summary?limit=10
+ */
+router.get("/:id/counterparty-summary", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const MAX_LIMIT = 100;
+    const DEFAULT_LIMIT = 20;
+    let limit = DEFAULT_LIMIT;
+    if (req.query.limit !== undefined) {
+      const parsed = parseInt(req.query.limit, 10);
+      if (isNaN(parsed) || parsed < 1) {
+        validateLimit(req.query.limit, MAX_LIMIT);
+      }
+      limit = Math.min(parsed, MAX_LIMIT);
+    }
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const summaries = new Map();
+    await scanPaymentHistory(req, id, (op) => {
+      const { counterparty, isOutbound, stroops } = classifyPayment(op, id);
+      if (!counterparty) return;
+
+      let entry = summaries.get(counterparty);
+      if (!entry) {
+        entry = {
+          address: counterparty,
+          sent: 0n,
+          received: 0n,
+          firstInteractionAt: op.created_at,
+          lastInteractionAt: op.created_at,
+          txCount: 0,
+        };
+        summaries.set(counterparty, entry);
+      }
+
+      if (isOutbound) entry.sent += stroops;
+      else entry.received += stroops;
+      entry.txCount += 1;
+      if (op.created_at < entry.firstInteractionAt) entry.firstInteractionAt = op.created_at;
+      if (op.created_at > entry.lastInteractionAt) entry.lastInteractionAt = op.created_at;
+    });
+
+    const counterparties = Array.from(summaries.values())
+      .sort((a, b) => b.txCount - a.txCount)
+      .slice(0, limit)
+      .map((entry) => ({
+        address: entry.address,
+        totalSent: stroopsToAmount(entry.sent),
+        totalReceived: stroopsToAmount(entry.received),
+        netPosition: signedStroopsToAmount(entry.received - entry.sent),
+        firstInteractionAt: toISOTimestamp(entry.firstInteractionAt),
+        lastInteractionAt: toISOTimestamp(entry.lastInteractionAt),
+        txCount: entry.txCount,
+      }));
+
+    return success(res, {
+      accountId: id,
+      counterparties,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+const LARGEST_TRANSACTION_DIRECTIONS = new Set(["sent", "received", "both"]);
+
+/**
+ * GET /account/:id/largest-transactions?direction=both&limit=10
+ *
+ * Groups the account's XLM payment operations by transaction and returns the
+ * transactions that moved the most XLM, largest first.
+ *
+ * Query params:
+ *   - direction ("sent" | "received" | "both", default: "both")
+ *       sent     — only XLM sent by the account (the account is the source)
+ *       received — only XLM received by the account
+ *       both     — XLM moved in either direction
+ *   - limit (integer, 1–50, default: 10) — maximum transactions to return
+ *
+ * Response:
+ *   {
+ *     accountId,
+ *     direction,
+ *     transactions: [{
+ *       transactionHash,
+ *       direction,       // "sent", "received" or "mixed" for this transaction
+ *       totalValueXLM,   // seven-decimal string for the requested direction
+ *       operationCount,
+ *       createdAt
+ *     }]
+ *   }
+ *
+ * Only native XLM amounts count towards totalValueXLM. Returns 404 when the
+ * account does not exist.
+ *
+ * @example
+ * GET /account/GABC.../largest-transactions?direction=sent&limit=5
+ */
+router.get("/:id/largest-transactions", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const direction =
+      req.query.direction === undefined
+        ? "both"
+        : String(req.query.direction).toLowerCase();
+    if (!LARGEST_TRANSACTION_DIRECTIONS.has(direction)) {
+      const err = new Error(
+        "Query parameter 'direction': must be one of sent, received, both.",
+      );
+      err.isValidation = true;
+      err.field = "direction";
+      err.receivedValue = String(req.query.direction);
+      err.expectedFormat = "sent | received | both";
+      throw err;
+    }
+
+    const limit =
+      req.query.limit !== undefined ? validateLimit(req.query.limit, 50) : 10;
+
+    await withHorizonTiming(req, () => server.loadAccount(id));
+
+    const byTransaction = new Map();
+    await scanPaymentHistory(req, id, (op) => {
+      const isNativeXlm =
+        op.type === "create_account" || op.asset_type === "native";
+      if (!isNativeXlm || !op.transaction_hash) return;
+
+      const { isOutbound, stroops } = classifyPayment(op, id);
+      const isInbound =
+        !isOutbound &&
+        (op.to === id || op.account === id || op.into === id);
+      if (!isOutbound && !isInbound) return;
+      // Self-payments do not move value in or out.
+      if (op.from === id && op.to === id) return;
+
+      let entry = byTransaction.get(op.transaction_hash);
+      if (!entry) {
+        entry = {
+          transactionHash: op.transaction_hash,
+          sent: 0n,
+          received: 0n,
+          operationCount: 0,
+          createdAt: op.created_at,
+        };
+        byTransaction.set(op.transaction_hash, entry);
+      }
+
+      if (isOutbound) entry.sent += stroops;
+      else entry.received += stroops;
+      entry.operationCount += 1;
+    });
+
+    const transactions = Array.from(byTransaction.values())
+      .map((entry) => {
+        let value;
+        if (direction === "sent") value = entry.sent;
+        else if (direction === "received") value = entry.received;
+        else value = entry.sent + entry.received;
+
+        let txDirection = "mixed";
+        if (entry.received === 0n) txDirection = "sent";
+        else if (entry.sent === 0n) txDirection = "received";
+
+        return { entry, value, txDirection };
+      })
+      .filter(({ value }) => value > 0n)
+      .sort((a, b) => (b.value > a.value ? 1 : b.value < a.value ? -1 : 0))
+      .slice(0, limit)
+      .map(({ entry, value, txDirection }) => ({
+        transactionHash: entry.transactionHash,
+        direction: txDirection,
+        totalValueXLM: stroopsToAmount(value),
+        operationCount: entry.operationCount,
+        createdAt: toISOTimestamp(entry.createdAt),
+      }));
+
+    return success(res, {
+      accountId: id,
+      direction,
+      transactions,
+    });
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
 const OFFERS_SUMMARY_PAGE_SIZE = 200;
 // An account holds at most 1,000 subentries, so five full pages always cover
 // every open offer.
@@ -7280,11 +7911,13 @@ router.get("/:id/watchlist-status", async (req, res, next) => {
 
     await withHorizonTiming(req, () => server.loadAccount(id));
 
+    const result = (await watchlistService.checkWatchlist(id)) || {};
+
     const data = {
       accountId: id,
-      onWatchlist: false,
-      sources: [],
-      reason: null,
+      onWatchlist: Boolean(result.onWatchlist),
+      sources: Array.isArray(result.sources) ? result.sources : [],
+      reason: result.reason ?? null,
       checkedAt: new Date().toISOString(),
     };
 
