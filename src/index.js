@@ -556,6 +556,12 @@ app.get("/", (req, res) => {
         },
         {
           method: "GET",
+          path: "/account/:id/trustline-history",
+          description:
+            "Trustline lifecycle events (created, removed, limit changes, authorisation), filterable by ?type= and ?asset=",
+        },
+        {
+          method: "GET",
           path: "/account/:id/effects",
           description: "Effects history for an account (normalized, paginated)",
         },
