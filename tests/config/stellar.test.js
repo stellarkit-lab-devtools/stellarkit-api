@@ -25,6 +25,7 @@ describe("src/config/stellar.js — network configuration", () => {
       if (!(key in ORIGINAL_ENV)) delete process.env[key];
     });
     Object.assign(process.env, ORIGINAL_ENV);
+    delete process.env.HORIZON_URLS;
   });
 
   afterEach(() => {
@@ -70,6 +71,21 @@ describe("src/config/stellar.js — network configuration", () => {
   });
 
   describe("Horizon URL — HORIZON_URL override", () => {
+    it("uses the first configured list URL ahead of the legacy override", () => {
+      process.env.HORIZON_URLS = "https://first.example.com, https://second.example.com";
+      process.env.HORIZON_URL = "https://legacy.example.com";
+      const { horizonUrl, getActiveHorizonHost } = require("../../src/config/stellar");
+      expect(horizonUrl).toBe("https://first.example.com");
+      expect(getActiveHorizonHost()).toBe("first.example.com");
+    });
+
+    it("strips credentials from public URL metadata and active health host", () => {
+      process.env.HORIZON_URLS = "https://alice:secret@first.example.com:8443/private";
+      const { horizonUrl, getActiveHorizonHost } = require("../../src/config/stellar");
+      expect(horizonUrl).toBe("https://first.example.com:8443/private");
+      expect(getActiveHorizonHost()).toBe("first.example.com:8443");
+    });
+
     it("uses the custom URL from HORIZON_URL when set", () => {
       process.env.HORIZON_URL = "https://my-custom-horizon.example.com";
       process.env.STELLAR_NETWORK = "testnet";

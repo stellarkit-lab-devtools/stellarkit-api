@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { server, horizonUrl } = require("../config/stellar");
+const { server, fetchHorizon } = require("../config/stellar");
 const { success } = require("../utils/response");
 const StellarKitError = require("../utils/StellarKitError");
 const cacheService = require("../services/cache");
@@ -51,7 +51,7 @@ router.get("/protocol-version", async (req, res, next) => {
       return success(res, cached);
     }
 
-    const response = await withHorizonTiming(req, () => fetch(horizonUrl));
+    const response = await withHorizonTiming(req, () => fetchHorizon());
     if (!response.ok) {
       throw new StellarKitError(
         "Unable to fetch network metadata from Stellar Horizon.",
@@ -129,8 +129,7 @@ router.get("/validators", async (req, res, next) => {
       }
     }
 
-    const url = `${horizonUrl}/accounts?order=desc&limit=200`;
-    const response = await withHorizonTiming(req, () => fetch(url));
+    const response = await withHorizonTiming(req, () => fetchHorizon("/accounts?order=desc&limit=200"));
 
     if (!response.ok) {
       const horizonErr = new Error("Unable to fetch validator data from Horizon. Please try again.");

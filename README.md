@@ -41,6 +41,9 @@ This project is ideal for:
 
 ## Documentation
 
+- [Response Migration Notes](docs/migrations.md) — confirmed response changes since 1.0.0 and consumer fixes
+- [API Versioning](docs/api-versioning.md) — compatibility, semver, and deprecation policy
+
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
