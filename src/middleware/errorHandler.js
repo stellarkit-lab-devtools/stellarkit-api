@@ -3,6 +3,7 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
+const redactSeeds = require("../utils/redactSeeds");
 const logger = require("../utils/logger");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
@@ -66,7 +67,7 @@ function logError(status, req, message) {
       {
         requestId,
         method: req.method,
-        path: req.path,
+        path: redactSeeds(req.path),
         status,
       },
       message
@@ -429,6 +430,7 @@ function errorHandler(err, req, res, next) {
         type: "InvalidAccountId",
         message: err.message,
         suggestion: err.suggestion,
+        details: err.details,
       },
     }, req));
   }

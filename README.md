@@ -3780,3 +3780,15 @@ describe("GET /asset/:code/:issuer/market-cap", () => {
     });
   });
 });
+
+### Local setup diagnostics
+
+Run `npm run doctor` to check Node, required .env values (STELLAR_NETWORK and PORT), network configuration, Horizon and its passphrase, Soroban RPC health, port availability, testnet Friendbot, and installed dependencies against the lockfile. Each line includes PASS, WARN, or FAIL and an action. Any FAIL exits with code 1. Use `npm run doctor -- --json` for a structured report. Mainnet requires SOROBAN_RPC_URL; Friendbot is skipped there.
+
+### Compose a muxed address
+
+`POST /utils/muxed-address` accepts `{ "baseAccount": "G...", "id": "18446744073709551615" }` and returns `data: { muxedAddress, baseAccount, id }`. Supply id as a decimal string from 0 through 18446744073709551615; JSON numbers are rejected to prevent precision loss.
+
+### Security contact
+
+Set SECURITY_CONTACT (for example, `mailto:security@example.com`) to serve the public `/.well-known/security.txt` endpoint. SECURITY_TXT_EXPIRES overrides the default expiry of one year ahead; SECURITY_POLICY_URL adds a disclosure policy link. Without a contact, the endpoint returns 404.

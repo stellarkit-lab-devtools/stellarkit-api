@@ -207,6 +207,7 @@ async function warmStartupCaches({
 
 // ── Security & Parsing ──────────────────────────────────────────────────────
 app.use(helmet());
+app.use(require("./routes/securityTxt"));
 // Reject TRACE/CONNECT/OPTIONS/PUT/HEAD/etc. before CORS or route handlers
 app.use(restrictHttpMethods);
 // Skip compression for responses smaller than 1 KB — gzip headers alone can exceed tiny payloads

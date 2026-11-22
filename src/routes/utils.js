@@ -6,6 +6,8 @@ registerParamValidation(router);
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
 const {
+  Account,
+  MuxedAccount,
   Transaction,
   TransactionBuilder,
   FeeBumpTransaction,
@@ -18,6 +20,20 @@ const {
 } = require("@stellar/stellar-sdk");
 const { normalizeAsset } = require("../utils/asset");
 const { server } = require("../config/stellar");
+
+router.post("/muxed-address", (req, res, next) => {
+  try {
+    const { baseAccount, id } = req.body || {};
+    validateAccountId(baseAccount);
+    if (typeof id !== "string" || !/^[0-9]+$/.test(id) || BigInt(id) > 18446744073709551615n) {
+      throw createValidationError("id must be a string containing a uint64 from 0 to 18446744073709551615.");
+    }
+    const muxed = new MuxedAccount(new Account(baseAccount, "0"), BigInt(id).toString());
+    return success(res, { muxedAddress: muxed.accountId(), baseAccount, id });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const STROOPS_PER_XLM = 10000000n;

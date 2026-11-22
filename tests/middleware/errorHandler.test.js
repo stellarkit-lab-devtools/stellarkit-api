@@ -466,6 +466,8 @@ describe("errorHandler middleware — full coverage", () => {
       const { req, res, next } = createMocks();
       const err = new Error("Invalid account ID: G123");
       err.isInvalidAccountId = true;
+      err.suggestion = "Use a public account address starting with G.";
+      err.details = { reason: "wrong_prefix" };
 
       errorHandler(err, req, res, next);
 
@@ -475,7 +477,8 @@ describe("errorHandler middleware — full coverage", () => {
         error: {
           type: "InvalidAccountId",
           message: "Invalid account ID: G123",
-          suggestion: "Account addresses start with G and are 56 characters long.",
+          suggestion: "Use a public account address starting with G.",
+          details: { reason: "wrong_prefix" },
         },
         requestId: "req-572-test",
       });
