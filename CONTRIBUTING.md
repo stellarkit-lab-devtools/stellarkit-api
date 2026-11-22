@@ -34,6 +34,9 @@ Issues with the **`Stellar Wave`** label are part of the Stellar Wave Program on
 
 ## 📖 Documentation
 
+- [Manual Release Checklist](docs/release-process.md) — maintainer permissions, versioning, SDK publishing, deployment verification, and hotfixes
+- [Route Scaffold Generator](docs/route-generator.md) — generate route, test, registration, and README stubs
+
 - [Testing Guide](docs/testing.md) — how the test suite is structured, how to run tests, mocking patterns, and coverage expectations
 - [Getting Started for Contributors](docs/getting-started-for-contributors.md) — environment setup, codebase orientation, response conventions, first test, and PR submission for first-time (Wave) contributors
 

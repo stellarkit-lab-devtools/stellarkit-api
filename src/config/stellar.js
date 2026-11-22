@@ -20,7 +20,9 @@ const failover = createHorizonFailover({
   urls,
   stickyMs: Number.isFinite(parsedStickyMs) && parsedStickyMs >= 0 ? parsedStickyMs : 60000,
   createServer: (url) => {
-    const client = new Horizon.Server(url);
+    let client;
+    try { client = new Horizon.Server(url, { timeout: 5000 }); }
+    catch { throw new Error("Unable to configure Horizon endpoint. Check the Horizon URL settings."); }
     if (typeof client.serverInfo !== "function") client.serverInfo = () => client.root();
     return client;
   },
@@ -49,14 +51,6 @@ async function fetchHorizon(path = "", options = {}) {
     }
     return response;
   });
-}
-
-// Horizon JS SDK exposes GET / as Server#root. StellarKit calls this
-// serverInfo() so routes and tests can mock a single, named method.
-if (typeof server.serverInfo !== "function") {
-  server.serverInfo = function serverInfo() {
-    return server.root();
-  };
 }
 
 // Soroban RPC has no free SDF-hosted mainnet endpoint, so there is no mainnet
@@ -216,6 +210,7 @@ async function fetchContract(contractId) {
 module.exports = {
   fetchContract,
   server,
+  streamingServer: failover.streamingServer,
   horizonUrl,
   fetchHorizon,
   getActiveHorizonHost: failover.getActiveHost,

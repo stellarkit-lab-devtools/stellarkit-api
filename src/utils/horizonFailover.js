@@ -2,22 +2,43 @@ const StellarKitError = require("./StellarKitError");
 
 function configuredUrls(env, fallback) {
   const urls = (env.HORIZON_URLS || "").split(",").map((url) => url.trim()).filter(Boolean);
-  return [...new Set(urls.length ? urls : [env.HORIZON_URL || fallback])];
+  const result = [...new Set(urls.length ? urls : [env.HORIZON_URL || fallback])];
+  try {
+    for (const value of result) {
+      const url = new URL(value);
+      if (!["https:", "http:"].includes(url.protocol)) throw new Error();
+      decodeURIComponent(url.username);
+      decodeURIComponent(url.password);
+    }
+  } catch {
+    throw new Error("Invalid Horizon endpoint configuration. Use absolute HTTP(S) URLs.");
+  }
+  return result;
 }
 
 function retryable(error) {
   const status = error.response?.status ?? error.status;
   if (status) return status >= 500 && status <= 599;
   return ["ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT",
-    "ECONNABORTED", "EPIPE", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]
+    "ECONNABORTED", "EPIPE", "ENETUNREACH", "EHOSTUNREACH", "ERR_NETWORK", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT"]
     .includes(error.code || error.cause?.code) ||
-    /timeout|timed out|fetch failed/i.test(error.message || "") || error.name === "AbortError";
+    /timeout|timed out|fetch failed|network error|socket hang up|econnrefused|econnreset|enotfound/i.test(error.message || "") ||
+    error.name === "AbortError" || error.name === "NetworkError";
 }
 
 // Never retain SDK request/config objects: they can contain URL credentials.
-function safeError(error) {
+function safeError(error, urls) {
+  error = error || {};
+  const secrets = urls.flatMap((url) => {
+    const { username, password } = new URL(url);
+    return [username, password, decodeURIComponent(username), decodeURIComponent(password)].filter(Boolean);
+  });
   const clean = (value) => {
-    if (typeof value === "string") return value.replace(/https?:\/\/[^\s/"<>]+@/gi, "https://[redacted]@");
+    if (typeof value === "string") {
+      let result = value.replace(/https?:\/\/[^\s/"<>]+@/gi, "https://[redacted]@");
+      for (const secret of secrets) result = result.split(secret).join("[redacted]");
+      return result;
+    }
     if (Array.isArray(value)) return value.map(clean);
     if (value && typeof value === "object") return Object.fromEntries(
       Object.entries(value).filter(([key]) => !["config", "request", "authorization", "password", "username"].includes(key.toLowerCase())).map(([key, entry]) => [key, clean(entry)]),
@@ -49,7 +70,7 @@ function createHorizonFailover({ urls, createServer, stickyMs = 60000, now = Dat
         active = index;
         return result;
       } catch (error) {
-        if (!retryable(error)) throw safeError(error);
+        if (!retryable(error)) throw safeError(error, urls);
       }
     }
     const error = new StellarKitError("Stellar Horizon is unavailable. Please try again.", 503, "UpstreamUnavailable");
@@ -63,37 +84,59 @@ function createHorizonFailover({ urls, createServer, stickyMs = 60000, now = Dat
 
   // Record builder calls so each retry reconstructs the identical request on
   // another server. Streams deliberately stay on the configured primary.
-  function wrap(target, steps = []) {
+  const asyncMethods = new Set(["loadAccount", "root", "serverInfo", "feeStats", "fetchBaseFee", "fetchTimebounds", "submitTransaction", "submitAsyncTransaction"]);
+  function wrap(target, steps = [], run = request) {
+    const overrides = new Map();
     return new Proxy(target, {
       get(object, property) {
+        if (overrides.has(property)) return overrides.get(property);
         if (property === "then") return undefined;
         const value = object[property];
         if (typeof value !== "function") return value;
+        if (!steps.length && asyncMethods.has(property)) {
+          return (...args) => run((client) => client[property](...args));
+        }
         return (...args) => {
           const next = [...steps, [property, args]];
-          if (property === "stream") return replay(clients[0], next);
+          if (property === "stream") {
+            const options = args[0] || {};
+            const onerror = options.onerror;
+            const streamArgs = [{ ...options, ...(onerror ? { onerror: (error) => onerror(safeError(error, urls)) } : {}) }, ...args.slice(1)];
+            try { return replay(clients[0], [...steps, [property, streamArgs]]); }
+            catch (error) { throw safeError(error, urls); }
+          }
           if (steps.length || property === "call") {
-            if (property === "call") return request((client) => replay(client, next));
-            return wrap(replay(clients[0], next), next);
+            if (property === "call") return run((client) => replay(client, next));
+            return wrap(replay(clients[0], next), next, run);
           }
           // Horizon's top-level async methods (loadAccount, feeStats, root,
           // submitTransaction) and its synchronous call-builder factories.
-          return wrap(value.apply(object, args), next);
+          return wrap(value.apply(object, args), next, run);
         };
+      },
+      // Preserve explicit method overrides, including the repository's usual
+      // jest.spyOn(server, ...) mocks, without changing SDK client internals.
+      set(_object, property, value) {
+        overrides.set(property, value);
+        return true;
+      },
+      deleteProperty(_object, property) {
+        overrides.delete(property);
+        return true;
       },
     });
   }
 
-  const asyncMethods = new Set(["loadAccount", "root", "serverInfo", "feeStats", "fetchBaseFee", "fetchTimebounds", "submitTransaction", "submitAsyncTransaction"]);
-  const builders = wrap(clients[0]);
-  const server = new Proxy(builders, {
-    get(target, property) {
-      if (asyncMethods.has(property)) return (...args) => request((client) => client[property](...args));
-      return target[property];
-    },
-  });
-
-  return { server, request, getActiveHost: () => new URL(urls[active]).host };
+  const primaryRequest = async (operation) => {
+    try { return await operation(clients[0], urls[0]); }
+    catch (error) { throw safeError(error, urls); }
+  };
+  return {
+    server: wrap(clients[0]),
+    streamingServer: wrap(clients[0], [], primaryRequest),
+    request,
+    getActiveHost: () => new URL(urls[active]).host,
+  };
 }
 
 module.exports = { configuredUrls, createHorizonFailover, retryable };

@@ -61,9 +61,9 @@ describe("Horizon failover with mock HTTP servers", () => {
     expect(backup.state.requests[0].url).toBe(primary.state.requests[0].url);
   });
 
-  it("does not fail over for a 404", async () => {
-    primary.state.status = 404;
-    await expect(client().server.root()).rejects.toMatchObject({ response: { status: 404 } });
+  it.each([400, 401, 404, 429])("does not fail over for HTTP %s", async (status) => {
+    primary.state.status = status;
+    await expect(client().server.root()).rejects.toMatchObject({ response: { status } });
     expect(backup.state.requests).toHaveLength(0);
   });
 
@@ -93,6 +93,38 @@ describe("Horizon failover with mock HTTP servers", () => {
     expect(failover.getActiveHost()).toBe(new URL(primary.url).host);
   });
 
+  it("tries each URL at most once, including a third endpoint", async () => {
+    primary.state.status = backup.state.status = 503;
+    const third = await endpoint();
+    await expect(client([primary.url, backup.url, third.url]).server.root()).resolves.toMatchObject({ horizon_version: "mock" });
+    for (const item of [primary, backup, third]) expect(item.state.requests).toHaveLength(1);
+  });
+
+  it("falls back from a failed sticky host to the recovered primary", async () => {
+    primary.state.status = 503;
+    const failover = client();
+    await failover.server.root();
+    primary.state.status = 200;
+    backup.state.status = 503;
+    await expect(failover.server.root()).resolves.toMatchObject({ horizon_version: "mock" });
+    expect(primary.state.requests).toHaveLength(2);
+    expect(backup.state.requests).toHaveLength(2);
+  });
+
+  it("redacts configured credentials on non-retryable errors before logging can occur", async () => {
+    const failover = client([primary.url.replace("://", "://alice:secret@")]);
+    const error = new Error(`alice secret ${primary.url.replace("://", "://alice:secret@")}`);
+    error.response = { status: 401, config: { authorization: "secret" }, data: { detail: "alice secret" } };
+    try {
+      await failover.request(() => Promise.reject(error));
+      throw new Error("Expected rejection");
+    } catch (caught) {
+      expect(caught.message).not.toMatch(/alice|secret/);
+      expect(JSON.stringify(caught)).not.toMatch(/alice|secret|authorization/);
+      expect(caught.response.status).toBe(401);
+    }
+  });
+
   it("returns a credential-free 503 envelope when all URLs fail", async () => {
     primary.state.status = backup.state.status = 503;
     const failover = client([primary.url.replace("://", "://alice:secret@"), backup.url]);
@@ -109,7 +141,8 @@ describe("Horizon failover with mock HTTP servers", () => {
 
   it("reports only the active host without credentials, path or query", async () => {
     primary.state.status = 503;
-    const failover = client([primary.url, `${backup.url.replace("://", "://alice:secret@")} /private?key=value`.replace(" /", "/")]);
+    const backupUrl = backup.url.replace("://", "://alice:secret@") + "/private?key=value";
+    const failover = client([primary.url, backupUrl]);
     const health = await getHorizonHealth({ server: failover.server, network: "testnet" });
     const body = { ...health, host: failover.getActiveHost() };
     expect(body.status).toBe("ok");
@@ -123,5 +156,22 @@ describe("Horizon failover with mock HTTP servers", () => {
     const failover = createHorizonFailover({ urls: [primary.url, backup.url], createServer });
     expect(failover.server.ledgers().stream({})).toBe("unsubscribe");
     expect(stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps streaming-route preflight requests on primary without failover", async () => {
+    primary.state.status = 503;
+    await expect(client().streamingServer.root()).rejects.toMatchObject({ response: { status: 503 } });
+    expect(primary.state.requests).toHaveLength(1);
+    expect(backup.state.requests).toHaveLength(0);
+  });
+
+  it("supports and restores the standard server method spy pattern", async () => {
+    const failover = client();
+    const spy = jest.spyOn(failover.server, "root").mockResolvedValue({ mocked: true });
+    await expect(failover.server.root()).resolves.toEqual({ mocked: true });
+    expect(primary.state.requests).toHaveLength(0);
+    spy.mockRestore();
+    await expect(failover.server.root()).resolves.toMatchObject({ horizon_version: "mock" });
+    expect(primary.state.requests).toHaveLength(1);
   });
 });

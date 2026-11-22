@@ -39,7 +39,7 @@ function generate(args, { root = path.resolve(__dirname, ".."), print = console.
   const validation = hasAccount ? "    validateAccountId(req.params.id);\n" : "";
   const queryImports = options.paginated ? 'const { parsePaginationParams } = require("../utils/pagination");\n' : "";
   const cacheImports = options.cached ? 'const cacheService = require("../services/cache");\nconst cacheTTL = require("../config/cacheConfig");\n' : "";
-  const paramsKey = 'JSON.stringify({ params: req.params, query: req.query })';
+  const paramsKey = 'JSON.stringify({ params: req.params, query: Object.fromEntries(Object.entries(req.query).filter(([key]) => key !== "fresh")) })';
   const cacheRead = options.cached ? `    const cacheKey = ${JSON.stringify(options.name + ":")} + ${paramsKey};\n    const fresh = req.query.fresh === true || req.query.fresh === "true";\n    if (!fresh) {\n      const cached = cacheService.get(cacheKey);\n      if (cached !== undefined) {\n        res.set("X-Cache", "HIT");\n        return success(res, cached.data, cached.meta);\n      }\n    }\n` : "";
   const fetchCode = options.paginated
     ? `    const { limit, order, cursor } = parsePaginationParams(req.query);\n    let query = server.operations()${hasAccount ? ".forAccount(req.params.id)" : ""}.limit(limit).order(order);\n    if (cursor) query = query.cursor(cursor);\n    const response = await query.call();\n    // TODO: replace the operation mapping with this endpoint's domain data.\n    const records = response.records || [];\n    const data = records.map(stripLinks);\n    const nextCursor = records.length ? records[records.length - 1].paging_token : null;\n    const meta = { meta: { count: records.length, limit, order, nextCursor, hasMore: records.length === limit } };\n`
@@ -72,6 +72,8 @@ function generate(args, { root = path.resolve(__dirname, ".."), print = console.
   // Preflight everything before touching the tree; exclusive creation protects
   // existing route/test files even when another generator runs concurrently.
   const created = [];
+  let indexChanged = false;
+  let readmeChanged = false;
   try {
     for (const [file, contents] of files) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -79,11 +81,13 @@ function generate(args, { root = path.resolve(__dirname, ".."), print = console.
       created.push(file);
     }
     fs.writeFileSync(indexPath, index.replace(insertion, `${registration}\n\n${insertion}`));
+    indexChanged = true;
     fs.writeFileSync(readmePath, `${readme.trimEnd()}\n\n### Scaffolded routes\n\n| Method | Path | Description | Query Params |\n| --- | --- | --- | --- |\n${row}\n`);
+    readmeChanged = true;
   } catch (error) {
     for (const file of created) fs.unlinkSync(file);
-    fs.writeFileSync(indexPath, index);
-    fs.writeFileSync(readmePath, readme);
+    if (indexChanged) fs.writeFileSync(indexPath, index);
+    if (readmeChanged) fs.writeFileSync(readmePath, readme);
     throw error;
   }
   print(`Created ${options.name} route and test; updated README.md and src/index.js.`);

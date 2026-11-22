@@ -14,8 +14,7 @@ describe("route scaffold generator", () => {
   });
   afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  it.each([[], ["--cached"], ["--paginated"], ["--cached", "--paginated"]])("generates conventions and lintable output (%j)", async (...flags) => {
-    // Jest expands array rows into individual arguments.
+  it.each([[], ["--cached"], ["--paginated"], ["--cached", "--paginated"]].map((flags) => ({ flags })))("generates conventions and lintable output ($flags)", async ({ flags }) => {
     const args = ["--path", "/account/:id/foo", "--name", "foo", ...flags];
     generate(args, { root, print: () => {} });
     const route = fs.readFileSync(path.join(root, "src/routes/foo.js"), "utf8");
