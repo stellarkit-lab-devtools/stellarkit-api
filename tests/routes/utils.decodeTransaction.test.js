@@ -3,7 +3,7 @@
 const request = require('supertest');
 const StellarSdk = require('@stellar/stellar-sdk');
 
-const app = require('../../src/app');
+const app = require('../../src/index');
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const NETWORK_PASSPHRASE = StellarSdk.Networks.TESTNET;

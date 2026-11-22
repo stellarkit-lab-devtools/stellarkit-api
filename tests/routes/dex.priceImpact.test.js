@@ -3,7 +3,7 @@
 const request = require('supertest');
 
 // Mock the Stellar config module so we can control the orderbook response.
-jest.mock('../../config/stellar', () => {
+jest.mock('../../src/config/stellar', () => {
   const call = jest.fn();
   const limit = jest.fn(() => ({ call }));
   const orderbook = jest.fn(() => ({ limit }));
@@ -15,8 +15,8 @@ jest.mock('../../config/stellar', () => {
   };
 });
 
-const stellarConfig = require('../../config/stellar');
-const app = require('../../app');
+const stellarConfig = require('../../src/config/stellar');
+const app = require('../../src/index');
 
 const { orderbook, limit, call } = stellarConfig.__mocks;
 
