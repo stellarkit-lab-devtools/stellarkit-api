@@ -48,7 +48,12 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testPathIgnorePatterns": ["/node_modules/", "/.kilo/"]
+    "testPathIgnorePatterns": ["/node_modules/", "/.kilo/"],
+    "setupFilesAfterEnv": ["./tests/setup.js"],
+    "resetMocks": true,
+    "restoreMocks": true,
+    "detectOpenHandles": true,
+    "forceExit": true
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",
