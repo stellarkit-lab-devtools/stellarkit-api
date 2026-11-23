@@ -16,6 +16,15 @@ import type {
   PoolPositionsResponse,
   TransactionSearchResponse,
 } from "../types/index.d";
+import {
+  request,
+  resolveFetch,
+  StellarKitConfigurationError,
+  StellarKitNetworkError,
+} from "./http";
+import type { FetchFunction } from "./http";
+export { StellarKitConfigurationError, StellarKitNetworkError } from "./http";
+export type { FetchFunction } from "./http";
 
 /**
  * Typed error thrown by StellarKitClient on non-2xx API responses.
@@ -48,19 +57,26 @@ interface RequestOptions {
 export class StellarKitClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
+  private readonly fetchImplementation: FetchFunction;
 
   /**
    * Create a new StellarKit API client.
    *
    * @param options.baseUrl - The base URL of the StellarKit API (e.g. 'https://api.stellarkit.io')
    * @param options.apiKey - Optional API key for authentication
+   * @param options.fetch - Optional fetch-compatible function for HTTP requests
    */
-  constructor({ baseUrl, apiKey }: { baseUrl: string; apiKey?: string }) {
+  constructor({ baseUrl, apiKey, fetch: fetchImplementation }: {
+    baseUrl: string;
+    apiKey?: string;
+    fetch?: FetchFunction;
+  }) {
     if (!baseUrl) {
       throw new Error("baseUrl is required");
     }
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
+    this.fetchImplementation = resolveFetch(fetchImplementation);
   }
 
   /**
@@ -100,7 +116,7 @@ export class StellarKitClient {
       headers["x-api-key"] = this.apiKey;
     }
 
-    const response = await fetch(urlString, {
+    const response = await request(this.fetchImplementation, urlString, {
       method,
       headers,
       body: body ? JSON.stringify(body) : null,
@@ -886,10 +902,16 @@ export class StellarKitClient {
   }
 }
 
+export { StellarKitClient as StellarKit };
+
 // CommonJS/UMD compatibility
 (StellarKitClient as any).default = StellarKitClient;
+(StellarKitClient as any).StellarKit = StellarKitClient;
+(StellarKitClient as any).StellarKitConfigurationError = StellarKitConfigurationError;
+(StellarKitClient as any).StellarKitNetworkError = StellarKitNetworkError;
 if (typeof module !== "undefined" && module.exports) {
   module.exports = StellarKitClient;
 } else if (typeof window !== "undefined") {
   (window as any).StellarKitClient = StellarKitClient;
+  (window as any).StellarKit = StellarKitClient;
 }
