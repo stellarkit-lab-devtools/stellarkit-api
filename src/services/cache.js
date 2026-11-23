@@ -1,5 +1,6 @@
 const NodeCache = require("node-cache");
 const logger = require("../utils/logger");
+const { getCoalescedRequests } = require("../utils/singleFlight");
 
 /**
  * Centralised in-memory TTL cache service backed by node-cache.
@@ -50,6 +51,10 @@ class CacheService {
     });
     this.hits = 0;
     this.misses = 0;
+    // Counts entries removed via `delete()` (forced eviction), separate from
+    // natural TTL expiry which node-cache handles internally and never routes
+    // through this method.
+    this.evictions = 0;
   }
 
   /**
@@ -109,6 +114,7 @@ class CacheService {
    */
   delete(key) {
     this.cache.del(key);
+    this.evictions++;
   }
 
   /**
@@ -129,7 +135,7 @@ class CacheService {
    * close to 100% means the cache is working well; a low rate may indicate
    * TTLs are too short or keys are not being reused.
    *
-   * @returns {{ hits: number, misses: number, hitRate: string, cachedKeys: number }}
+   * @returns {{ hits: number, misses: number, hitRate: string, cachedKeys: number, coalescedRequests: number }}
    */
   getStats() {
     const total = this.hits + this.misses;
@@ -140,6 +146,8 @@ class CacheService {
       hitRate: `${hitRate}%`,
       // Number of keys that are currently live (not yet expired or deleted)
       cachedKeys: this.cache.keys().length,
+      // Requests that shared an upstream call via src/utils/singleFlight.js
+      coalescedRequests: getCoalescedRequests(),
     };
   }
 }

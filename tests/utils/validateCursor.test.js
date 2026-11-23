@@ -102,6 +102,18 @@ describe("validateCursor – unit", () => {
   it("accepts cursor strings containing only digits", () => {
     expect(validateCursor("999999")).toBe("999999");
   });
+
+  it("throws for cursor strings containing invalid characters", () => {
+    let caught;
+    try {
+      validateCursor("invalid cursor!");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(caught.isInvalidCursor).toBe(true);
+    expect(caught.type).toBe("InvalidCursor");
+  });
 });
 
 // ── parsePaginationParams integration ────────────────────────────────────────
@@ -161,6 +173,8 @@ describe("parsePaginationParams – cursor validation", () => {
 
 // ── HTTP integration: paginated endpoint returns 400 for bad cursor ──────────
 
+const { Keypair } = require("@stellar/stellar-sdk");
+
 jest.mock("../../src/config/stellar", () => {
   const original = jest.requireActual("../../src/config/stellar");
   return {
@@ -177,8 +191,7 @@ jest.mock("../../src/config/stellar", () => {
 const request = require("supertest");
 const app = require("../../src/index");
 
-const VALID_ACCOUNT =
-  "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+const VALID_ACCOUNT = Keypair.random().publicKey();
 
 describe("Paginated endpoints – invalid cursor returns 400", () => {
   beforeEach(() => {
@@ -233,5 +246,14 @@ describe("Paginated endpoints – invalid cursor returns 400", () => {
       .get(`/transactions/${VALID_ACCOUNT}?cursor=112631640938561537`);
 
     expect(res.status).not.toBe(400);
+  });
+
+  it("GET /transactions/:id with invalid cursor characters returns 400", async () => {
+    const res = await request(app)
+      .get(`/transactions/${VALID_ACCOUNT}?cursor=bad cursor!`)
+      .expect(400);
+
+    expect(res.body.error.type).toBe("InvalidCursor");
+    expect(res.body.error.suggestion).toBe("Use the cursor returned in the previous response.");
   });
 });

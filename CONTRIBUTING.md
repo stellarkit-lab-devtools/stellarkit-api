@@ -10,7 +10,9 @@ Thank you for your interest in contributing! StellarKit API participates in the 
 - [📖 Documentation](#documentation)
 - [🛠️ Development Setup](#development-setup)
 - [📋 How to Contribute](#how-to-contribute)
+- [🚫 What Not to Commit](#-what-not-to-commit)
 - [✅ PR Checklist](#pr-checklist)
+- [🧩 Code Patterns](#-code-patterns)
 - [🧱 Code Style](#-code-style)
 - [🔍 Linting](#-linting)
 - [💬 Questions?](#-questions)
@@ -32,7 +34,12 @@ Issues with the **`Stellar Wave`** label are part of the Stellar Wave Program on
 
 ## 📖 Documentation
 
+- [Manual Release Checklist](docs/release-process.md) — maintainer permissions, versioning, SDK publishing, deployment verification, and hotfixes
+- [Route Scaffold Generator](docs/route-generator.md) — generate route, test, registration, and README stubs
+
 - [Testing Guide](docs/testing.md) — how the test suite is structured, how to run tests, mocking patterns, and coverage expectations
+- [Getting Started for Contributors](docs/getting-started-for-contributors.md) — environment setup, codebase orientation, response conventions, first test, and PR submission for first-time (Wave) contributors
+- [Architecture Decision Records](docs/adr/README.md) — why responses use the `{ success, data | error }` envelope, why amounts are seven-decimal strings, and why all Stellar clients come from one shared config module
 
 ---
 
@@ -45,6 +52,8 @@ npm install
 cp .env.example .env
 npm run dev
 ```
+
+For a detailed overview of the project structure, conventions, and where to add new code, see [docs/project-structure.md](docs/project-structure.md).
 
 ---
 
@@ -59,13 +68,47 @@ npm run dev
 
 ---
 
+## 🚫 What Not to Commit
+
+Keep the repository clean. The following file types must **never** be included in a PR:
+
+| File type | Examples | Where it belongs instead |
+|---|---|---|
+| Test output files | `test-out.txt`, `test-result.txt`, `*-output.txt` | Discard locally; they are not part of the codebase |
+| Implementation summary docs | `IMPLEMENTATION_SUMMARY.md`, `CHANGES_MADE.txt`, `REFACTORING_SUMMARY.md` | Summarise in the PR description or CHANGELOG.md |
+| Ad-hoc / one-off scripts | `run-test.js`, `verify-*.js`, `manual-verification.sh` | Permanent, reusable scripts go in `scripts/` with a clear name and comment |
+| PR-specific notes | `PR_*.md`, `*_FIX_SUMMARY.md`, `X_POWERED_BY_FIX_SUMMARY.md` | The PR description on GitHub is the right place for this |
+| Local debugging artefacts | `*.log`, any scratch file created while investigating a bug | Delete before opening a PR |
+
+> **Rule of thumb:** if the file only makes sense in the context of *your current working session*, it does not belong in the repo.
+
+Changelog-worthy release notes go in [`CHANGELOG.md`](CHANGELOG.md). Reusable helper scripts go in [`scripts/`](scripts/). Everything else stays local or goes in the PR description.
+
+---
+
 ## ✅ PR Checklist
 
 - [ ] `npm test` passes
 - [ ] New functionality has tests
 - [ ] Code follows existing patterns (async/await, centralised error handling)
+- [ ] New endpoints pass the checklist in the [Code Patterns Guide](docs/code-patterns.md#checklist)
+- [ ] If adding new middleware, routes, or utilities, they follow the conventions in [docs/project-structure.md](docs/project-structure.md)
 - [ ] PR description explains what was changed and why
 - [ ] Issue number is referenced in the PR description
+
+---
+
+## 🧩 Code Patterns
+
+Most review feedback on new endpoints comes from the same five patterns. The **[Code Patterns Guide](docs/code-patterns.md)** shows the wrong and correct approach for each one, with the helper to use:
+
+1. **[Horizon instance usage](docs/code-patterns.md#1-horizon-instance-usage)**: import `server` and `sorobanServer` from `src/config/stellar.js`. Never create your own.
+2. **[Response envelope shape](docs/code-patterns.md#2-response-envelope-shape)**: send responses with `success(res, data)`. Errors go through `next(err)`.
+3. **[Amount formatting](docs/code-patterns.md#3-amount-formatting)**: return seven-decimal strings from `formatAmount` or `parseStellarAmount`, and sum amounts in stroops.
+4. **[Cache integration](docs/code-patterns.md#4-cache-integration)**: use the shared `cacheService` with TTLs from `cacheConfig`, an `X-Cache` header, and `?fresh=true`.
+5. **[Error handling flow](docs/code-patterns.md#5-error-handling-flow)**: validate input with `validators.js`, throw `StellarKitError`, and let `errorHandler` respond.
+
+Read it before you add an endpoint.
 
 ---
 

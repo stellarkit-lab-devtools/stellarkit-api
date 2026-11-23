@@ -20,7 +20,7 @@
 const INTEGER_PARAMS = new Set(["limit", "operations"]);
 
 /** Parameters to coerce to booleans. */
-const BOOLEAN_PARAMS = new Set(["fresh"]);
+const BOOLEAN_PARAMS = new Set(["fresh", "sponsored", "includeOperations"]);
 
 /**
  * Attempt to coerce a trimmed string to an integer.

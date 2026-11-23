@@ -27,6 +27,8 @@ function registerParamValidation(router) {
     "assetIssuer",
     "sellAsset",
     "buyAsset",
+    "sourceAsset",
+    "destAsset",
   ];
   for (const name of paramNames) {
     router.param(name, rejectEmptyParam);

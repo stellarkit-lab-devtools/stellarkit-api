@@ -1,0 +1,29 @@
+{
+  "name": "@stellarkit/client",
+  "version": "1.0.0",
+  "description": "TypeScript/JavaScript client SDK for the StellarKit API",
+  "license": "MIT",
+  "sideEffects": false,
+  "main": "./dist/cjs/stellarkit-client.js",
+  "module": "./dist/esm/stellarkit-client.js",
+  "types": "./dist/cjs/stellarkit-client.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/stellarkit-client.js",
+      "require": "./dist/cjs/stellarkit-client.js",
+      "types": "./dist/cjs/stellarkit-client.d.ts"
+    },
+    "./soroban": {
+      "import": "./dist/esm/soroban.js",
+      "require": "./dist/cjs/soroban.js",
+      "types": "./dist/cjs/soroban.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json",
+    "verify:exports": "node scripts/verify-exports.cjs"
+  }
+}

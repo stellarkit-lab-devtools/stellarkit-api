@@ -2,11 +2,14 @@
  * Tests for GET /account/:id/multisig-info
  *
  * Covers:
- *   - Returns isMultisig, thresholds (low/med/high), masterWeight, signers list
+ *   - Returns isMultisig, thresholds (low/medium/high), masterWeight, signers list
  *   - isMultisig=true  when multiple signers exist
  *   - isMultisig=false when account has only the master key with default thresholds
  *   - isMultisig=true  when thresholds exceed the master key weight
- *   - Signer types are normalized (ed25519_public_key, hash_x, pre_auth_tx)
+ *   - isMultisig is always a strict boolean (true/false), never truthy/falsy
+ *   - Signer types are normalised to human-readable strings (hash_x, pre_auth_tx, ed25519_public_key)
+ *   - No snake_case field names in the response
+ *   - sponsoredBy is always present on each signer as a string or null
  *   - Returns 404 when account does not exist
  *   - Returns 400 for an invalid account address
  */
@@ -29,6 +32,7 @@ beforeEach(() => {
 const accountId = Keypair.random().publicKey();
 const signer1 = Keypair.random().publicKey();
 const signer2 = Keypair.random().publicKey();
+const sponsorId = Keypair.random().publicKey();
 
 // ── Happy path: multisig account ──────────────────────────────────────────
 
@@ -64,15 +68,20 @@ describe("GET /account/:id/multisig-info — multisig account", () => {
     expect(res.body.data.isMultisig).toBe(true);
   });
 
+  it("isMultisig is a strict boolean (not just truthy)", async () => {
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    expect(typeof res.body.data.isMultisig).toBe("boolean");
+  });
+
   it("returns the correct accountId", async () => {
     const res = await request(app).get(`/account/${accountId}/multisig-info`);
     expect(res.body.data.accountId).toBe(accountId);
   });
 
-  it("thresholds object contains low, med, high", async () => {
+  it("thresholds object contains low, medium, high", async () => {
     const res = await request(app).get(`/account/${accountId}/multisig-info`);
     const { thresholds } = res.body.data;
-    expect(thresholds).toEqual({ low: 1, med: 3, high: 5 });
+    expect(thresholds).toEqual({ low: 1, medium: 3, high: 5 });
   });
 
   it("masterWeight equals the weight of the account's own key", async () => {
@@ -90,20 +99,102 @@ describe("GET /account/:id/multisig-info — multisig account", () => {
     expect(res.body.data.signerCount).toBe(res.body.data.signers.length);
   });
 
-  it("each signer has key, weight, and type fields", async () => {
+  it("each signer has key, weight, type, and sponsoredBy fields", async () => {
     const res = await request(app).get(`/account/${accountId}/multisig-info`);
     for (const signer of res.body.data.signers) {
       expect(signer).toHaveProperty("key");
       expect(signer).toHaveProperty("weight");
       expect(signer).toHaveProperty("type");
+      expect(signer).toHaveProperty("sponsoredBy");
     }
   });
 
-  it("sha256_hash signer type is normalized correctly", async () => {
+  it("sha256_hash signer type is normalised to human-readable 'hash_x'", async () => {
     const res = await request(app).get(`/account/${accountId}/multisig-info`);
     const hashXSigner = res.body.data.signers.find((s) => s.key === signer2);
     expect(hashXSigner).toBeDefined();
     expect(hashXSigner.type).toBe("hash_x");
+  });
+
+  it("ed25519_public_key signer type is preserved as-is", async () => {
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    const ed25519Signer = res.body.data.signers.find((s) => s.key === signer1);
+    expect(ed25519Signer.type).toBe("ed25519_public_key");
+  });
+
+  it("sponsoredBy is null for unsponsored signers", async () => {
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    for (const signer of res.body.data.signers) {
+      expect(signer.sponsoredBy).toBeNull();
+    }
+  });
+
+  it("no snake_case field names in the response data", async () => {
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    const json = JSON.stringify(res.body.data);
+    // Spot-check that raw Horizon snake_case names are absent
+    expect(json).not.toMatch(/"low_threshold":/);
+    expect(json).not.toMatch(/"med_threshold":/);
+    expect(json).not.toMatch(/"high_threshold":/);
+    expect(json).not.toMatch(/"sponsored_by":/);
+  });
+});
+
+// ── sponsoredBy is present when a signer has a sponsor ──────────────────
+
+describe("GET /account/:id/multisig-info — sponsored signer", () => {
+  it("sponsoredBy is the sponsor public key when the signer is sponsored", async () => {
+    server.loadAccount.mockResolvedValue({
+      id: accountId,
+      signers: [
+        { key: accountId, type: "ed25519_public_key", weight: 1 },
+        { key: signer1, type: "ed25519_public_key", weight: 2, sponsor: sponsorId },
+      ],
+      thresholds: { low_threshold: 1, med_threshold: 2, high_threshold: 3 },
+    });
+
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    expect(res.statusCode).toBe(200);
+
+    const sponsored = res.body.data.signers.find((s) => s.key === signer1);
+    expect(sponsored).toBeDefined();
+    expect(sponsored.sponsoredBy).toBe(sponsorId);
+  });
+
+  it("sponsoredBy is always present even when no signers have a sponsor", async () => {
+    server.loadAccount.mockResolvedValue({
+      id: accountId,
+      signers: [
+        { key: accountId, type: "ed25519_public_key", weight: 1 },
+      ],
+      thresholds: { low_threshold: 1, med_threshold: 1, high_threshold: 1 },
+    });
+
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    expect(res.statusCode).toBe(200);
+
+    const master = res.body.data.signers[0];
+    expect(master).toHaveProperty("sponsoredBy");
+    expect(master.sponsoredBy).toBeNull();
+  });
+});
+
+// ── pre_auth_tx signer type ───────────────────────────────────────────────
+
+describe("GET /account/:id/multisig-info — pre_auth_tx signer type", () => {
+  it("preauth_tx is normalised to 'pre_auth_tx'", async () => {
+    server.loadAccount.mockResolvedValue({
+      id: accountId,
+      signers: [
+        { key: accountId, type: "ed25519_public_key", weight: 1 },
+        { key: signer1, type: "preauth_tx", weight: 1 },
+      ],
+      thresholds: { low_threshold: 1, med_threshold: 1, high_threshold: 1 },
+    });
+
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    const preAuthSigner = res.body.data.signers.find((s) => s.key === signer1);
+    expect(preAuthSigner.type).toBe("pre_auth_tx");
   });
 });
 
@@ -128,6 +219,12 @@ describe("GET /account/:id/multisig-info — single signer account", () => {
     const res = await request(app).get(`/account/${accountId}/multisig-info`);
     expect(res.statusCode).toBe(200);
     expect(res.body.data.isMultisig).toBe(false);
+  });
+
+  it("isMultisig is a strict boolean false (not null/undefined/0)", async () => {
+    const res = await request(app).get(`/account/${accountId}/multisig-info`);
+    expect(res.body.data.isMultisig).toStrictEqual(false);
+    expect(typeof res.body.data.isMultisig).toBe("boolean");
   });
 
   it("signerCount is 1", async () => {

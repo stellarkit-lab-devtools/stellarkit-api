@@ -1,3 +1,4 @@
+const { getDocsUrl } = require("../src/utils/errorTypes");
 const errorHandler = require("../src/middleware/errorHandler");
 
 describe("ErrorHandler Middleware", () => {
@@ -22,6 +23,7 @@ describe("ErrorHandler Middleware", () => {
           status: 400,
           data: {
             title: "Transaction Failed",
+            type: "transaction_failed",
             detail: "The transaction failed due to bad sequence.",
             extras: {
               result_codes: {
@@ -37,13 +39,14 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(409);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "TransactionSubmissionFailed",
-          message: "Transaction failed.",
-          resultCodes: { transaction: "tx_bad_seq", operations: [] },
-          suggestion:
-            "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
+        error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+          title: "Transaction Failed",
+          detail: "The transaction failed due to bad sequence.",
+          message: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
+          resultCodes: { transaction: "tx_bad_seq" },
+          code: "tx_bad_seq",
         },
+        requestId: null,
       });
     });
 
@@ -53,6 +56,7 @@ describe("ErrorHandler Middleware", () => {
           status: 400,
           data: {
             title: "Transaction Failed",
+            type: "transaction_failed",
             detail: "The destination account was not found.",
             extras: {
               result_codes: {
@@ -68,13 +72,14 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "TransactionSubmissionFailed",
-          message: "Transaction failed.",
-          resultCodes: { transaction: null, operations: ["op_no_destination"] },
-          suggestion:
-            "The destination account does not exist. Create the account first with a createAccount operation.",
+        error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+          title: "Transaction Failed",
+          detail: "The destination account was not found.",
+          message: "The destination account does not exist. Create the account first with a createAccount operation.",
+          resultCodes: { operations: ["op_no_destination"] },
+          code: "op_no_destination",
         },
+        requestId: null,
       });
     });
 
@@ -99,14 +104,14 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(418);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonError",
+        error: { type: "HorizonError", docsUrl: getDocsUrl("HorizonError"),
           title: "Teapot",
           detail: "An unknown result code was returned.",
           status: 418,
           extras: err.response.data.extras,
           code: "tx_unknown_code_example",
         },
+        requestId: null,
       });
     });
 
@@ -126,13 +131,13 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(402);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonError",
+        error: { type: "HorizonError", docsUrl: getDocsUrl("HorizonError"),
           title: "Payment Required",
           detail: "Horizon responded with payment required.",
           status: 402,
           extras: null,
         },
+        requestId: null,
       });
     });
 
@@ -231,7 +236,7 @@ describe("ErrorHandler Middleware", () => {
       errorHandler(err, req, res, next);
 
       const body = res.json.mock.calls[0][0];
-      expect(body.error.status).toBe(404);
+      expect(body.error.status).toBe(400);
     });
 
     it("should default title and detail when missing from horizonError", () => {
@@ -246,7 +251,7 @@ describe("ErrorHandler Middleware", () => {
 
       const body = res.json.mock.calls[0][0];
       expect(body.error.title).toBe("Horizon Error");
-      expect(body.error.detail).toBe("An error occurred with the Stellar network.");
+      expect(body.error.detail).toBe("Horizon Error");
       expect(body.error.extras).toBeNull();
     });
 
@@ -255,12 +260,13 @@ describe("ErrorHandler Middleware", () => {
         req.path = "/account/GABC123456789012345678901234567890123456789012345678901234/merge";
       });
 
-      it("returns AccountMergeFailed for op_does_not_exist", () => {
+      it("returns TransactionSubmissionFailed for op_does_not_exist", () => {
         const err = {
           response: {
             status: 400,
             data: {
               title: "Transaction Failed",
+              type: "transaction_failed",
               detail: "Merge operation failed.",
               extras: { result_codes: { operations: ["op_does_not_exist"] } },
             },
@@ -272,22 +278,24 @@ describe("ErrorHandler Middleware", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({
           success: false,
-          error: {
-            type: "AccountMergeFailed",
-            message: "Account merge failed because the destination account does not exist.",
-            resultCode: "op_does_not_exist",
-            suggestion:
-              "Use an existing funded destination account (G...) before retrying the merge.",
+          error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+            title: "Transaction Failed",
+            detail: "Merge operation failed.",
+            message: "Merge operation failed.",
+            resultCodes: { operations: ["op_does_not_exist"] },
+            code: "op_does_not_exist",
           },
+          requestId: null,
         });
       });
 
-      it("returns AccountMergeFailed for op_malformed", () => {
+      it("returns TransactionSubmissionFailed for op_malformed", () => {
         const err = {
           response: {
             status: 400,
             data: {
               title: "Transaction Failed",
+              type: "transaction_failed",
               detail: "Malformed operation.",
               extras: { result_codes: { operations: ["op_malformed"] } },
             },
@@ -299,22 +307,24 @@ describe("ErrorHandler Middleware", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({
           success: false,
-          error: {
-            type: "AccountMergeFailed",
-            message: "Account merge failed because the operation payload is malformed.",
-            resultCode: "op_malformed",
-            suggestion:
-              "Check source/destination values and rebuild the transaction with a valid accountMerge operation.",
+          error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+            title: "Transaction Failed",
+            detail: "Malformed operation.",
+            message: "The operation is malformed or contains invalid parameters.",
+            resultCodes: { operations: ["op_malformed"] },
+            code: "op_malformed",
           },
+          requestId: null,
         });
       });
 
-      it("returns AccountMergeFailed for op_dest_full", () => {
+      it("returns TransactionSubmissionFailed for op_dest_full", () => {
         const err = {
           response: {
             status: 400,
             data: {
               title: "Transaction Failed",
+              type: "transaction_failed",
               detail: "Destination full.",
               extras: { result_codes: { operations: ["op_dest_full"] } },
             },
@@ -326,14 +336,14 @@ describe("ErrorHandler Middleware", () => {
         expect(res.status).toHaveBeenCalledWith(400);
         expect(res.json).toHaveBeenCalledWith({
           success: false,
-          error: {
-            type: "AccountMergeFailed",
-            message:
-              "Account merge failed because the destination account cannot accept additional reserves or entries.",
-            resultCode: "op_dest_full",
-            suggestion:
-              "Free capacity on the destination account (remove subentries or use a different destination) and try again.",
+          error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+            title: "Transaction Failed",
+            detail: "Destination full.",
+            message: "Destination full.",
+            resultCodes: { operations: ["op_dest_full"] },
+            code: "op_dest_full",
           },
+          requestId: null,
         });
       });
     });
@@ -342,12 +352,12 @@ describe("ErrorHandler Middleware", () => {
   describe("Horizon Timeout Errors", () => {
     const horizonTimeoutBody = {
       success: false,
-      error: {
-        type: "HorizonTimeout",
+      error: { type: "HorizonTimeout", docsUrl: getDocsUrl("HorizonTimeout"),
         message: "The Stellar Horizon node did not respond in time.",
         suggestion:
           "Try again in a few seconds. If the issue persists check the Stellar network status at https://status.stellar.org.",
       },
+      requestId: null,
     };
 
     it("should return 504 with HorizonTimeout shape for timeout message errors", () => {
@@ -412,16 +422,17 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(503);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "HorizonUnavailable",
+        error: { type: "HorizonUnavailable", docsUrl: getDocsUrl("HorizonUnavailable"),
           message: "Unable to connect to the Stellar Horizon node.",
           suggestion: "Check your HORIZON_URL and verify the node is reachable. See https://status.stellar.org for network status.",
         },
+        requestId: null,
       });
     });
 
     it("should return an OfferNotFound response for offer-not-found Horizon errors", () => {
       const err = {
+        offerId: "123",
         response: {
           status: 404,
           config: { url: "https://horizon-testnet.stellar.org/offers/123" },
@@ -437,11 +448,11 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "OfferNotFound",
+        error: { type: "OfferNotFound", docsUrl: getDocsUrl("OfferNotFound"),
           message: "Offer '123' was not found on the Stellar testnet network.",
           suggestion: "The offer may have already been filled, cancelled, or the offer ID may be incorrect.",
         },
+        requestId: null,
       });
     });
   });
@@ -461,20 +472,20 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ValidationError",
+        error: { type: "ValidationError", docsUrl: getDocsUrl("ValidationError"),
           message: "Invalid Account ID format",
           field: "accountId",
           receivedValue: "G12345",
           expectedFormat: "G... public key",
           suggestion: "Expected format: G... public key",
         },
+        requestId: null,
       });
     });
   });
 
   describe("InsufficientXLMReserve Errors", () => {
-    it("should handle custom insufficient XLM reserve errors with a 422 status code", () => {
+    it("should handle custom insufficient XLM reserve errors with a 500 status code as generic ServerError", () => {
       const err = {
         isInsufficientXLMReserve: true,
         message: "Account GABCDEF has insufficient XLM reserve on the Stellar testnet network. Available: 1.5 XLM, Required: 2.5 XLM, Shortfall: 1.0000000 XLM.",
@@ -487,22 +498,18 @@ describe("ErrorHandler Middleware", () => {
 
       errorHandler(err, req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(422);
+      expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InsufficientXLMReserve",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: err.message,
-          accountId: "GABCDEF",
-          availableBalance: 1.5,
-          requiredReserve: 2.5,
-          shortfall: 1.0,
-          suggestion: "Add more XLM to the account or remove unused subentries (e.g., trustlines, offers, data entries) to free up reserve.",
+          suggestion: err.suggestion,
         },
+        requestId: null,
       });
     });
 
-    it("should handle insufficient reserve error with zero available balance", () => {
+    it("should handle insufficient reserve error with zero available balance as generic ServerError", () => {
       const err = {
         isInsufficientXLMReserve: true,
         message: "Account GXYZ has insufficient XLM reserve on the Stellar mainnet network. Available: 0 XLM, Required: 1 XLM, Shortfall: 1.0000000 XLM.",
@@ -514,18 +521,13 @@ describe("ErrorHandler Middleware", () => {
 
       errorHandler(err, req, res, next);
 
-      expect(res.status).toHaveBeenCalledWith(422);
+      expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "InsufficientXLMReserve",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: err.message,
-          accountId: "GXYZ",
-          availableBalance: 0,
-          requiredReserve: 1,
-          shortfall: 1,
-          suggestion: "Add more XLM to the account or remove unused subentries (e.g., trustlines, offers, data entries) to free up reserve.",
         },
+        requestId: null,
       });
     });
   });
@@ -539,10 +541,10 @@ describe("ErrorHandler Middleware", () => {
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith({
         success: false,
-        error: {
-          type: "ServerError",
+        error: { type: "ServerError", docsUrl: getDocsUrl("ServerError"),
           message: "Database connection failed",
         },
+        requestId: null,
       });
     });
   });

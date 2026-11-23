@@ -16,6 +16,7 @@ Closes #
 <!-- Describe how you tested your changes and how reviewers can reproduce the testing. -->
 
 ## Checklist
+- [ ] No test output files, implementation summary docs, or ad-hoc scripts are included in this PR.
 - [ ] I have updated the documentation accordingly.
 - [ ] My changes generate no new warnings.
 - [ ] I have performed a self-review of my own code.

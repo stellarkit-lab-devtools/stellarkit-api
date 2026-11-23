@@ -3,10 +3,48 @@ const router = express.Router();
 const logger = require("../utils/logger");
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
-const { server } = require("../config/stellar");
+const { streamingServer: server } = require("../config/stellar");
 const { StrKey } = require("@stellar/stellar-sdk");
 const { formatTransaction } = require("../utils/formatTransaction");
 const { normalizeAsset } = require("../utils/asset");
+const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
+const webhookRegistry = require("../services/webhookRegistry");
+const webhookDelivery = require("../services/webhookDelivery");
+
+/**
+ * Horizon paging tokens are numeric ("123456789-1" style for effects/ops,
+ * plain digits for transactions/ledgers); "now" starts from the live edge.
+ */
+const STREAM_CURSOR_PATTERN = /^(now|\d+(-\d+)?)$/;
+
+/**
+ * Resolve the ?cursor= query param for a stream route.
+ * Returns "now" when absent, the cursor when valid, or null when malformed.
+ *
+ * Clients resume a dropped stream by reconnecting with the `cursor` of the
+ * last event they received; Horizon then replays everything after it, so no
+ * events are duplicated or skipped across the reconnect.
+ *
+ * @param {object} query - Express req.query
+ * @returns {string|null}
+ */
+function resolveStreamCursor(query) {
+  const raw = query ? query.cursor : undefined;
+  if (raw === undefined || raw === "") return "now";
+  if (typeof raw !== "string" || !STREAM_CURSOR_PATTERN.test(raw)) return null;
+  return raw;
+}
+
+function invalidCursorResponse(res, cursor) {
+  return res.status(400).json({
+    success: false,
+    error: {
+      type: "InvalidCursor",
+      message: "The provided cursor value is invalid.",
+      detail: `Received '${String(cursor).slice(0, 50)}'. Use the cursor of the last event you received, or "now".`,
+    },
+  });
+}
 
 /**
  * Error codes for SSE stream errors
@@ -24,6 +62,13 @@ const STREAM_ERROR_CODES = {
  *
  * Path param:
  *   - id: Stellar account public key (G... address, 56 chars)
+ *
+ * Query params:
+ *   - cursor (optional) — paging token of the last event received; the stream
+ *     resumes after it. Defaults to "now" (live edge).
+ *
+ * Each transaction event carries the Horizon paging token as the SSE `id:`
+ * and as a `cursor` field in the payload.
  *
  * SSE Events:
  *   - connected: Sent immediately after validation passes
@@ -63,7 +108,13 @@ router.get("/transactions/:id", async (req, res, next) => {
     });
   }
 
-  // 3. Account existence check (optional but preferred)
+  // 3. Optional resume cursor
+  const cursor = resolveStreamCursor(req.query);
+  if (cursor === null) {
+    return invalidCursorResponse(res, req.query.cursor);
+  }
+
+  // 4. Account existence check (optional but preferred)
   try {
     await server.loadAccount(id);
   } catch (err) {
@@ -109,11 +160,11 @@ router.get("/transactions/:id", async (req, res, next) => {
   let heartbeatInterval;
 
   try {
-    // Start streaming transactions from now onwards (not historical)
+    // Stream from the live edge, or resume after the client's last cursor
     streamClose = server
       .transactions()
       .forAccount(id)
-      .cursor("now")
+      .cursor(cursor)
       .stream({
         onmessage: (transaction) => {
           // Check if client has disconnected
@@ -127,8 +178,11 @@ router.get("/transactions/:id", async (req, res, next) => {
             logger.debug({ txHash: transaction.hash }, "Transaction forwarded");
           }
 
-          // Format and send transaction event
-          const payload = formatTransaction(transaction);
+          // Format and send transaction event. The paging token is sent as
+          // both the SSE id and a `cursor` field so clients can resume.
+          const eventCursor = transaction.paging_token || null;
+          const payload = { ...formatTransaction(transaction), cursor: eventCursor };
+          if (eventCursor) res.write(`id: ${eventCursor}\n`);
           res.write(`event: transaction\n`);
           res.write(`data: ${JSON.stringify(payload)}\n\n`);
         },
@@ -214,8 +268,13 @@ router.get("/transactions/:id", async (req, res, next) => {
  *
  * Filters to: payment, create_account operation types.
  *
+ * Query params:
+ *   - cursor (optional) — paging token of the last event received; the stream
+ *     resumes after it. Defaults to "now" (live edge).
+ *
  * SSE Events:
- *   - payment: JSON with { type, amount, assetCode, from, to, timestamp }
+ *   - payment: JSON with { type, amount, asset, from, to, timestamp, cursor }
+ *     (the paging token is also sent as the SSE `id:`)
  *   - heartbeat comment (": ping"): every 30 seconds
  */
 router.get("/payments/:id", async (req, res, next) => {
@@ -230,6 +289,11 @@ router.get("/payments/:id", async (req, res, next) => {
         detail: "Must be a valid G... address",
       },
     });
+  }
+
+  const cursor = resolveStreamCursor(req.query);
+  if (cursor === null) {
+    return invalidCursorResponse(res, req.query.cursor);
   }
 
   try {
@@ -265,7 +329,7 @@ router.get("/payments/:id", async (req, res, next) => {
     closeStream = server
       .payments()
       .forAccount(id)
-      .cursor("now")
+      .cursor(cursor)
       .stream({
         onmessage: (op) => {
           if (res.writableEnded || res.destroyed) {
@@ -282,10 +346,30 @@ router.get("/payments/:id", async (req, res, next) => {
             from: op.from || op.funder || op.source_account || null,
             to: op.to || op.account || null,
             timestamp: op.created_at || null,
+            cursor: op.paging_token || null,
           };
 
+          if (payload.cursor) res.write(`id: ${payload.cursor}\n`);
           res.write(`event: payment\n`);
           res.write(`data: ${JSON.stringify(payload)}\n\n`);
+
+          // Trigger webhook delivery for payment.received events
+          const webhooks = webhookRegistry.getWebhooks(id, "payment.received");
+          if (webhooks.length > 0) {
+            const webhookPayload = {
+              event: "payment.received",
+              accountId: id,
+              payment: payload,
+              timestamp: new Date().toISOString(),
+            };
+
+            webhookDelivery.triggerWebhooks(webhooks, webhookPayload).catch((err) => {
+              logger.error(
+                { accountId: id, error: err.message },
+                "Error triggering webhook delivery"
+              );
+            });
+          }
         },
         onerror: () => {
           if (!res.writableEnded && !res.destroyed) res.end();
@@ -341,7 +425,7 @@ router.get("/ledgers", async (req, res, next) => {
       onmessage: (ledger) => {
         if (res.writableEnded || res.destroyed) return;
         res.write(`data: ${JSON.stringify({
-          sequence: ledger.sequence,
+          sequence: formatLedgerSequence(ledger.sequence),
           closedAt: ledger.closed_at,
           baseFee: ledger.base_fee_in_stroops || ledger.base_fee,
           transactionCount: ledger.successful_transaction_count,

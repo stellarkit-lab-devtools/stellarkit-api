@@ -14,61 +14,7 @@ Every error response follows the same envelope:
 
 Some error types include additional fields such as `detail`, `suggestion`, `field`, `receivedValue`, `expectedFormat`, or Horizon-specific `extras`.
 
-For a complete reference of HTTP status codes returned by the API, see [Error Codes](./error-codes.md).
-
----
-
-## ValidationError
-
-Returned when a request parameter or body value fails validation.
-
-**Status:** `400`
-
-**Example:**
-
-```json
-{
-  "success": false,
-  "error": {
-    "type": "<ErrorType>",
-    "message": "...",
-    ...
-  }
-}
-```
-
-## Error Types
-
-| Type              | HTTP Status | Description                                                           |
-| ----------------- | ----------- | --------------------------------------------------------------------- |
-| `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
-| `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
-| `InsufficientReserve` | 422     | Account does not have enough XLM to cover the minimum reserve requirement |
-| `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
-| `NotFound`        | 404         | Route or resource not found                                           |
-| `RateLimitError`  | 429         | Too many requests from the same IP                                    |
-| `ServerError`     | 500         | Unexpected internal error                                             |
-
----
-
-### OfferNotFound
-
-Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID that does not exist, or when any operation references a non-existent offer.
-StellarKit API Error Reference
-
-Every error response follows the same envelope:
-
-```json
-{
-  "success": false,
-  "error": {
-    "type": "ErrorType",
-    "message": "Human-readable description."
-  }
-}
-```
-
-Some error types include additional fields such as `detail`, `suggestion`, `field`, `receivedValue`, `expectedFormat`, or Horizon-specific `extras`.
+Every error body also includes `error.docsUrl`, a link to the heading for that error type on this page (or to the top of the page for unknown types). The base URL can be overridden with the `DOCS_BASE_URL` environment variable.
 
 For a complete reference of HTTP status codes returned by the API, see [Error Codes](./error-codes.md).
 
@@ -95,15 +41,18 @@ Returned when a request parameter or body value fails validation.
 
 ## Error Types
 
-| Type              | HTTP Status | Description                                                           |
-| ----------------- | ----------- | --------------------------------------------------------------------- |
-| `ValidationError` | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
-| `HorizonError`    | varies      | Error propagated from the Stellar Horizon API                         |
-| `InsufficientReserve` | 422     | Account does not have enough XLM to cover the minimum reserve requirement |
-| `OfferNotFound`   | 404         | A specific offer was requested but does not exist on the network      |
-| `NotFound`        | 404         | Route or resource not found                                           |
-| `RateLimitError`  | 429         | Too many requests from the same IP                                    |
-| `ServerError`     | 500         | Unexpected internal error                                             |
+| Type                  | HTTP Status | Description                                                           |
+| --------------------- | ----------- | --------------------------------------------------------------------- |
+| `ValidationError`     | 400         | Input validation failed (invalid account ID, asset code, limit, etc.) |
+| `HorizonError`        | varies      | Error propagated from the Stellar Horizon API                         |
+| `InsufficientReserve` | 422         | Account does not have enough XLM to cover the minimum reserve requirement |
+| `OfferNotFound`       | 404         | A specific offer was requested but does not exist on the network      |
+| `LiquidityPoolNotFound` | 404       | A specific liquidity pool was requested but does not exist on the network |
+| `TrustlineNotFound`   | 404         | The requested asset trustline does not exist on the account           |
+| `TomlFetchFailed`     | 502         | The issuer's stellar.toml could not be fetched (network error, missing file, or invalid format) |
+| `NotFound`            | 404         | Route or resource not found                                           |
+| `RateLimitError`      | 429         | Too many requests from the same IP                                    |
+| `ServerError`         | 500         | Unexpected internal error                                             |
 
 ---
 
@@ -117,19 +66,108 @@ Returned when `GET /account/:id/offers?offerId=<id>` is called with an offer ID 
 {
   "success": false,
   "error": {
-    "type": "AccountNotFound",
-    "message": "Account GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN was not found on the Stellar testnet network.",
-    "suggestion": "Verify the account address is correct and that the account has been funded."
+    "type": "OfferNotFound",
+    "message": "Offer '12345' was not found on the Stellar testnet network.",
+    "suggestion": "The offer may have already been filled, cancelled, or the offer ID may be incorrect."
+  }
+}
+```
+
+---
+
+### TrustlineNotFound
+
+Returned when an endpoint looks up a specific asset trustline for an account and that trustline does not exist.
+
+**Status:** `404`
+
+**Affected endpoints:**
+- `GET /account/:id/asset-balance/:assetCode/:assetIssuer`
+- `GET /account/:id/freeze-status/:assetCode/:assetIssuer`
+- `GET /account/:id/can-receive/:assetCode/:assetIssuer`
+
+**Example response:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "TrustlineNotFound",
+    "message": "Account 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN' does not hold a trustline for USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN.",
+    "suggestion": "The account must establish a trustline before holding this asset."
   }
 }
 ```
 
 **Common causes:**
-- The public key is valid but the account has not been created on the network
-- The account was merged and no longer exists
-- Using a testnet key on mainnet or vice versa
+- The account has never created a trustline for the requested asset
+- The trustline was removed by the account holder
+- The wrong issuer address was supplied
 
-**Suggested fix:** Verify the account address. If on testnet, fund the account using Friendbot (`GET /utils/friendbot/:accountId`).
+**Suggested fix:** The account must submit a `changeTrust` operation for the asset before it can hold a balance or interact with it.
+
+---
+
+### LiquidityPoolNotFound
+
+Returned when a liquidity pool endpoint (`GET /liquidity-pools/:id`, `GET /liquidity-pools/:id/trades`, `GET /liquidity-pools/:id/profitability`, `GET /liquidity-pools/:id/reserve-ratio`) is called with a pool ID that does not exist on the network. The raw Horizon `404` is translated into this structured error.
+
+**Status:** `404`
+
+**Affected endpoints:**
+- `GET /liquidity-pools/:id`
+- `GET /liquidity-pools/:id/trades`
+- `GET /liquidity-pools/:id/profitability`
+- `GET /liquidity-pools/:id/reserve-ratio`
+
+**Example response:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "LiquidityPoolNotFound",
+    "message": "Liquidity pool '67339253ccd0390f4886b5952d7f8d68f70f61280d908e234190c609c95b6026' was not found on the Stellar mainnet network.",
+    "suggestion": "Verify the pool ID is correct and that the pool has not been dissolved."
+  }
+}
+```
+
+**Common causes:**
+- The pool ID is misspelled or truncated
+- The liquidity pool has been dissolved and removed from the network
+- The pool exists on a different network (e.g., looking up a mainnet pool on testnet)
+
+**Suggested fix:** Verify the pool ID is a valid 64-character hex string and that the pool exists on the configured network. See [Mainnet vs Testnet Configuration](./deployment.md#mainnet-vs-testnet-configuration) for guidance.
+
+---
+
+## TomlFetchFailed
+
+Returned by `GET /asset/:code/:issuer/toml` when the issuer's `stellar.toml` file cannot be fetched — due to a network error, a missing file, or invalid TOML content.
+
+**Status:** `502`
+
+**Example response:**
+
+```json
+{
+  "success": false,
+  "error": {
+    "type": "TomlFetchFailed",
+    "message": "Could not fetch stellar.toml for issuer 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN'.",
+    "suggestion": "Verify the issuer has a valid stellar.toml at their home domain. See https://developers.stellar.org/docs/issuing-assets/publishing-asset-info for requirements."
+  }
+}
+```
+
+**Common causes:**
+- The issuer account has no `home_domain` set
+- The issuer's home domain is unreachable or times out
+- `/.well-known/stellar.toml` does not exist at the issuer's home domain (404)
+- The file exists but is not valid TOML
+
+**Suggested fix:** The issuer must publish a valid `stellar.toml` at `https://<home_domain>/.well-known/stellar.toml`.
 
 ---
 
@@ -298,24 +336,10 @@ Returned when API key authentication is enabled and the request is missing or ha
 
 **Status:** `401`
 
-**Example:**
-
-```json
-{
-  "success": false,
-  "error": {
-    "type": "HorizonError",
-    "title": "Transaction Failed",
-    "detail": "The transaction failed when submitted to the Stellar network.",
-    "status": 400,
-    "extras": { "result_codes": { "transaction": "tx_failed" } },
-    "code": "tx_failed",
-    "message": "tx_failed"
-  }
-}
-```
+---
 
 ### ServerError
+
 **HTTP status:** `500` (or another 5xx status when set upstream)
 
 Returned for unexpected errors not covered by another error type. In production, the message is generic (`"An unexpected error occurred."`) to avoid leaking internals; the full message is included outside of production.
@@ -333,3 +357,164 @@ Returned for unexpected errors not covered by another error type. In production,
 **Note:** In non-production environments, the `message` field contains the original error message for debugging. In production, it is replaced with a generic message.
 
 **Suggested fix:** Retry the request. If the error persists, report it with the `X-Request-ID` response header value for troubleshooting.
+
+---
+
+## Error type reference (continued)
+
+### AccountNotFound
+
+**Status:** `404`
+
+The requested Stellar account does not exist or has not been funded.
+
+### AssetNotFound
+
+**Status:** `404`
+
+The requested asset code/issuer pair was not found.
+
+### ConfigError
+
+**Status:** `500`
+
+The API is missing required configuration (for example SOROBAN_RPC_URL).
+
+### ContractNotFound
+
+**Status:** `404`
+
+The requested Soroban contract was not found on the configured network.
+
+### DuplicateParameter
+
+**Status:** `400`
+
+A query parameter was supplied more than once.
+
+### Forbidden
+
+**Status:** `403`
+
+The request is not permitted by the server policy.
+
+### Gone
+
+**Status:** `410`
+
+The requested resource is no longer available.
+
+### HorizonTimeout
+
+**Status:** `504`
+
+Horizon did not respond before the configured timeout.
+
+### HorizonUnavailable
+
+**Status:** `503`
+
+The configured Horizon node could not be reached.
+
+### InsufficientScope
+
+**Status:** `403`
+
+The API key lacks the scope required by the endpoint (admin).
+
+### InternalError
+
+**Status:** `500`
+
+An unexpected runtime error occurred while handling the request.
+
+### InvalidAccountId
+
+**Status:** `400`
+
+The supplied account address is not a valid Stellar public key.
+
+### InvalidContentType
+
+**Status:** `415`
+
+The request Content-Type is not supported.
+
+### InvalidHorizonResponse
+
+**Status:** `502`
+
+Horizon returned a response that could not be interpreted.
+
+### InvalidLimit
+
+**Status:** `400`
+
+The supplied pagination limit is outside the allowed range.
+
+### InvalidParameter
+
+**Status:** `400`
+
+A request parameter failed validation.
+
+### InvalidTransactionHash
+
+**Status:** `400`
+
+The supplied transaction hash is not a valid 64-character hex hash.
+
+### MethodNotAllowed
+
+**Status:** `405`
+
+The HTTP method is not allowed for this endpoint.
+
+### NoLedgerData
+
+**Status:** `404`
+
+No ledger data was available for the requested range.
+
+### NoPathFound
+
+**Status:** `404`
+
+No payment path was found between the requested assets.
+
+### NotFound
+
+**Status:** `404`
+
+The requested route or resource does not exist.
+
+### OrderBookEmpty
+
+**Status:** `404`
+
+No active offers exist for the requested asset pair.
+
+### RateLimitExceeded
+
+**Status:** `429`
+
+Too many requests were made within the rate-limit window.
+
+### TransactionSubmissionFailed
+
+**Status:** `409`
+
+The network accepted the transaction envelope but rejected the transaction itself.
+
+### UpstreamUnavailable
+
+**Status:** `503`
+
+An upstream service (such as Soroban RPC) is currently unreachable.
+
+### WebhookNotFound
+
+**Status:** `404`
+
+The requested webhook registration does not exist.
+
