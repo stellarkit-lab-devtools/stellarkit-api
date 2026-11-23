@@ -103,6 +103,7 @@ This project is ideal for:
 | GET | `/` | Lists available API endpoints | — |
 | GET | `/health` | Service health check | — |
 | GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
+| GET | `/network-status/:sequence` | Normalized data for one closed ledger (cached for one hour) | `sequence` |
 | GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
 | GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
 | GET | `/network/validator-quorum` | Current quorum health status | `fresh` |
@@ -192,6 +193,7 @@ This project is ideal for:
 | GET | `/dex/best-path/:sourceAsset/:destAsset` | Optimal conversion path with estimated rate, slippage, and hops | `amount` |
 | GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
 | GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
+| GET | `/dex/order-book-depth/:sellAsset/:buyAsset` | Order book levels with cumulative volumes and spread | `depth` |
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
 | GET | `/dex/liquidity-concentration/:baseAsset/:counterAsset` | Percentage of bid and ask volume within 1%, 2% and 5% of the mid price (30 s cache) | `fresh` |
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
