@@ -246,6 +246,8 @@ if (allowedOriginsEnv) {
   app.use(cors());
 }
 app.use(requestLogger);
+const i18nMiddleware = require('./middleware/i18n');
+app.use(i18nMiddleware);
 app.use(metricsCollector);
 app.use(contentTypeValidator);
 app.use(bodySizeLimit);

@@ -13,6 +13,7 @@
  */
 
 const redactSeeds = require("../utils/redactSeeds");
+const sanitizeLogValue = require("../utils/sanitizeLogValue");
 const logger = require("../utils/logger");
 const metricsService = require("../services/metrics");
 
@@ -53,13 +54,24 @@ function requestLogger(req, res, next) {
       const responseTimeMs = Math.round(elapsedMs * 1000) / 1000;
     const requestId = req.requestId || "-";
     const method = req.method;
-    const path = redactSeeds(req.originalUrl || req.url);
+    
+    // Sanitize user-supplied values: path, query string, User-Agent, Referer, Origin
+    const rawPath = req.originalUrl || req.url;
+    const path = sanitizeLogValue(redactSeeds(rawPath));
+    const query = sanitizeLogValue(req._parsedUrl && req._parsedUrl.query ? req._parsedUrl.query : '');
+    const userAgent = sanitizeLogValue(req.headers['user-agent']);
+    const referer = sanitizeLogValue(req.headers['referer']);
+    const origin = sanitizeLogValue(req.headers['origin']);
+    
     const statusCode = res.statusCode;
 
-      const requestId = safeGet(req, ["requestId"]) || "-";
-      const method = safeGet(req, ["method"]) || "UNKNOWN";
-      const path = safeGet(req, ["originalUrl"]) || safeGet(req, ["url"]) || "/";
-      const statusCode = safeGet(res, ["statusCode"]) || 0;
+    const fields = { requestId, method, path, statusCode, responseTimeMs };
+    
+    // Add optional sanitized user-supplied fields
+    if (query) fields.query = query;
+    if (userAgent) fields.userAgent = userAgent;
+    if (referer) fields.referer = referer;
+    if (origin) fields.origin = origin;
 
       const ip = safeGet(req, ["ip"]);
       const safeIp = typeof ip === "string" ? ip : "unknown";

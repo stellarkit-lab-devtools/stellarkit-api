@@ -1,0 +1,42 @@
+{
+  "Unauthorized": {
+    "message": "Se requiere autenticación.",
+    "suggestion": "Proporcione una clave API válida a través del encabezado X-API-Key."
+  },
+  "InsufficientScope": {
+    "message": "Permisos insuficientes para esta operación.",
+    "suggestion": "Use una clave API con el alcance requerido (admin)."
+  },
+  "RateLimitExceeded": {
+    "message": "Demasiadas solicitudes, intente de nuevo más tarde.",
+    "suggestion": "Espere antes de reintentar o reduzca la frecuencia de solicitudes."
+  },
+  "NotFound": {
+    "message": "El recurso solicitado no se encontró.",
+    "suggestion": "Verifique que el identificador sea correcto y exista en la red."
+  },
+  "AccountNotFound": {
+    "message": "Cuenta no encontrada en la red Stellar.",
+    "suggestion": "Verifique que la dirección de la cuenta sea correcta y que haya sido financiada."
+  },
+  "AssetNotFound": {
+    "message": "Activo no encontrado.",
+    "suggestion": "Verifique el código del activo y la dirección del emisor."
+  },
+  "TrustlineNotFound": {
+    "message": "La línea de confianza no existe para este activo.",
+    "suggestion": "La cuenta debe establecer una línea de confianza antes de poseer este activo."
+  },
+  "InvalidParameter": {
+    "message": "Valor de parámetro inválido proporcionado.",
+    "suggestion": "Verifique el formato del parámetro e intente de nuevo."
+  },
+  "ValidationError": {
+    "message": "La validación de la solicitud falló.",
+    "suggestion": "Revise los errores de campo y corrija el contenido de la solicitud."
+  },
+  "HorizonTimeout": {
+    "message": "La red Stellar no respondió a tiempo.",
+    "suggestion": "Reintente la solicitud. Si el problema persiste, verifique el estado de la red."
+  }
+}
