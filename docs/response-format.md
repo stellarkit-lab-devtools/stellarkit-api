@@ -12,6 +12,7 @@ This guide explains the standard response format conventions used across all Ste
 4. [Asset Shape](#asset-shape)
 5. [Timestamp Format](#timestamp-format)
 6. [Amount Format](#amount-format)
+7. [Amounts and Precision](amounts-and-precision.md)
 
 ---
 
@@ -117,7 +118,7 @@ Endpoints that return lists of records (transactions, payments, operations, etc.
 ```
 
 **Meta Fields:**
-- `total` — Number of items in current response
+- `total` — Number of items in the current asset-holder response. Other paginated routes generally use `count`; see [migration notes](migrations.md#pagination-metadata-moved-then-the-asset-holder-count-was-renamed) for the confirmed endpoint differences.
 - `limit` — Requested page size
 - `order` — Sort order used
 - `nextCursor` — Token for next page (null if no more pages)
@@ -148,6 +149,23 @@ Endpoints that return lists of records (transactions, payments, operations, etc.
   ]
 }
 ```
+
+**`Link` header (RFC 8288):**
+
+Whenever `meta.hasMore` is `true`, the response also carries a `Link` header
+pointing at the next page, so HTTP clients and tooling can follow pagination
+without reading the body:
+
+```
+Link: <https://api.example.com/account/GABC.../payments?limit=10&assetCode=USDC&cursor=137424838656-1>; rel="next"
+```
+
+- Every original query parameter is kept; only `cursor` is replaced (or added).
+- Keys and values are percent-encoded, e.g. `asset=USDC:GA5Z...` becomes `asset=USDC%3AGA5Z...`.
+- The URL is built from the request protocol and `Host` header, so behind a proxy it follows the `TRUST_PROXY` setting (see [deployment.md](deployment.md#running-behind-a-reverse-proxy)).
+- The header is absent on the final page.
+
+It is emitted by the shared `success()` helper in `src/utils/response.js`, so every route that returns `meta.hasMore` through it gets the header automatically.
 
 ---
 

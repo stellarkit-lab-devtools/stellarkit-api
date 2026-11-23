@@ -41,9 +41,13 @@ This project is ideal for:
 
 ## Documentation
 
+- [Response Migration Notes](docs/migrations.md) — confirmed response changes since 1.0.0 and consumer fixes
+- [API Versioning](docs/api-versioning.md) — compatibility, semver, and deprecation policy
+
 - [SDK Migration Guide](docs/sdk-migration.md) — migrating from the JavaScript SDK to the TypeScript SDK
 - [SDK README](sdk/README.md) — JavaScript client usage and method reference
 - [Getting Started Guide](docs/getting-started.md) - Set up the project and make your first API calls
+- [Stellar Concepts Guide](docs/stellar-concepts.md) - Map Stellar concepts (account, ledger, transaction, operation, effect, payment, trustline, reserve, sequence, claimable balance, sponsorship, liquidity pool, DEX offer, fees, Soroban) to StellarKit endpoints
 - [SEP Integration Guide](docs/sep-integration.md) - Use StellarKit discovery, account, asset, fee, and monitoring endpoints in SEP-10, SEP-24, and SEP-31 workflows
 - [Anchor Integration Guide](docs/anchor-integration.md) - Complete anchor discovery and integration workflow: discover anchors via `/network/anchor-directory`, fetch anchor info, check SEP support, and initiate deposit/withdrawal flows
 - [Soroban Integration Guide](docs/soroban-integration.md) - End-to-end workflow for querying contract state, monitoring events, checking expiry, and simulating invocations
@@ -53,14 +57,17 @@ This project is ideal for:
 - [Production Deployment Guide](docs/deployment.md) - Deploy to production with Node.js, Docker, Railway, Render, or Fly.io
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
 - [Response Format Guide](docs/response-format.md) - Standard response envelopes, pagination, and data formats
+- [Amounts and Precision Guide](docs/amounts-and-precision.md) - Why amounts are seven-decimal strings, stroops/int64, the 2^53 boundary, rounding behaviour, and safe handling in JS/Python/Go
 - [Streaming Guide](docs/streaming.md) - SSE and WebSocket streaming endpoints, event payloads, reconnection, and clean close handling
 - [Advanced Streaming Patterns](docs/streaming-advanced.md) - Production streaming patterns: exponential backoff reconnection, multi-stream management, client-side filtering, graceful shutdown, and memory management
 - [Real-Time Guide](docs/real-time-guide.md) - Build real-time Stellar apps by combining SSE/WebSocket streams with REST calls and polling, handling interruptions, and a complete Node.js balance monitor
+- [Browser Integration Guide](docs/BROWSER_INTEGRATION.md) - Secure browser app setup: CORS configuration, API key safety, server-side proxy, EventSource and WebSocket limitations, and rate limiting behavior
 - [Webhooks Guide](docs/webhooks.md) - Register webhooks, available events, payload shapes, signature verification, retries, and unregistration
 - [Webhook Security Guide](docs/webhook-security.md) - Verify HMAC-SHA256 delivery signatures in Node.js/Python/Go, handle invalid signatures, store secrets safely, and rotate with the dual-secret pattern
 - [Webhook Receiver Implementation Guide](docs/webhook-implementation.md) - Build an Express endpoint that verifies signatures, responds with 200 at the right time, de-duplicates retried deliveries, and handles errors, with a complete Node.js example
 - [Batch Endpoints Guide](docs/batch-endpoints.md) - Batch trust-status, freeze-status, and transaction status APIs, limits, and when to use batch vs individual
 - [DEX Endpoints Guide](docs/dex-endpoints.md) - All six DEX endpoints with curl examples, sample responses, and guidance on spread vs depth vs imbalance vs arbitrage
+- [DeFi Workflows Guide](docs/defi-guide.md) - Build DeFi apps with StellarKit: pool profitability analysis, price impact estimation, LP position monitoring, and arbitrage opportunity detection
 - [Compliance Endpoints Guide](docs/compliance-endpoints.md) - All compliance and risk endpoints with curl examples, sample responses, and a complete compliance workflow
 - [Compliance Workflow Guide](docs/compliance-workflow.md) - Step-by-step KYC/AML workflow chaining risk score, watchlist, transaction velocity, compliance check, and freeze check into a compliance report
 - [Network Endpoints Guide](docs/network-endpoints.md) - All network and fee endpoints with curl examples, cache TTLs, and sample responses
@@ -122,6 +129,7 @@ This project is ideal for:
 | GET | `/account/:id/asset-balance/:assetCode/:assetIssuer` | Balance for a specific asset trustline | — |
 | GET | `/account/:id/sequence` | Current sequence number | — |
 | GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode`, `sponsored` |
+| GET | `/account/:id/trustline-history` | Trustline lifecycle events (created, removed, limit_updated, authorized, deauthorized, authorized_to_maintain_liabilities) | `type`, `asset`, `limit`, `order`, `cursor` |
 | GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor`, `assetCode`, `assetIssuer` |
 | GET | `/account/:id/funding-history` | Account funding sources with sender, amount, asset, and timestamp | — |
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
@@ -151,6 +159,8 @@ This project is ideal for:
 | GET | `/account/:id/historical-balances` | Balance snapshots over time reconstructed from payment and trade history | `asset` (`CODE:ISSUER`, default XLM), `resolution` (`7d`\|`30d`, default `7d`) |
 | GET | `/account/:id/counterparties` | Frequent payment counterparties | — |
 | GET | `/account/:id/payment-counterparty-risk` | Top payment counterparties by txCount with a risk level (`low`/`medium`/`high`) and risk factors for each | `limit` (default 10, max 20) |
+| GET | `/account/:id/counterparty-summary` | Per-counterparty totals sent/received, net position, first/last interaction and txCount, sorted by txCount | `limit` (default 20, max 100) |
+| GET | `/account/:id/largest-transactions` | Transactions that moved the most XLM, sorted by totalValueXLM descending | `direction` (`sent`\|`received`\|`both`, default `both`), `limit` (default 10, max 50) |
 | GET | `/account/:id/transactions/search` | Search transactions by memo content | `memo`, `memo_type`, `limit`, `cursor`, `order` |
 | POST | `/account/:id/multisig-plan` | Signer combinations for each threshold | Body: `availableSigners` |
 
@@ -183,6 +193,7 @@ This project is ideal for:
 | GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
 | GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
+| GET | `/dex/liquidity-concentration/:baseAsset/:counterAsset` | Percentage of bid and ask volume within 1%, 2% and 5% of the mid price (30 s cache) | `fresh` |
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
 | GET | `/dex/top-markets` | Top markets ranked by recent trade activity | `limit` |
 | GET | `/dex/volume-leaders` | Top assets ranked by 24h trading volume against XLM (5 min cache) | `limit` (default 10, max 50) |
@@ -3771,3 +3782,15 @@ describe("GET /asset/:code/:issuer/market-cap", () => {
     });
   });
 });
+
+### Local setup diagnostics
+
+Run `npm run doctor` to check Node, required .env values (STELLAR_NETWORK and PORT), network configuration, Horizon and its passphrase, Soroban RPC health, port availability, testnet Friendbot, and installed dependencies against the lockfile. Each line includes PASS, WARN, or FAIL and an action. Any FAIL exits with code 1. Use `npm run doctor -- --json` for a structured report. Mainnet requires SOROBAN_RPC_URL; Friendbot is skipped there.
+
+### Compose a muxed address
+
+`POST /utils/muxed-address` accepts `{ "baseAccount": "G...", "id": "18446744073709551615" }` and returns `data: { muxedAddress, baseAccount, id }`. Supply id as a decimal string from 0 through 18446744073709551615; JSON numbers are rejected to prevent precision loss.
+
+### Security contact
+
+Set SECURITY_CONTACT (for example, `mailto:security@example.com`) to serve the public `/.well-known/security.txt` endpoint. SECURITY_TXT_EXPIRES overrides the default expiry of one year ahead; SECURITY_POLICY_URL adds a disclosure policy link. Without a contact, the endpoint returns 404.

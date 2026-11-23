@@ -1,5 +1,9 @@
 const request = require("supertest");
 const app = require("../src/index");
+const cacheService = require("../src/services/cache");
+
+// Payments and transactions responses are cached; start every test cold.
+beforeEach(() => cacheService.flush());
 const { server } = require("../src/config/stellar");
 const { Keypair } = require("@stellar/stellar-sdk");
 

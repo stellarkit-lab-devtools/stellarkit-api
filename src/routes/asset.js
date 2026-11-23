@@ -994,12 +994,26 @@ router.get("/:code/:issuer/trading-volume", async (req, res, next) => {
     const { code, issuer } = req.params;
     validateAsset(code, issuer);
 
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `trading-volume:${code}:${issuer}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
     const assetCode = code.toUpperCase();
     const asset = new Asset(assetCode, issuer);
-    const windowStartMs = Date.now() - 24 * 60 * 60 * 1000;
-    const traders = new Set();
-    let volume = 0;
-    let tradeCount = 0;
+    const now = Date.now();
+    const windowStart24hMs = now - 24 * 60 * 60 * 1000;
+    const windowStart7dMs = now - 7 * 24 * 60 * 60 * 1000;
+
+    const data24h = { volume: 0, tradeCount: 0, traders: new Set() };
+    const data7d = { volume: 0, tradeCount: 0, traders: new Set() };
+
     let cursor;
     let done = false;
 
@@ -1015,7 +1029,7 @@ router.get("/:code/:issuer/trading-volume", async (req, res, next) => {
         cursor = trade.paging_token;
         const timestamp = new Date(trade.ledger_close_time).getTime();
         if (!Number.isFinite(timestamp)) continue;
-        if (timestamp < windowStartMs) {
+        if (timestamp < windowStart7dMs) {
           done = true;
           break;
         }
@@ -1031,28 +1045,165 @@ router.get("/:code/:issuer/trading-volume", async (req, res, next) => {
         const amount = Number(
           isBaseAsset ? trade.base_amount : trade.counter_amount,
         );
-        if (Number.isFinite(amount)) volume += amount;
-        tradeCount += 1;
-        if (trade.base_account) traders.add(trade.base_account);
-        if (trade.counter_account) traders.add(trade.counter_account);
+        if (!Number.isFinite(amount)) continue;
+
+        // Update 7d data
+        data7d.volume += amount;
+        data7d.tradeCount += 1;
+        if (trade.base_account) data7d.traders.add(trade.base_account);
+        if (trade.counter_account) data7d.traders.add(trade.counter_account);
+
+        // Update 24h data if within 24h window
+        if (timestamp >= windowStart24hMs) {
+          data24h.volume += amount;
+          data24h.tradeCount += 1;
+          if (trade.base_account) data24h.traders.add(trade.base_account);
+          if (trade.counter_account) data24h.traders.add(trade.counter_account);
+        }
       }
 
       if (done || records.length < 200 || !cursor) break;
     }
 
-    return success(res, {
-      asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
-      volume24h: volume.toFixed(7),
-      tradeCount24h: tradeCount,
-      uniqueTraders24h: traders.size,
-    });
+    const response = {
+      code: assetCode,
+      issuer,
+      volume24h: data24h.volume.toFixed(7),
+      volume7d: data7d.volume.toFixed(7),
+      tradeCount24h: data24h.tradeCount,
+      tradeCount7d: data7d.tradeCount,
+      uniqueTraders24h: data24h.traders.size,
+    };
+
+    res.set("X-Cache", "MISS");
+    cacheService.set(cacheKey, response, cacheTTL.CACHE_TTL_ASSET_TRADING_VOLUME_MS / 1000 || 300);
+    return success(res, response);
   } catch (err) {
     next(err);
   }
 });
 
 /**
- * GET /asset/:code/:issuer/top-traders
+ * GET /asset/:code/:issuer/burn-history
+ *
+ * Returns a time series of burn events (payments sent to the issuer or burn
+ * addresses) with timestamp, amount, burner address, and transaction hash.
+ * Includes total lifetime burned amount and 7-day burn rate.
+ *
+ * Query params:
+ *   limit (number, 1–200, default: 50) — maximum number of events to return.
+ *   cursor (string, default: null)     — pagination cursor for next page.
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       code: string,
+ *       issuer: string,
+ *       totalBurned: string    // seven-decimal format
+ *       burnRate7d: string     // average daily burn over last 7 days
+ *       events: [
+ *         {
+ *           timestamp: string,
+ *           amount: string,
+ *           burnerAddress: string,
+ *           txHash: string
+ *         }
+ *       ]
+ *     }
+ *   }
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/burn-history?limit=50
+ */
+router.get("/:code/:issuer/burn-history", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const rawLimit = req.query.limit;
+    const limit = rawLimit !== undefined ? validateLimit(rawLimit, 200) : 50;
+    const cursor = req.query.cursor || null;
+
+    const asset = new Asset(assetCode, issuer);
+    const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let allEvents = [];
+    let allBurned = 0;
+    let sevenDaysBurned = 0;
+
+    // Query for payments involving this asset
+    let query = server
+      .payments()
+      .forAsset(asset)
+      .limit(200)
+      .order("desc");
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    for (const op of records) {
+      const isPayment = op.type === "payment";
+      const isPathPayment = [
+        "path_payment_strict_receive",
+        "path_payment_strict_send",
+      ].includes(op.type);
+      if (!isPayment && !isPathPayment) continue;
+
+      // Determine if this is a burn:
+      // A burn happens when the asset is sent TO the issuer
+      const to = op.to;
+      const amount = op.amount;
+
+      // Check if sent to issuer (self-burn)
+      if (to !== issuer) continue;
+      if (!amount || Number(amount) <= 0) continue;
+
+      const timestamp = new Date(op.created_at);
+      if (Number.isNaN(timestamp.getTime())) continue;
+
+      const burntAmount = Number(amount);
+      allBurned += burntAmount;
+
+      if (timestamp.getTime() >= sevenDaysAgoMs) {
+        sevenDaysBurned += burntAmount;
+      }
+
+      allEvents.push({
+        timestamp: timestamp.toISOString(),
+        amount: burntAmount.toFixed(7),
+        burnerAddress: op.from,
+        txHash: op.transaction_hash,
+      });
+    }
+
+    // Calculate 7-day burn rate (average daily burn)
+    const burnRate7d = (sevenDaysBurned / 7).toFixed(7);
+
+    // Return paginated response
+    const paginatedEvents = allEvents.slice(0, limit);
+    const nextCursor = paginatedEvents.length < allEvents.length
+      ? paginatedEvents[paginatedEvents.length - 1]?.txHash || null
+      : null;
+
+    const responseData = {
+      code: assetCode,
+      issuer,
+      totalBurned: allBurned.toFixed(7),
+      burnRate7d,
+      events: paginatedEvents,
+    };
+
+    if (nextCursor) {
+      res.set("X-Next-Cursor", nextCursor);
+    }
+
+    return success(res, responseData);
+  } catch (err) {
+    next(err);
+  }
+});
  *
  * Returns the accounts with the highest trading volume for the specified asset
  * in the last 24 hours. Each entry includes the account address, buy volume,

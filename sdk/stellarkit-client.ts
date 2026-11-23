@@ -15,7 +15,16 @@ import type {
   AssetSearchResponse,
   PoolPositionsResponse,
   TransactionSearchResponse,
-} from "../types/index.d.ts";
+} from "../types/index.d";
+import {
+  request,
+  resolveFetch,
+  StellarKitConfigurationError,
+  StellarKitNetworkError,
+} from "./http";
+import type { FetchFunction } from "./http";
+export { StellarKitConfigurationError, StellarKitNetworkError } from "./http";
+export type { FetchFunction } from "./http";
 
 /**
  * Typed error thrown by StellarKitClient on non-2xx API responses.
@@ -40,6 +49,35 @@ interface RequestOptions {
   body?: unknown;
 }
 
+/** Context passed to `onRequest` hooks. Mutate `headers` to add request headers. */
+export interface RequestHookContext {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+/** Summary passed to `onResponse` hooks after a successful or failed HTTP response. */
+export interface ResponseHookInfo {
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+}
+
+type Hook<T> = ((value: T) => void | Promise<void>);
+
+/** Optional lifecycle hooks shared by every SDK request. */
+export interface ClientHooks {
+  onRequest?: Hook<RequestHookContext> | Array<Hook<RequestHookContext>>;
+  onResponse?: Hook<ResponseHookInfo> | Array<Hook<ResponseHookInfo>>;
+  onError?: Hook<StellarKitError> | Array<Hook<StellarKitError>>;
+  onHookError?: HookErrorHandler;
+}
+
+/** Called when a hook itself throws; hook failures never fail the SDK call. */
+export type HookErrorHandler = (error: unknown, hookName: string) => void;
+
 /**
  * StellarKit API Client for TypeScript
  *
@@ -48,19 +86,26 @@ interface RequestOptions {
 export class StellarKitClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
+  private readonly fetchImplementation: FetchFunction;
 
   /**
    * Create a new StellarKit API client.
    *
    * @param options.baseUrl - The base URL of the StellarKit API (e.g. 'https://api.stellarkit.io')
    * @param options.apiKey - Optional API key for authentication
+   * @param options.fetch - Optional fetch-compatible function for HTTP requests
    */
-  constructor({ baseUrl, apiKey }: { baseUrl: string; apiKey?: string }) {
+  constructor({ baseUrl, apiKey, fetch: fetchImplementation }: {
+    baseUrl: string;
+    apiKey?: string;
+    fetch?: FetchFunction;
+  }) {
     if (!baseUrl) {
       throw new Error("baseUrl is required");
     }
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
+    this.fetchImplementation = resolveFetch(fetchImplementation);
   }
 
   /**
@@ -100,20 +145,43 @@ export class StellarKitClient {
       headers["x-api-key"] = this.apiKey;
     }
 
-    const response = await fetch(urlString, {
+    const response = await request(this.fetchImplementation, urlString, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : null,
-    });
+      body,
+    }, "onRequest");
+
+    let response: Response;
+    try {
+      response = await fetch(urlString, {
+        method,
+        headers,
+        body: requestBody,
+      });
+    } catch (error) {
+      await this.runHooks<StellarKitError>(this.hooks.onError, error instanceof StellarKitError
+        ? error
+        : new StellarKitError(String((error as Error)?.message || error), 0, "NetworkError"), "onError");
+      throw error;
+    }
 
     const result = await response.json();
+    const durationMs = Date.now() - startedAt;
+    await this.runHooks<ResponseHookInfo>(this.hooks.onResponse, {
+      url: urlString,
+      method,
+      status: response.status,
+      durationMs,
+    }, "onResponse");
 
     if (!response.ok) {
-      throw new StellarKitError(
+      const error = new StellarKitError(
         result.error?.message || response.statusText,
         response.status,
         result.error?.type || "ApiError",
       );
+      await this.runHooks<StellarKitError>(this.hooks.onError, error, "onError");
+      throw error;
     }
 
     return result.data;
@@ -787,6 +855,16 @@ export class StellarKitClient {
     return this._request(`/soroban/contract/${contractId}`);
   }
 
+  /**
+   * Get the status and decoded return value of a Soroban transaction.
+   *
+   * @param hash - 64-character hex transaction hash
+   * @returns Transaction status, return value, and ledger metadata
+   */
+  async getSorobanTransaction(hash: string): Promise<unknown> {
+    return this._request(`/soroban/transactions/${hash}`);
+  }
+
   // ── Claimable Balances ─────────────────────────────────────────────────────
 
   /**
@@ -898,10 +976,16 @@ export class StellarKitClient {
   }
 }
 
+export { StellarKitClient as StellarKit };
+
 // CommonJS/UMD compatibility
 (StellarKitClient as any).default = StellarKitClient;
+(StellarKitClient as any).StellarKit = StellarKitClient;
+(StellarKitClient as any).StellarKitConfigurationError = StellarKitConfigurationError;
+(StellarKitClient as any).StellarKitNetworkError = StellarKitNetworkError;
 if (typeof module !== "undefined" && module.exports) {
   module.exports = StellarKitClient;
 } else if (typeof window !== "undefined") {
   (window as any).StellarKitClient = StellarKitClient;
+  (window as any).StellarKit = StellarKitClient;
 }

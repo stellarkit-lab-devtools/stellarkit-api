@@ -38,6 +38,37 @@ All modules accept the same constructor options:
 | --------- | -------- | -------- | ------------------------------------------------ |
 | `baseUrl` | `string` | Yes      | StellarKit API base URL (e.g. `http://localhost:3000`) |
 | `apiKey`  | `string` | No       | Sent as the `x-api-key` request header           |
+| `fetch`   | Fetch-compatible function | No | Fetch implementation used for SDK HTTP requests |
+
+### Custom fetch
+
+Pass a fetch-compatible function when the runtime does not provide global `fetch`, or when you want to supply your own implementation:
+
+```typescript
+import { fetch as undiciFetch } from "undici";
+import { StellarKit } from "stellarkit-sdk";
+
+const client = new StellarKit({
+  baseUrl: "https://api.example.com",
+  fetch: undiciFetch,
+});
+```
+
+If neither the option nor a global `fetch` is available, construction throws `StellarKitConfigurationError`. A rejected fetch call throws `StellarKitNetworkError`.
+
+With `node-fetch` (for example, version 2 on Node.js 16):
+
+```javascript
+const fetch = require("node-fetch");
+const StellarKit = require("stellarkit-sdk");
+
+const client = new StellarKit({
+  baseUrl: "https://api.example.com",
+  fetch,
+});
+```
+
+The option applies to SDK REST requests only. Streaming helpers such as SSE and WebSocket connections are outside this fetch configuration and continue to use their runtime-specific transport.
 
 ### Modular clients (recommended)
 
@@ -60,7 +91,7 @@ const client = new StellarKitClient({ baseUrl, apiKey });
 
 ### Unified client
 
-`StellarKitClient` exposes every endpoint in one class (network, fees, account, transactions, assets, DEX, pools, utils).
+`StellarKitClient` (also exported as `StellarKit`) exposes every endpoint in one class (network, fees, account, transactions, assets, DEX, pools, utils).
 
 ```typescript
 import { StellarKitClient } from "stellarkit-sdk";
@@ -74,6 +105,37 @@ const status = await client.getNetworkStatus();
 ```
 
 ---
+
+## Request and response hooks
+
+The unified `StellarKitClient` accepts lifecycle hooks that run around **every** SDK call — no need to wrap each method. Each hook may be a single function or an array of functions, executed in registration order:
+
+- `onRequest({ url, method, headers, body })` — may mutate `headers` to add tracing/auth headers.
+- `onResponse({ url, method, status, durationMs })` — runs after the response is received.
+- `onError(error)` — receives the typed `StellarKitError` (status/type) on non-2xx or network failures.
+
+A hook that throws never fails the SDK call; the error is passed to the optional `onHookError(error, hookName)` callback.
+
+```ts
+import { randomUUID } from "node:crypto";
+import { StellarKitClient } from "stellarkit-api/sdk/stellarkit-client";
+
+const client = new StellarKitClient({
+  baseUrl: "https://api.stellarkit.io",
+  hooks: {
+    onRequest: ({ headers }) => {
+      headers["x-trace-id"] = randomUUID(); // trace header on every call
+    },
+    onResponse: ({ url, status, durationMs }) => {
+      console.log(`${url} ${status} ${durationMs}ms`);
+    },
+    onError: (err) => console.error(err.type, err.status, err.message),
+  },
+  onHookError: (err, hookName) => console.warn(`hook ${hookName} failed`, err),
+});
+
+await client.getHealth();
+```
 
 ## Error handling
 

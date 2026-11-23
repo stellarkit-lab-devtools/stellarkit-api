@@ -1,4 +1,6 @@
 import type { FeeEstimateResponse } from "../types/index.d";
+import { request, resolveFetch } from "./http";
+import type { FetchFunction } from "./http";
 
 /** Typed error thrown by FeesModule on non-2xx API responses. */
 export class StellarKitError extends Error {
@@ -116,21 +118,27 @@ export interface BatchFeeEstimateResponse {
 export class FeesModule {
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
+  private readonly fetchImplementation: FetchFunction;
 
   /**
    * @param options.baseUrl - Base URL of the StellarKit API (trailing slash stripped).
    * @param options.apiKey  - Optional API key sent as the `X-API-Key` header.
    */
-  constructor({ baseUrl, apiKey }: { baseUrl: string; apiKey?: string }) {
+  constructor({ baseUrl, apiKey, fetch: fetchImplementation }: {
+    baseUrl: string;
+    apiKey?: string;
+    fetch?: FetchFunction;
+  }) {
     if (!baseUrl) throw new Error("baseUrl is required");
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.headers = { "Content-Type": "application/json", Accept: "application/json" };
     if (apiKey) this.headers["X-API-Key"] = apiKey;
+    this.fetchImplementation = resolveFetch(fetchImplementation);
   }
 
   /** @private Fetch a path and return the `data` field, or throw StellarKitError. */
   private async _get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, { headers: this.headers });
+    const res = await request(this.fetchImplementation, `${this.baseUrl}${path}`, { headers: this.headers });
     const body = await res.json();
     if (!res.ok) {
       throw new StellarKitError(

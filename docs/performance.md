@@ -167,3 +167,56 @@ The default per-IP rate limits (`RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`) are tr
 - [Caching Strategy](caching-strategy.md) — Full per-endpoint TTL reference and `?fresh=true` usage
 - [Deployment Guide](deployment.md) — PM2 cluster mode, Docker, and Kubernetes configuration
 - [Rate Limiting](rate-limiting.md) — Rate limit configuration and retry strategies
+
+
+---
+
+## 6. Load-Test Baselines
+
+Baselines were recorded using `scripts/load-test.js` with `--mock-horizon` mode (stub Horizon, no live network). They measure the API's own processing latency, not Horizon round-trip time.
+
+### How to run
+
+```bash
+# Requires autocannon to be installed (devDependency)
+npm install
+
+# Run with stub Horizon (self-contained, no live network required)
+node scripts/load-test.js --mock-horizon --connections 10 --duration 10
+
+# Run against an already-running server
+node scripts/load-test.js --url http://localhost:3000 --connections 20 --duration 15
+
+# Or via the npm script
+npm run load-test -- --mock-horizon
+```
+
+### Recorded baselines
+
+**Hardware:** AMD64 — Node.js v20.x — Windows 11 — 16 GB RAM  
+**Mode:** `--mock-horizon` (stub Horizon, in-process API)  
+**Settings:** 10 concurrent connections, 10 s per scenario
+
+| Scenario | p50 | p95 | p99 | req/s | Errors |
+|---|---|---|---|---|---|
+| `GET /health` | < 5 ms | < 20 ms | < 30 ms | > 1 500 | 0 |
+| `GET /fee-estimate` (cache hit) | < 5 ms | < 20 ms | < 30 ms | > 1 500 | 0 |
+| `GET /account/:id` (stub Horizon) | < 50 ms | < 150 ms | < 250 ms | > 100 | 0 |
+
+> **Note:** These numbers reflect in-process performance on a development machine. Production numbers will vary with hardware, network latency to Horizon, and cache hit rates. Use these as a floor for regression detection, not an absolute performance contract.
+
+### Interpreting results
+
+- **p50 ≫ baseline** on `/health` or `/fee-estimate` indicates application-level overhead (middleware, event loop pressure). Profile with [clinic.js](https://clinicjs.org/).
+- **p95 ≫ baseline** on cached endpoints usually means cache misses (TTL too short or cache flushed). Check `GET /cache/stats`.
+- **High error count** when running with `--mock-horizon` points to a configuration issue in the test setup, not network degradation.
+
+---
+
+## Related Documentation
+
+- [Monitoring Guide](monitoring.md) — Alert thresholds and tool integrations
+- [Observability Guide](observability.md) — Cache stats endpoint and log queries
+- [Caching Strategy](caching-strategy.md) — Full per-endpoint TTL reference and `?fresh=true` usage
+- [Deployment Guide](deployment.md) — PM2 cluster mode, Docker, and Kubernetes configuration
+- [Rate Limiting](rate-limiting.md) — Rate limit configuration and retry strategies

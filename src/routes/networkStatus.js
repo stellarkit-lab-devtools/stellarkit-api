@@ -5,6 +5,7 @@ const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { fetchNetworkStatus } = require("../utils/mapNetworkStatus");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 /**
  * GET /network-status
@@ -23,13 +24,13 @@ const { fetchNetworkStatus } = require("../utils/mapNetworkStatus");
  */
 router.get("/", async (req, res, next) => {
   try {
-    const cacheKey = "network-status";
-    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    // No query params affect this response, so every variant (?x=1, ?x=2 ...)
+    // collapses onto the single "network-status" entry.
+    const cacheKey = buildCacheKey(req, { namespace: "network-status", allowedParams: [] });
+    const fresh = isFresh(req);
 
-    const refresh = () => fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
-
-    // Check cache first (unless fresh=true). Stale hits are served immediately
-    // with X-Cache: STALE while a single background refresh runs.
+    // Check cache first (unless fresh=true). A fresh request still repopulates
+    // the normal key below.
     if (!fresh) {
       const cached = cacheService.getWithRevalidation(
         cacheKey,
@@ -42,9 +43,13 @@ router.get("/", async (req, res, next) => {
       }
     }
 
-    const data = await refresh();
-
-    cacheService.setWithRevalidation(cacheKey, data, cacheTTL.networkStatus);
+    // Coalesce concurrent cache misses (and ?fresh=true requests) for the
+    // same key into a single Horizon call.
+    const data = await singleFlight(cacheKey, async () => {
+      const fetched = await fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
+      cacheService.set(cacheKey, fetched, cacheTTL.networkStatus);
+      return fetched;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);

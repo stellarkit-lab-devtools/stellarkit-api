@@ -13,6 +13,7 @@ const { isNativeAsset } = require("../utils/assetHelpers");
 const { formatAmount } = require("../utils/formatAmount");
 const { makeLiquidityPoolNotFoundError } = require("../utils/errors");
 const { isValidPoolId } = require("../utils/validators");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 function makeAssetQueryValidationError(field, value) {
   const err = new Error(
@@ -254,6 +255,326 @@ router.get("/:id/trades", async (req, res, next) => {
     cacheService.set(cacheKey, data, cacheTTL.poolTrades);
     res.set("X-Cache", "MISS");
     return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Pool activity (deposits, withdrawals, lifecycle) ─────────────────────────
+
+/** Horizon effect type → normalised activity type. Trades are deliberately absent. */
+const POOL_ACTIVITY_EFFECT_TYPES = {
+  liquidity_pool_deposited: "deposit",
+  liquidity_pool_withdrew: "withdraw",
+  liquidity_pool_created: "created",
+  liquidity_pool_removed: "removed",
+  liquidity_pool_revoked: "revoked",
+};
+
+const POOL_ACTIVITY_TYPES = Object.values(POOL_ACTIVITY_EFFECT_TYPES);
+
+/** Horizon cannot filter effects by type, so we scan at most this many pages. */
+const POOL_ACTIVITY_MAX_PAGES = 10;
+
+/** Horizon's maximum page size — minimises round-trips while scanning. */
+const POOL_ACTIVITY_PAGE_SIZE = 200;
+
+/**
+ * Parse the optional ?type= filter. Accepts a single type or a comma-separated
+ * list (e.g. ?type=deposit,withdraw). Returns null when no filter is given.
+ *
+ * @param {string|undefined} raw
+ * @returns {Set<string>|null}
+ */
+function parsePoolActivityTypeFilter(raw) {
+  if (raw === undefined) return null;
+  const values = String(raw)
+    .split(",")
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+  const invalid = values.filter((v) => !POOL_ACTIVITY_TYPES.includes(v));
+  if (values.length === 0 || invalid.length > 0) {
+    const err = new Error(
+      `Query parameter 'type' must be one of: ${POOL_ACTIVITY_TYPES.join(", ")}.`
+    );
+    err.isValidation = true;
+    err.field = "type";
+    err.receivedValue = String(raw).slice(0, 50);
+    err.expectedFormat = POOL_ACTIVITY_TYPES.join(" | ");
+    err.status = 400;
+    throw err;
+  }
+  return new Set(values);
+}
+
+/**
+ * Normalise a list of Horizon `{ asset, amount }` reserve entries.
+ *
+ * @param {Array<{asset: string, amount: string}>|undefined} reserves
+ * @returns {Array<{asset: object, amount: string}>|null}
+ */
+function normalizePoolReserves(reserves) {
+  if (!Array.isArray(reserves)) return null;
+  return reserves.map((r) => ({
+    asset: normalizeAssetFromString(r.asset),
+    amount: formatAmount(r.amount),
+  }));
+}
+
+/**
+ * Map a Horizon liquidity-pool effect to the StellarKit activity shape.
+ * `revoked` events report the revoked reserves (paid out to the account as
+ * claimable balances) under reservesReceived and the revoked shares under
+ * sharesRedeemed.
+ *
+ * @param {object} effect - Raw Horizon effect record
+ * @param {string|null} transactionHash
+ * @returns {object}
+ */
+function normalizePoolActivityEffect(effect, transactionHash) {
+  const type = POOL_ACTIVITY_EFFECT_TYPES[effect.type];
+
+  let reservesReceived = null;
+  let sharesRedeemed = null;
+  if (type === "withdraw") {
+    reservesReceived = normalizePoolReserves(effect.reserves_received);
+    sharesRedeemed = formatAmount(effect.shares_redeemed) ?? null;
+  } else if (type === "revoked") {
+    reservesReceived = normalizePoolReserves(effect.reserves_revoked);
+    sharesRedeemed = formatAmount(effect.shares_revoked) ?? null;
+  }
+
+  return {
+    type,
+    account: effect.account || null,
+    reservesDeposited:
+      type === "deposit" ? normalizePoolReserves(effect.reserves_deposited) : null,
+    reservesReceived,
+    sharesReceived: type === "deposit" ? formatAmount(effect.shares_received) ?? null : null,
+    sharesRedeemed,
+    timestamp: toISOTimestamp(effect.created_at),
+    transactionHash,
+  };
+}
+
+/**
+ * Extract the operation ID an effect belongs to, from its operation link or,
+ * failing that, its paging token ("<operationId>-<index>").
+ *
+ * @param {object} effect
+ * @returns {string|null}
+ */
+function effectOperationId(effect) {
+  const href = effect && effect._links && effect._links.operation && effect._links.operation.href;
+  if (href) {
+    const last = String(href).split("?")[0].split("/").filter(Boolean).pop();
+    if (last && /^\d+$/.test(last)) return last;
+  }
+  const token = effect && (effect.paging_token || effect.id);
+  if (token) {
+    const opId = String(token).split("-")[0].replace(/^0+(?=\d)/, "");
+    if (/^\d+$/.test(opId)) return opId;
+  }
+  return null;
+}
+
+/**
+ * Resolve the transaction hash for each effect. Effects do not carry the hash
+ * directly, so we look up the parent operation (deduplicated per request).
+ * A failed lookup yields null rather than failing the whole response.
+ *
+ * @param {object[]} effects
+ * @returns {Promise<Array<string|null>>}
+ */
+async function resolveEffectTransactionHashes(effects) {
+  const lookups = new Map();
+  const lookup = (opId) => {
+    if (!lookups.has(opId)) {
+      lookups.set(
+        opId,
+        server
+          .operations()
+          .operation(opId)
+          .call()
+          .then((op) => (op && op.transaction_hash) || null)
+          .catch(() => null)
+      );
+    }
+    return lookups.get(opId);
+  };
+
+  return Promise.all(
+    effects.map((effect) => {
+      if (effect.transaction_hash) return effect.transaction_hash;
+      const opId = effectOperationId(effect);
+      return opId ? lookup(opId) : null;
+    })
+  );
+}
+
+/**
+ * GET /liquidity-pools/:id/activity
+ *
+ * Returns deposits, withdrawals and lifecycle events (created, removed,
+ * revoked) for a liquidity pool, normalised as:
+ *
+ *   { type, account, reservesDeposited, reservesReceived, sharesReceived,
+ *     sharesRedeemed, timestamp, transactionHash }
+ *
+ * Trade effects are excluded — GET /liquidity-pools/:id/trades covers them.
+ * Amounts are seven-decimal strings and assets use the standard
+ * { code, issuer, type } shape.
+ *
+ * Horizon cannot filter effects by type, so the route scans up to 10 pages of
+ * pool effects. If that cap is hit before `limit` events are found, the
+ * events collected so far are returned with meta.partial: true and a
+ * meta.nextCursor that continues the scan.
+ *
+ * Query params:
+ *   - type   (optional) deposit | withdraw | created | removed | revoked (comma-separated allowed)
+ *   - limit  (number, default 20, max 100)
+ *   - order  ("asc" | "desc", default "desc")
+ *   - cursor (string, optional) — paging token to resume from
+ *   - fresh  (boolean) — bypass the cache read
+ *
+ * Errors:
+ *   - 400 when the pool ID is not 64 hexadecimal characters or ?type= is invalid
+ *   - 404 when the pool does not exist
+ */
+router.get("/:id/activity", async (req, res, next) => {
+  try {
+    const rawId = String(req.params.id);
+    const id = /^[0-9a-fA-F]{64}$/.test(rawId) ? rawId.toLowerCase() : rawId;
+
+    if (!isValidPoolId(id)) {
+      const err = new Error(
+        `"${rawId.slice(0, 70)}" is not a valid liquidity pool ID. Pool IDs are 64-character hexadecimal strings.`
+      );
+      err.isValidation = true;
+      err.field = "id";
+      err.receivedValue = rawId.slice(0, 70);
+      err.expectedFormat = "64-character hexadecimal string";
+      err.status = 400;
+      return next(err);
+    }
+
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+    const typeFilter = parsePoolActivityTypeFilter(req.query.type);
+
+    const cacheKey = buildCacheKey(
+      {
+        query: {
+          limit,
+          order,
+          cursor,
+          type: typeFilter ? [...typeFilter].sort().join(",") : undefined,
+        },
+      },
+      {
+        namespace: `liquidity-pool-activity:${id}`,
+        allowedParams: ["limit", "order", "cursor", "type"],
+      }
+    );
+
+    if (!isFresh(req)) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached.data, { meta: cached.meta });
+      }
+    }
+
+    const matched = [];
+    let pageCursor = cursor;
+    let pagesScanned = 0;
+    let exhausted = false;
+    let lastScannedToken = null;
+    let sawAnyRecord = false;
+
+    while (pagesScanned < POOL_ACTIVITY_MAX_PAGES && matched.length < limit) {
+      let query = server
+        .effects()
+        .forLiquidityPool(id)
+        .limit(POOL_ACTIVITY_PAGE_SIZE)
+        .order(order);
+      if (pageCursor) query = query.cursor(pageCursor);
+
+      let page;
+      try {
+        page = await query.call();
+      } catch (err) {
+        if (err.response && err.response.status === 404) {
+          return next(makeLiquidityPoolNotFoundError(id, NETWORK));
+        }
+        throw err;
+      }
+      pagesScanned++;
+
+      const records = (page && page.records) || [];
+      if (records.length > 0) sawAnyRecord = true;
+
+      for (const effect of records) {
+        lastScannedToken = effect.paging_token || lastScannedToken;
+        const type = POOL_ACTIVITY_EFFECT_TYPES[effect.type];
+        if (!type) continue; // trades and unrelated effects
+        if (typeFilter && !typeFilter.has(type)) continue;
+        matched.push(effect);
+        if (matched.length >= limit) break;
+      }
+
+      if (records.length < POOL_ACTIVITY_PAGE_SIZE) {
+        exhausted = true;
+        break;
+      }
+      pageCursor = records[records.length - 1].paging_token;
+      if (!pageCursor) {
+        exhausted = true;
+        break;
+      }
+    }
+
+    // An empty effect history is indistinguishable from an unknown pool, so
+    // confirm the pool exists before returning an empty list.
+    if (!sawAnyRecord && !cursor) {
+      try {
+        await server.liquidityPools().liquidityPoolId(id).call();
+      } catch (err) {
+        if (err.response && err.response.status === 404) {
+          return next(makeLiquidityPoolNotFoundError(id, NETWORK));
+        }
+        throw err;
+      }
+    }
+
+    const hashes = await resolveEffectTransactionHashes(matched);
+    const events = matched.map((effect, i) => normalizePoolActivityEffect(effect, hashes[i]));
+
+    const complete = matched.length >= limit;
+    const partial = !complete && !exhausted;
+
+    let nextCursor = null;
+    if (complete) {
+      nextCursor = matched[matched.length - 1].paging_token || null;
+    } else if (partial) {
+      nextCursor = lastScannedToken;
+    }
+
+    const payload = {
+      data: { poolId: id, events },
+      meta: {
+        count: events.length,
+        limit,
+        order,
+        type: typeFilter ? [...typeFilter] : null,
+        pagesScanned,
+        partial,
+        nextCursor,
+      },
+    };
+
+    cacheService.set(cacheKey, payload, cacheTTL.poolActivity);
+    res.set("X-Cache", "MISS");
+    return success(res, payload.data, { meta: payload.meta });
   } catch (err) {
     next(err);
   }

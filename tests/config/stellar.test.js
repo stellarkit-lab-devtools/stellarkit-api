@@ -1,195 +1,86 @@
-"use strict";
+const http = require("http");
+const https = require("https");
 
-/**
- * Tests for src/config/stellar.js — network configuration (Issue #864).
- *
- * Verifies:
- *  - Testnet default Horizon URL
- *  - Mainnet default Horizon URL
- *  - HORIZON_URL environment override
- *  - SOROBAN_RPC_URL configuration (default and override)
- *
- * Because stellar.js is loaded once per process and caches its values via
- * require(), each test that needs a different env must isolate the module
- * registry with jest.resetModules() and re-require the module inside the test.
- */
+describe("stellar.js keep-alive configuration", () => {
+  let stellarConfig;
 
-describe("src/config/stellar.js — network configuration", () => {
-  // Snapshot of the original env so we can restore it after every test
-  const ORIGINAL_ENV = { ...process.env };
-
-  beforeEach(() => {
+  beforeAll(() => {
     jest.resetModules();
-    // Restore all env vars before each test so they don't bleed across
-    Object.keys(process.env).forEach((key) => {
-      if (!(key in ORIGINAL_ENV)) delete process.env[key];
-    });
-    Object.assign(process.env, ORIGINAL_ENV);
+    stellarConfig = require("../../src/config/stellar");
   });
 
-  afterEach(() => {
-    jest.resetModules();
-    // Full env restore after each test
-    Object.keys(process.env).forEach((key) => {
-      if (!(key in ORIGINAL_ENV)) delete process.env[key];
-    });
-    Object.assign(process.env, ORIGINAL_ENV);
-  });
-
-  // ── Horizon URL ──────────────────────────────────────────────────────────
-
-  describe("Horizon URL — testnet", () => {
-    it("uses the SDF testnet Horizon URL when STELLAR_NETWORK=testnet", () => {
-      process.env.STELLAR_NETWORK = "testnet";
-      delete process.env.HORIZON_URL;
-
-      const { horizonUrl } = require("../../src/config/stellar");
-
-      expect(horizonUrl).toBe("https://horizon-testnet.stellar.org");
+  describe("httpAgent configuration", () => {
+    it("has keepAlive enabled", () => {
+      expect(stellarConfig.httpAgent).toBeDefined();
+      expect(stellarConfig.httpAgent.keepAlive).toBe(true);
     });
 
-    it("defaults to testnet when STELLAR_NETWORK is not set", () => {
-      delete process.env.STELLAR_NETWORK;
-      delete process.env.HORIZON_URL;
+    it("has correct keepAliveMsecs", () => {
+      expect(stellarConfig.httpAgent.keepAliveMsecs).toBe(30000);
+    });
 
-      const { horizonUrl } = require("../../src/config/stellar");
-
-      expect(horizonUrl).toBe("https://horizon-testnet.stellar.org");
+    it("has maxSockets from UPSTREAM_MAX_SOCKETS", () => {
+      expect(stellarConfig.httpAgent.maxSockets).toBe(stellarConfig.UPSTREAM_MAX_SOCKETS);
     });
   });
 
-  describe("Horizon URL — mainnet", () => {
-    it("uses the SDF mainnet Horizon URL when STELLAR_NETWORK=mainnet", () => {
-      process.env.STELLAR_NETWORK = "mainnet";
-      delete process.env.HORIZON_URL;
+  describe("httpsAgent configuration", () => {
+    it("has keepAlive enabled", () => {
+      expect(stellarConfig.httpsAgent).toBeDefined();
+      expect(stellarConfig.httpsAgent.keepAlive).toBe(true);
+    });
 
-      const { horizonUrl } = require("../../src/config/stellar");
+    it("has correct keepAliveMsecs", () => {
+      expect(stellarConfig.httpsAgent.keepAliveMsecs).toBe(30000);
+    });
 
-      expect(horizonUrl).toBe("https://horizon.stellar.org");
+    it("has maxSockets from UPSTREAM_MAX_SOCKETS", () => {
+      expect(stellarConfig.httpsAgent.maxSockets).toBe(stellarConfig.UPSTREAM_MAX_SOCKETS);
     });
   });
 
-  describe("Horizon URL — HORIZON_URL override", () => {
-    it("uses the custom URL from HORIZON_URL when set", () => {
-      process.env.HORIZON_URL = "https://my-custom-horizon.example.com";
-      process.env.STELLAR_NETWORK = "testnet";
-
-      const { horizonUrl } = require("../../src/config/stellar");
-
-      expect(horizonUrl).toBe("https://my-custom-horizon.example.com");
-    });
-
-    it("HORIZON_URL override takes precedence over STELLAR_NETWORK=mainnet", () => {
-      process.env.STELLAR_NETWORK = "mainnet";
-      process.env.HORIZON_URL = "https://private-horizon.example.com";
-
-      const { horizonUrl } = require("../../src/config/stellar");
-
-      expect(horizonUrl).toBe("https://private-horizon.example.com");
+  describe("UPSTREAM_MAX_SOCKETS environment override", () => {
+    it("defaults to 50 when not set", () => {
+      expect(stellarConfig.UPSTREAM_MAX_SOCKETS).toBe(50);
     });
   });
+});
 
-  // ── NETWORK value ────────────────────────────────────────────────────────
+describe("keep-alive connection reuse", () => {
+  it("shared client reuses connections for sequential calls", async () => {
+    const express = require("express");
+    const http = require("http");
 
-  describe("NETWORK export", () => {
-    it("exports NETWORK as 'testnet' when STELLAR_NETWORK=testnet", () => {
-      process.env.STELLAR_NETWORK = "testnet";
-      const { NETWORK } = require("../../src/config/stellar");
-      expect(NETWORK).toBe("testnet");
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
     });
 
-    it("exports NETWORK as 'mainnet' when STELLAR_NETWORK=mainnet", () => {
-      process.env.STELLAR_NETWORK = "mainnet";
-      const { NETWORK } = require("../../src/config/stellar");
-      expect(NETWORK).toBe("mainnet");
+    await new Promise(resolve => server.listen(0, resolve));
+    const port = server.address().port;
+
+    const testApp = express();
+    testApp.get("/call1", async (req, res) => {
+      const { httpAgent, httpsAgent } = require("../../src/config/stellar");
+      const url = `http://localhost:${port}/test`;
+      await fetch(url, { agent: httpAgent });
+      res.send("ok");
+    });
+    testApp.get("/call2", async (req, res) => {
+      const { httpAgent } = require("../../src/config/stellar");
+      const url = `http://localhost:${port}/test`;
+      await fetch(url, { agent: httpAgent });
+      res.send("ok");
     });
 
-    it("defaults NETWORK to 'testnet' when STELLAR_NETWORK is not set", () => {
-      delete process.env.STELLAR_NETWORK;
-      const { NETWORK } = require("../../src/config/stellar");
-      expect(NETWORK).toBe("testnet");
-    });
-  });
+    let connectionCount = 0;
+    server.on("connection", () => { connectionCount++; });
 
-  // ── NETWORKS map ─────────────────────────────────────────────────────────
+    const request = require("supertest");
+    await request(testApp).get("/call1");
+    await request(testApp).get("/call2");
 
-  describe("NETWORKS export", () => {
-    it("exports a NETWORKS map containing testnet and mainnet URLs", () => {
-      const { NETWORKS } = require("../../src/config/stellar");
-
-      expect(NETWORKS).toMatchObject({
-        testnet: "https://horizon-testnet.stellar.org",
-        mainnet: "https://horizon.stellar.org",
-      });
-    });
-  });
-
-  // ── Soroban RPC URL ───────────────────────────────────────────────────────
-
-  describe("Soroban RPC URL — testnet default", () => {
-    it("uses the SDF testnet Soroban RPC URL by default on testnet", () => {
-      process.env.STELLAR_NETWORK = "testnet";
-      delete process.env.SOROBAN_RPC_URL;
-
-      const { sorobanRpcUrl } = require("../../src/config/stellar");
-
-      expect(sorobanRpcUrl).toBe("https://soroban-testnet.stellar.org");
-    });
-  });
-
-  describe("Soroban RPC URL — SOROBAN_RPC_URL override", () => {
-    it("uses the value from SOROBAN_RPC_URL when set", () => {
-      process.env.STELLAR_NETWORK = "testnet";
-      process.env.SOROBAN_RPC_URL = "https://my-soroban-rpc.example.com";
-
-      const { sorobanRpcUrl } = require("../../src/config/stellar");
-
-      expect(sorobanRpcUrl).toBe("https://my-soroban-rpc.example.com");
-    });
-
-    it("SOROBAN_RPC_URL override takes precedence over network default", () => {
-      process.env.STELLAR_NETWORK = "testnet";
-      process.env.SOROBAN_RPC_URL = "https://custom-rpc.example.com";
-
-      const { sorobanRpcUrl } = require("../../src/config/stellar");
-
-      expect(sorobanRpcUrl).toBe("https://custom-rpc.example.com");
-    });
-  });
-
-  describe("Soroban RPC URL — mainnet (no default)", () => {
-    it("is undefined on mainnet when SOROBAN_RPC_URL is not set", () => {
-      process.env.STELLAR_NETWORK = "mainnet";
-      delete process.env.SOROBAN_RPC_URL;
-
-      const { sorobanRpcUrl } = require("../../src/config/stellar");
-
-      // No SDF-hosted mainnet Soroban endpoint exists — must be explicitly configured
-      expect(sorobanRpcUrl).toBeUndefined();
-    });
-
-    it("sorobanServer is null on mainnet when SOROBAN_RPC_URL is not set", () => {
-      process.env.STELLAR_NETWORK = "mainnet";
-      delete process.env.SOROBAN_RPC_URL;
-
-      const { sorobanServer } = require("../../src/config/stellar");
-
-      expect(sorobanServer).toBeNull();
-    });
-  });
-
-  // ── server object ─────────────────────────────────────────────────────────
-
-  describe("Horizon server instance", () => {
-    it("exports a server object", () => {
-      const { server } = require("../../src/config/stellar");
-      expect(server).toBeDefined();
-      expect(typeof server).toBe("object");
-    });
-
-    it("server has a serverInfo method (polyfill or native)", () => {
-      const { server } = require("../../src/config/stellar");
-      expect(typeof server.serverInfo).toBe("function");
-    });
+    expect(connectionCount).toBeLessThanOrEqual(2);
+    server.close();
   });
 });

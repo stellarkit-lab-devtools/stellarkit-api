@@ -166,6 +166,10 @@ See [Logging Guide](./logging.md) for full details on structured logging, log pa
 
 ## HORIZON_URL
 
+For an ordered list of endpoints and sticky recovery, see
+[Horizon failover](horizon-failover.md). Non-empty `HORIZON_URLS` takes precedence
+over `HORIZON_URL`; `HORIZON_FAILOVER_STICKY_MS` defaults to 60000.
+
 **Variable:** `HORIZON_URL`  
 **Default:** (empty — automatically selected based on `STELLAR_NETWORK`)  
 **Required:** No (leave blank in most cases)
