@@ -593,7 +593,7 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
     validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
-    const axios = require("axios");
+    const { safeFetchToml } = require("../utils/safeFetch");
 
     const checks = {
       accountExists: { passed: false, detail: "Account not found on Stellar network." },
@@ -623,8 +623,7 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
     const tomlUrl = `https://${homeDomain}/.well-known/stellar.toml`;
     let tomlText;
     try {
-      const response = await axios.get(tomlUrl, { timeout: 5000 });
-      tomlText = response.data;
+      tomlText = await safeFetchToml(homeDomain);
       checks.tomlReachable = { passed: true, detail: `stellar.toml fetched from ${tomlUrl}.` };
     } catch (err) {
       return success(res, { verified: false, checks });

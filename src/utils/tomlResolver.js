@@ -1,4 +1,4 @@
-const axios = require("axios");
+const { safeFetchToml } = require("./safeFetch");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 

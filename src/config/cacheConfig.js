@@ -37,7 +37,16 @@ function msToSeconds(ms, defaultMs) {
 
 const globalFallbackMs = parseInt(process.env.CACHE_TTL_MS, 10) || 5000;
 
+// Opt-in stale-while-revalidate window (milliseconds). 0 means disabled.
+const swrParsed = parseInt(process.env.CACHE_SWR_MS, 10);
+const swrMs = Number.isFinite(swrParsed) && swrParsed > 0 ? swrParsed : 0;
+
 const cacheTTL = {
+  /** Stale-while-revalidate window in ms (0 = disabled). */
+  swrMs,
+  /** Alias used by cache service consumers. */
+  staleWhileRevalidate: swrMs,
+
   /** /network-status — live Horizon root payload, 10 s default */
   networkStatus: msToSeconds(
     process.env.CACHE_TTL_NETWORK_STATUS_MS,

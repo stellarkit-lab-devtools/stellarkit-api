@@ -32,10 +32,14 @@ router.get("/", async (req, res, next) => {
     // Check cache first (unless fresh=true). A fresh request still repopulates
     // the normal key below.
     if (!fresh) {
-      const cached = cacheService.get(cacheKey);
-      if (cached) {
-        res.set("X-Cache", "HIT");
-        return success(res, cached);
+      const cached = cacheService.getWithRevalidation(
+        cacheKey,
+        cacheTTL.networkStatus,
+        refresh,
+      );
+      if (cached.value !== undefined) {
+        res.set("X-Cache", cached.state);
+        return success(res, cached.value);
       }
     }
 
