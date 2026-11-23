@@ -5607,6 +5607,83 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/token-holdings
+ *
+ * Returns the account's non-native asset balances (token holdings) with
+ * issuer metadata resolved from stellar.toml where available.  This is the
+ * asset-only view that a portfolio tracker needs — native XLM is excluded.
+ *
+ * Each entry includes:
+ *   asset        — { code, issuer, type }
+ *   balance      — seven-decimal string
+ *   limit        — trustline limit (seven-decimal string)
+ *   isAuthorized — boolean | null
+ *   toml         — resolved TOML metadata (name, desc, image) or null
+ *
+ * Cached for CACHE_TTL_ASSET_MS (default 30 s). ?fresh=true bypasses cache.
+ * Returns 404 when the account does not exist.
+ */
+router.get("/:id/token-holdings", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `token-holdings:${id}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+    const formatted = formatAccountBalances(account);
+
+    const holdings = await Promise.all(
+      (formatted.assets || []).map(async (a) => {
+        let toml = null;
+        try {
+          if (a.asset.issuer) {
+            const result = await fetchStellarTomlResult(a.asset.issuer);
+            if (result && result.parsed) {
+              const t = normaliseStellarToml(result.parsed);
+              toml = {
+                name: t?.name || null,
+                desc: t?.desc || null,
+                image: t?.image || null,
+              };
+            }
+          }
+        } catch (_) {
+          // TOML resolution is best-effort.
+        }
+        return {
+          asset: {
+            code: a.asset.code,
+            issuer: a.asset.issuer,
+            type: a.asset.type,
+          },
+          balance: a.balance,
+          limit: a.limit,
+          isAuthorized: a.isAuthorized,
+          toml,
+        };
+      }),
+    );
+
+    const data = { accountId: id, holdings, count: holdings.length };
+    cacheService.set(cacheKey, data, cacheTTL.asset);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * Extracts the ledger sequence encoded in a Horizon operation ID.
  * Horizon operation IDs are TOIDs: the ledger sequence occupies the high 32 bits.
  *

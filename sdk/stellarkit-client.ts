@@ -47,6 +47,8 @@ interface RequestOptions {
   method?: string;
   params?: Record<string, string | number | boolean | null | undefined> | null;
   body?: unknown;
+  /** When true, bypass the client-side response cache for this single call. */
+  fresh?: boolean;
 }
 
 /** Context passed to `onRequest` hooks. Mutate `headers` to add request headers. */
@@ -78,6 +80,14 @@ export interface ClientHooks {
 /** Called when a hook itself throws; hook failures never fail the SDK call. */
 export type HookErrorHandler = (error: unknown, hookName: string) => void;
 
+/** Optional client-side response cache configuration. */
+export interface ClientCacheConfig {
+  /** How long a cached GET response stays fresh, in milliseconds. Default: 60000 (60 s). */
+  ttlMs?: number;
+  /** Maximum cache entries before the least-recently-used entry is evicted. Default: 200. */
+  maxEntries?: number;
+}
+
 /**
  * StellarKit API Client for TypeScript
  *
@@ -87,6 +97,11 @@ export class StellarKitClient {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
   private readonly fetchImplementation: FetchFunction;
+  private readonly _cacheConfig: ClientCacheConfig | null;
+  private readonly _cacheTtlMs: number;
+  private readonly _cacheMaxEntries: number;
+  private readonly _cache: Map<string, { data: unknown; expiresAt: number }>;
+  private readonly _inFlight: Map<string, Promise<unknown>>;
 
   /**
    * Create a new StellarKit API client.
@@ -94,11 +109,18 @@ export class StellarKitClient {
    * @param options.baseUrl - The base URL of the StellarKit API (e.g. 'https://api.stellarkit.io')
    * @param options.apiKey - Optional API key for authentication
    * @param options.fetch - Optional fetch-compatible function for HTTP requests
+   * @param options.cache - Optional client-side GET response cache.  When set,
+   *   successful GET responses are cached by URL with LRU eviction at
+   *   `maxEntries` (default 200).  Identical in-flight requests share one
+   *   fetch.  Errors are never cached.  A per-call `{ fresh: true }` bypasses
+   *   the cache.  This cache is local to this client instance only — other
+   *   instances or server-side caches are unaffected.
    */
-  constructor({ baseUrl, apiKey, fetch: fetchImplementation }: {
+  constructor({ baseUrl, apiKey, fetch: fetchImplementation, cache }: {
     baseUrl: string;
     apiKey?: string;
     fetch?: FetchFunction;
+    cache?: ClientCacheConfig;
   }) {
     if (!baseUrl) {
       throw new Error("baseUrl is required");
@@ -106,6 +128,11 @@ export class StellarKitClient {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
     this.fetchImplementation = resolveFetch(fetchImplementation);
+    this._cacheConfig = cache ?? null;
+    this._cacheTtlMs = cache?.ttlMs ?? 60_000;
+    this._cacheMaxEntries = cache?.maxEntries ?? 200;
+    this._cache = new Map();
+    this._inFlight = new Map();
   }
 
   /**
@@ -119,7 +146,7 @@ export class StellarKitClient {
    */
   private async _request<T>(
     path: string,
-    { method = "GET", params = null, body = null }: RequestOptions = {},
+    { method = "GET", params = null, body = null, fresh = false }: RequestOptions = {},
   ): Promise<T> {
     let urlString = `${this.baseUrl}${path}`;
 
@@ -136,6 +163,17 @@ export class StellarKitClient {
         : `${this.baseUrl}${path}?${url.searchParams.toString()}`;
     }
 
+    // ── Client-side cache (GET only) ─────────────────────────────────────────
+    if (this._cacheConfig && method === "GET") {
+      if (!fresh) {
+        const cached = this._cacheGet(urlString);
+        if (cached !== undefined) return cached as T;
+
+        const inFlight = this._inFlight.get(urlString);
+        if (inFlight) return inFlight as Promise<T>;
+      }
+    }
+
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "Accept": "application/json",
@@ -145,55 +183,78 @@ export class StellarKitClient {
       headers["x-api-key"] = this.apiKey;
     }
 
-    const response = await request(this.fetchImplementation, urlString, {
-      method,
-      headers,
-      body,
-    }, "onRequest");
-
-    let response: Response;
-    try {
-      response = await fetch(urlString, {
+    const startedAt = Date.now();
+    const promise = (async () => {
+      const response = await request(this.fetchImplementation, urlString, {
         method,
         headers,
-        body: requestBody,
+        body,
       });
-    } catch (error) {
-      await this.runHooks<StellarKitError>(this.hooks.onError, error instanceof StellarKitError
-        ? error
-        : new StellarKitError(String((error as Error)?.message || error), 0, "NetworkError"), "onError");
-      throw error;
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new StellarKitError(
+          result?.error?.message || response.statusText,
+          response.status,
+          result?.error?.type || "ApiError",
+        );
+      }
+
+      return result.data as T;
+    })();
+
+    if (this._cacheConfig && method === "GET") {
+      this._inFlight.set(urlString, promise);
+      promise
+        .then((data) => {
+          if (!fresh) this._cacheSet(urlString, data);
+        })
+        .catch(() => {
+          // Errors are never cached.
+        })
+        .finally(() => {
+          this._inFlight.delete(urlString);
+        });
     }
 
-    const result = await response.json();
-    const durationMs = Date.now() - startedAt;
-    await this.runHooks<ResponseHookInfo>(this.hooks.onResponse, {
-      url: urlString,
-      method,
-      status: response.status,
-      durationMs,
-    }, "onResponse");
+    return promise;
+  }
 
-    if (!response.ok) {
-      const error = new StellarKitError(
-        result.error?.message || response.statusText,
-        response.status,
-        result.error?.type || "ApiError",
-      );
-      await this.runHooks<StellarKitError>(this.hooks.onError, error, "onError");
-      throw error;
+  /** @private Read a URL from the LRU cache, or undefined on miss/expiry. */
+  private _cacheGet(url: string): unknown {
+    const entry = this._cache.get(url);
+    if (!entry) return undefined;
+    if (Date.now() >= entry.expiresAt) {
+      this._cache.delete(url);
+      return undefined;
     }
+    // Move to end (most-recently-used) for LRU eviction.
+    this._cache.delete(url);
+    this._cache.set(url, entry);
+    return entry.data;
+  }
 
-    return result.data;
+  /** @private Store a URL → data mapping, evicting the LRU entry at maxEntries. */
+  private _cacheSet(url: string, data: unknown): void {
+    if (this._cache.has(url)) this._cache.delete(url);
+    this._cache.set(url, { data, expiresAt: Date.now() + this._cacheTtlMs });
+    while (this._cache.size > this._cacheMaxEntries) {
+      const oldest = this._cache.keys().next().value;
+      if (oldest === undefined) break;
+      this._cache.delete(oldest);
+    }
   }
 
   /**
    * Service health check.
    *
+   * @param options - Optional per-call options.
+   * @param options.fresh - When true, bypass the client-side response cache.
    * @returns Health status
    */
-  async getHealth(): Promise<HealthResponse["data"]> {
-    return this._request("/health");
+  async getHealth(options?: { fresh?: boolean }): Promise<HealthResponse["data"]> {
+    return this._request("/health", { fresh: options?.fresh });
   }
 
   // ── Network ────────────────────────────────────────────────────────────────
@@ -205,7 +266,7 @@ export class StellarKitClient {
    */
   async getNetworkStatus(options?: { fresh?: boolean }): Promise<NetworkStatusResponse["data"]> {
     const params = options?.fresh ? { fresh: true } : null;
-    return this._request("/network-status", { params });
+    return this._request("/network-status", { params, fresh: options?.fresh });
   }
 
   /**

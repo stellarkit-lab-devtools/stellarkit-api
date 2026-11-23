@@ -43,6 +43,8 @@ const cacheTTL = require("./config/cacheConfig");
 const { cacheKey: buildCacheKey } = require("./utils/cacheKey");
 
 const rateLimiter = require("./middleware/rateLimiter");
+const { buildDisabledRoutesMiddleware } = require("./middleware/disabledRoutes");
+const readinessProbe = require("./services/readinessProbe");
 const restrictHttpMethods = require("./middleware/restrictHttpMethods");
 const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
@@ -315,8 +317,28 @@ app.get("/health", async (req, res) => {
   });
 });
 
+// ── Liveness probe — no upstream calls, always 200 while the process runs ──
+app.get("/health/live", (_req, res) => {
+  res.status(200).json({ status: "alive" });
+});
+
+// ── Readiness probe — 200 only when config is loaded and Horizon probe is fresh
+app.get("/health/ready", (_req, res) => {
+  const status = readinessProbe.getStatus();
+  if (status === "ready") {
+    return res.status(200).json({ status: "ready" });
+  }
+  return res.status(503).json({ status });
+});
+
 // ── API Key Authentication ─────────────────────────────────────────────────────
 app.use(apiKeyMiddleware);
+
+// ── Disabled Routes ──────────────────────────────────────────────────────────
+// Mount before route handlers so disabled routes never make upstream calls.
+const disabledRoutesEnv = process.env.DISABLED_ROUTES || "";
+const disabledRoutesMiddleware = buildDisabledRoutesMiddleware(disabledRoutesEnv);
+app.use(disabledRoutesMiddleware);
 
 // ── API Routes ───────────────────────────────────────────────────────────────
 app.use("/network-status", networkStatusRouter);
@@ -423,6 +445,8 @@ app.get("/", (req, res) => {
       network: process.env.STELLAR_NETWORK || "testnet",
       endpoints: [
         { method: "GET", path: "/health", description: "Service health check" },
+        { method: "GET", path: "/health/live", description: "Liveness probe (always 200, no upstream calls)" },
+        { method: "GET", path: "/health/ready", description: "Readiness probe (200 when Horizon probe is fresh)" },
         { method: "GET", path: "/network-status", description: "Latest ledger, fees, and protocol info" },
         { method: "GET", path: "/fee-estimate", description: "Fee tiers for transaction submission" },
         { method: "GET", path: "/fee-estimate?operations=N", description: "Fee estimate for N operations" },
@@ -441,6 +465,7 @@ app.get("/", (req, res) => {
         { method: "POST", path: "/accounts/multisig-info", description: "Batch multisig configuration lookup for multiple accounts" },
         { method: "GET", path: "/account/:id/pool-positions", description: "Calculate liquidity pool positions and share values" },
         { method: "GET", path: "/account/:id/liquidity-contribution", description: "Aggregate liquidity pool contributions by pool and asset" },
+        { method: "GET", path: "/account/:id/token-holdings", description: "Non-native asset balances with resolved TOML metadata" },
         { method: "GET", path: "/account/:id/pending-effects", description: "Submitted operations that have not yet produced confirmed effects" },
         { method: "GET", path: "/account/:id/historical-balances", description: "Balance snapshots over time reconstructed from payment and trade history" },
         { method: "GET", path: "/account/:id/transactions/search", description: "Search account transactions by memo content" },
@@ -543,6 +568,8 @@ app.get("/", (req, res) => {
           description: "Real-time stream of live Stellar ledger updates",
         },
         { method: "GET", path: "/health", description: "Service health check" },
+        { method: "GET", path: "/health/live", description: "Liveness probe (always 200)" },
+        { method: "GET", path: "/health/ready", description: "Readiness probe (200 when ready)" },
         {
           method: "GET",
           path: "/network-status",
@@ -656,6 +683,11 @@ app.get("/", (req, res) => {
           method: "GET",
           path: "/account/:id/liquidity-contribution",
           description: "Aggregate liquidity pool contributions by pool and asset",
+        },
+        {
+          method: "GET",
+          path: "/account/:id/token-holdings",
+          description: "Non-native asset balances with resolved TOML metadata",
         },
         {
           method: "GET",
@@ -857,6 +889,39 @@ app.use((req, res) => {
 // ── Global Error Handler ──────────────────────────────────────────────────────
 app.use(errorHandler);
 
+// ── Disabled Routes: warn on unmatched patterns ─────────────────────────────
+// After all routes are mounted, check whether any DISABLED_ROUTES patterns
+// match no registered route.  We collect mount points from the Express router
+// stack (the `path` property on each layer).
+if (disabledRoutesEnv) {
+  const registeredPaths = [];
+  if (app._router && app._router.stack) {
+    for (const layer of app._router.stack) {
+      if (typeof layer.path === "string" && layer.path) {
+        registeredPaths.push(layer.path);
+      } else if (layer.route && layer.route.path) {
+        registeredPaths.push(layer.route.path);
+      }
+    }
+  }
+  const patterns = disabledRoutesEnv.split(",").map((s) => s.trim()).filter(Boolean);
+  for (const pattern of patterns) {
+    let matches = false;
+    if (/^[A-Z]+\s+\//.test(pattern)) {
+      const pathPart = pattern.split(/\s+/).slice(1).join(" ");
+      matches = registeredPaths.some((p) => p === pathPart || p.startsWith(pathPart.replace(/\/$/, "") + "/") || pathPart.startsWith(p.replace(/\/$/, "") + "/"));
+    } else if (pattern.endsWith("/*")) {
+      const prefix = pattern.slice(0, -1);
+      matches = registeredPaths.some((p) => p === prefix.slice(0, -1) || p.startsWith(prefix));
+    } else {
+      matches = registeredPaths.some((p) => p === pattern || p.startsWith(pattern + "/") || pattern.startsWith(p + "/"));
+    }
+    if (!matches) {
+      logger.warn(`DISABLED_ROUTES: pattern "${pattern}" matches no registered routes`);
+    }
+  }
+}
+
 // ── Start ────────────────────────────────────────────────────────────────────
 function startServer({
   appInstance = app,
@@ -879,6 +944,10 @@ function startServer({
     warmStartupCaches({ logger }).catch((err) => {
       logger.error(`[CACHE WARM] startup warmup failed: ${err.message}`);
     });
+
+    // Start the background readiness probe so /health/ready reflects
+    // Horizon connectivity without per-request upstream calls.
+    readinessProbe.start(() => server);
   });
 
   setupWebSocketHook(httpServer);

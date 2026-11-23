@@ -57,7 +57,23 @@ const client = new StellarKitClient({
 });
 ```
 
-## Usage Examples
+### Client-Side Response Cache
+
+Set `cache: { ttlMs, maxEntries }` on the constructor to cache successful GET responses by URL. This is useful when dashboards call the same endpoint from many components at once.
+
+```javascript
+const client = new StellarKitClient({
+  baseUrl: "http://localhost:3000",
+  cache: { ttlMs: 5000, maxEntries: 200 },
+});
+```
+
+- **LRU eviction** at `maxEntries` (default 200) — the least-recently-used entry is evicted when the cache is full.
+- **In-flight dedup** — identical concurrent requests share a single fetch, so ten components calling `getHealth()` at the same time produce one network request.
+- **Errors are never cached** — only successful (2xx) responses are stored.
+- **Per-call bypass** — pass `{ fresh: true }` to any method to skip the cache for that single call: `await client.getHealth({ fresh: true })`.
+- **Off by default** — no caching occurs unless `cache` is configured.
+- **Instance-local** — the cache affects only this client instance. Other instances and the server-side cache are unaffected.
 
 ### Network & Fees
 
