@@ -1205,7 +1205,8 @@ router.get("/:code/:issuer/burn-history", async (req, res, next) => {
     next(err);
   }
 });
- *
+
+/**
  * Returns the accounts with the highest trading volume for the specified asset
  * in the last 24 hours. Each entry includes the account address, buy volume,
  * sell volume, net volume, and trade count. Traders are ranked by total volume
@@ -1374,10 +1375,7 @@ router.get("/:code/:issuer/top-traders", async (req, res, next) => {
  * - 7d  — 7-day window,  daily buckets
  * - 30d — 30-day window, daily buckets (default)
  */
-const HOLDER_GROWTH_RESOLUTIONS = {
-  "7d":  { windowMs: 7  * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
-  "30d": { windowMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
-};
+// HOLDER_GROWTH_RESOLUTIONS is already defined above; reuse it.
 
 /**
  * Buckets change_trust operations into a holder-growth time series.
@@ -1393,41 +1391,7 @@ const HOLDER_GROWTH_RESOLUTIONS = {
  * @param {number} bucketMs           - Width of each time bucket in milliseconds.
  * @returns {Array<{ timestamp: string, holderCount: number, change: number }>}
  */
-function aggregateTrustlineGrowth(operations, windowStartMs, bucketMs) {
-  const buckets = new Map();
-
-  for (const op of operations) {
-    const opTime = new Date(op.created_at).getTime();
-    if (!Number.isFinite(opTime) || opTime < windowStartMs) continue;
-
-    const bucketStart = Math.floor(opTime / bucketMs) * bucketMs;
-
-    if (!buckets.has(bucketStart)) {
-      buckets.set(bucketStart, { bucketStart, change: 0 });
-    }
-
-    const bucket = buckets.get(bucketStart);
-    if (parseFloat(op.limit) > 0) {
-      bucket.change += 1;
-    } else {
-      bucket.change -= 1;
-    }
-  }
-
-  const sorted = Array.from(buckets.values()).sort(
-    (a, b) => a.bucketStart - b.bucketStart,
-  );
-
-  let cumulativeHolders = 0;
-  return sorted.map((bucket) => {
-    cumulativeHolders += bucket.change;
-    return {
-      timestamp: new Date(bucket.bucketStart).toISOString(),
-      holderCount: cumulativeHolders,
-      change: bucket.change,
-    };
-  });
-}
+// aggregateTrustlineGrowth is already defined above; reuse it.
 
 /**
  * GET /asset/:code/:issuer/holder-growth
@@ -1476,9 +1440,8 @@ const validResolutions = ["7d", "30d", "90d"];
       throw err;
     }
 
-    const cacheKey = `asset-issuance-history:${assetCode}:${issuer}:${resolution}`;
-    const fresh = isFreshRequest(req.query);
     const cacheKey = `asset-holder-growth:${assetCode}:${issuer}:${resolution}`;
+    const fresh = isFreshRequest(req.query);
 
     if (!fresh) {
       const cached = cacheService.get(cacheKey);

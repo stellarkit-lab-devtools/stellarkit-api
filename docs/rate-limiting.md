@@ -1,153 +1,111 @@
 # Rate Limiting
 
-StellarKit API applies per-IP rate limiting to protect the service and the upstream Stellar Horizon servers it depends on. This guide covers the default limits, how to configure them, the headers clients should read to track usage, and how to handle a `429` response.
+StellarKit uses a **cost-based token-bucket** rate limiter. Each request is
+charged a cost based on its route, and the total cost per window must not
+exceed the budget.
 
-> **Building a high-volume app?** See **[Staying Within Rate Limits: A Practical Strategies Guide](rate-limiting-strategies.md)** for request batching, caching, `?fresh=true` timing, polling cadence, and a complete exponential-backoff implementation.
+## How it works
 
----
+| Concept | Value |
+|---|---|
+| Budget per window | `RATE_LIMIT_BUDGET` (defaults to `RATE_LIMIT_MAX`, i.e. 100 for global, 500 per account) |
+| Window duration | `RATE_LIMIT_WINDOW_MS` (default: 900000 ms / 15 min) |
+| Client identification | `X-Account-ID` header (if present), otherwise `req.ip` |
+| Default cost | 1 |
+| Cache-hit refund | Down to cost 1 when `X-Cache: HIT` |
 
-## Default Limits
+## Cost table
 
-Rate limits are tracked per client IP address within a sliding time window (15 minutes by default). Three limiters are active:
+Costs are defined in `src/config/routeCosts.js`.
 
-| Limiter | Applies to | Default max requests / window |
-| --- | --- | --- |
-| Global | Every route except `/health` | `100` |
-| Account summary | `GET /account/:id/summary` | `20` |
-| Asset holders | `GET /asset/:code/:issuer/holders` | `10` |
+### Default cost (1)
 
-The account summary and asset holders limiters exist because those endpoints fan out into several Horizon requests per call and are more expensive to serve. `/health` is exempt from rate limiting so uptime checks are never blocked.
+All routes not listed below cost 1 per request.
 
----
+### Aggregate / fan-out cost (5)
 
-## Configuration
+Endpoints that make multiple Horizon calls, scan large histories, or combine
+several data sources:
 
-Rate limiting behavior is controlled via environment variables — no code changes are required.
+| Method | Route pattern | Cost |
+|---|---|---|
+| GET | `/account/:id/counterparties` | 5 |
+| GET | `/account/:id/pool-positions` | 5 |
+| GET | `/account/:id/liquidity-contribution` | 5 |
+| GET | `/account/:id/balance-velocity` | 5 |
+| GET | `/account/:id/historical-balances` | 5 |
+| GET | `/account/:id/reserve-breakdown` | 5 |
+| GET | `/account/:id/summary` | 5 |
+| GET | `/account/:id/timeline` | 5 |
+| GET | `/account/:id/volume` | 5 |
+| GET | `/account/:id/subentry-health` | 5 |
+| GET | `/account/:id/operation-breakdown` | 5 |
+| GET | `/account/:id/risk` | 5 |
+| GET | `/account/:id/payment-counterparty-risk` | 5 |
+| GET | `/account/:id/offers-summary` | 5 |
+| GET | `/account/:id/merge-eligibility` | 5 |
+| GET | `/account/:id/inactivity` | 5 |
+| GET | `/account/:id/trustline-health` | 5 |
+| POST | `/account/:id/multisig-plan` | 5 |
+| GET | `/dex/arbitrage/:code/:issuer` | 5 |
+| GET | `/dex/top-markets` | 5 |
+| GET | `/dex/volume-leaders` | 5 |
+| GET | `/asset/:code/:issuer/holders` | 5 |
+| GET | `/network/soroban-stats` | 5 |
+| GET | `/liquidity-pools/:id/profitability` | 5 |
+| GET | `/liquidity-pools/:id/reserve-ratio` | 5 |
+| GET | `/liquidity-pools/:id/activity` | 5 |
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `RATE_LIMIT_WINDOW_MS` | `900000` (15 minutes) | Length of the rate-limit window, in milliseconds. Applies to all three limiters. |
-| `RATE_LIMIT_MAX` | `100` | Maximum requests per window per IP for the **global** limiter. |
+### Batch cost (item count)
 
-The account summary (`20`) and asset holders (`10`) limits are currently fixed and not configurable via environment variables — only their window length follows `RATE_LIMIT_WINDOW_MS`.
+Batch endpoints cost the number of items in the request body:
 
-Example `.env`:
+| Method | Route pattern | Body field | Cost |
+|---|---|---|---|
+| POST | `/accounts/native-balances` | `addresses` | `addresses.length` |
+| POST | `/accounts/effects` | `addresses` | `addresses.length` |
+| POST | `/accounts/trust-status` | `addresses` | `addresses.length` |
+| POST | `/accounts/signers` | `addresses` | `addresses.length` |
+| POST | `/accounts/transaction-counts` | `addresses` | `addresses.length` |
+| POST | `/accounts/multisig-info` | `accountIds` | `accountIds.length` |
+| POST | `/transactions/batch-status` | `hashes` | `hashes.length` |
 
-```bash
-# 10-minute window, 200 requests per window on the global limiter
-RATE_LIMIT_WINDOW_MS=600000
-RATE_LIMIT_MAX=200
-```
+## Cache-hit refund
 
-Both variables are optional; the server falls back to the defaults above when they're unset, invalid, or non-positive. Restart the service after changing them for the new values to take effect.
+When a response is served from cache (`X-Cache: HIT`), the charged cost is
+refunded down to 1. This means cached responses only consume the default cost,
+regardless of the route's nominal cost.
 
----
+## Response headers
 
-## Client IPs Behind a Reverse Proxy (`TRUST_PROXY`)
-
-Limits are bucketed by `req.ip`. When the API runs behind nginx, a load balancer
-or a PaaS router, the TCP peer is the proxy, not the client — so `TRUST_PROXY`
-must tell Express which proxies may report the real client IP via
-`X-Forwarded-For`.
-
-| Value | Effect |
-| --- | --- |
-| `false` (default) | `X-Forwarded-For` is ignored. A spoofed header cannot change a client's bucket. |
-| `1` (hop count) | The address added by the nearest proxy is used. Set it to the number of proxies you run. |
-| `loopback` | Proxies on `127.0.0.0/8` / `::1` are trusted (proxy on the same host). |
-| `10.0.0.0/8,192.168.1.10` | Only the listed IPs / CIDR ranges are trusted as proxies. |
-
-```bash
-# Single load balancer in front of the API
-TRUST_PROXY=1
-```
-
-> **Shared-IP pitfall:** behind a proxy with `TRUST_PROXY=false`, every client
-> appears to have the proxy's IP and they all share **one** bucket of
-> `RATE_LIMIT_MAX` requests. One noisy client can then rate-limit everyone.
-
-> **`TRUST_PROXY=true` is rejected at startup.** Trusting every hop means the
-> left-most `X-Forwarded-For` entry — which any client can set — becomes
-> `req.ip`, so a caller could choose a new bucket on every request. Use a hop
-> count or explicit CIDRs instead.
-
-See [Running Behind a Reverse Proxy](deployment.md#running-behind-a-reverse-proxy) for deployment examples.
-
----
-
-## Response Headers
-
-Because of how the limiter is configured, StellarKit API does **not** send `X-RateLimit-*` headers on ordinary, successful requests — only when a request is rejected for exceeding the limit. When that happens, the `429` response includes:
+Every response includes:
 
 | Header | Description |
-| --- | --- |
-| `X-RateLimit-Limit` | The max requests allowed in the current window for the limiter that was triggered (e.g. `100` for the global limiter, `20` for account summary). |
-| `X-RateLimit-Remaining` | Always `0` on a `429` response — the request was rejected because the budget was exhausted. |
-| `X-RateLimit-Reset` | ISO 8601 timestamp of when the current window resets and the counter goes back to `0`. |
-| `Retry-After` | Seconds to wait before retrying, equivalent to the remaining time in the current window. |
+|---|---|
+| `X-RateLimit-Cost` | The cost charged for this request |
+| `X-RateLimit-Limit` | The total budget for this client |
+| `X-RateLimit-Remaining` | Remaining budget in the current window |
+| `X-RateLimit-Reset` | ISO 8601 timestamp when the window resets |
 
-Since there is no way to read remaining quota from a successful response, treat a `429` as the first signal that you're near (or over) the limit, and use `Retry-After` / `X-RateLimit-Reset` to pace subsequent requests. If you need proactive usage tracking, count requests on the client side against the configured `RATE_LIMIT_MAX` and window.
+When the budget is exhausted, the response is `429 Too Many Requests` with:
 
----
+| Header | Description |
+|---|---|
+| `Retry-After` | Seconds until the window resets |
 
-## Example Rate Limit Error Response
+## Environment variables
 
-```
-HTTP/1.1 429 Too Many Requests
-Content-Type: application/json
-Retry-After: 900
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 2026-07-24T15:32:10.000Z
-```
+| Variable | Default | Description |
+|---|---|---|
+| `RATE_LIMIT_BUDGET` | `RATE_LIMIT_MAX` (100) | Token budget per window for requests without `X-Account-ID` |
+| `RATE_LIMIT_MAX` | 100 | Legacy fallback for `RATE_LIMIT_BUDGET` |
+| `ACCOUNT_RATE_LIMIT_MAX` | 500 | Token budget per window for requests with `X-Account-ID` |
+| `RATE_LIMIT_WINDOW_MS` | 900000 (15 min) | Duration of the rate-limit window |
 
-```json
-{
-  "success": false,
-  "error": {
-    "type": "RateLimitExceeded",
-    "message": "Too many requests, please try again later.",
-    "retryAfter": 900,
-    "resetAt": "2026-07-24T15:32:10.000Z"
-  }
-}
-```
+## Adding new routes
 
-- `error.retryAfter` — seconds until the window resets (same value as the `Retry-After` header).
-- `error.resetAt` — ISO 8601 timestamp of the reset (same value as `X-RateLimit-Reset`).
+To assign a cost to a new route, add it to `src/config/routeCosts.js`:
 
----
-
-## Recommended Retry Strategy
-
-1. **Don't retry immediately in a loop.** On a `429`, read `Retry-After` (seconds) or `X-RateLimit-Reset` (timestamp) and wait at least that long before the next attempt.
-2. **Use exponential backoff with jitter** for repeated failures (including transient `5xx` errors), rather than retrying at a fixed interval:
-   ```js
-   async function requestWithBackoff(fn, attempt = 0) {
-     try {
-       return await fn();
-     } catch (err) {
-       if (err.status !== 429 || attempt >= 5) throw err;
-
-       const retryAfterMs = err.retryAfter
-         ? err.retryAfter * 1000
-         : Math.min(2 ** attempt * 1000, 30_000);
-       const jitter = Math.random() * 250;
-
-       await new Promise((resolve) => setTimeout(resolve, retryAfterMs + jitter));
-       return requestWithBackoff(fn, attempt + 1);
-     }
-   }
-   ```
-3. **Cache and batch where possible.** Endpoints like `/network-status` and `/fee-estimate` are already cached server-side (see `CACHE_TTL_MS` in the [README](../README.md#environment-variables-reference)); avoid polling them faster than that TTL.
-4. **Spread load across time** for bulk operations (e.g. scanning many accounts) instead of firing requests in parallel bursts — a small delay between requests keeps you comfortably under the window limit.
-5. **Surface `RateLimitExceeded` distinctly** in your own error handling so it's not confused with validation or Horizon errors — see the [Error Reference](error-reference.md#ratelimiterror) for the full error shape.
-
----
-
-## Related Docs
-
-- [Staying Within Rate Limits: A Practical Strategies Guide](rate-limiting-strategies.md) — batching, caching, `?fresh=true` timing, polling priority, and exponential backoff
-- [Error Reference](error-reference.md) — all error types and status codes
-- [Getting Started Guide](getting-started.md) — initial setup and environment variables
-- [Environment Configuration](environment-configuration.md) — full `.env` reference
+- Add to `AGGREGATE_ROUTES` for cost-5 endpoints.
+- Add to `BATCH_ROUTES` for batch endpoints (cost = body item count).
+- If not listed, the route defaults to cost 1.

@@ -40,7 +40,7 @@ const { getHorizonHealth } = require("./utils/horizonHealth");
 const cacheTTL = require("./config/cacheConfig");
 const { cacheKey: buildCacheKey } = require("./utils/cacheKey");
 
-const rateLimiter = require("./middleware/rateLimiter");
+const rateLimiter = require("./middleware/costRateLimiter");
 const restrictHttpMethods = require("./middleware/restrictHttpMethods");
 const contentTypeValidator = require("./middleware/contentTypeValidator");
 const bodySizeLimit = require("./middleware/bodySizeLimit");
@@ -275,7 +275,20 @@ app.use(coerceQueryParams);
 app.use(routeCounter);
 app.use((req, res, next) => {
   const originalJson = res.json.bind(res);
-  res.json = (payload) => originalJson(normalizeAmountFields(payload));
+  res.json = function (payload) {
+    const normalized = normalizeAmountFields(payload);
+
+    // ?pretty=true returns indented JSON; any other value returns compact.
+    const pretty = req.query && req.query.pretty === "true";
+
+    if (pretty) {
+      const body = JSON.stringify(normalized, null, 2);
+      res.set("Content-Type", "application/json; charset=utf-8");
+      return res.send(body);
+    }
+
+    return originalJson(normalized);
+  };
   next();
 });
 
@@ -404,6 +417,9 @@ app.use("/soroban", sorobanRouter);
 app.use("/network", etagMiddleware, networkRouter);
 const transactionEffectsRouter = require("./routes/transaction.effects");
 app.use("/transaction", etagMiddleware, transactionEffectsRouter);
+
+const transactionParticipantsRouter = require("./routes/transaction.participants");
+app.use("/transaction", transactionParticipantsRouter);
 
 // ── Root
 app.get("/", (req, res) => {
@@ -579,6 +595,12 @@ app.get("/", (req, res) => {
           path: "/transaction/:hash/effects",
           description:
             "Ledger effects produced by a transaction hash (normalized)",
+        },
+        {
+          method: "GET",
+          path: "/transaction/:hash/participants",
+          description:
+            "Accounts involved in a transaction with their roles (source, destination, fee_payer, issuer, claimant, balance_change, contract)",
         },
 
         {

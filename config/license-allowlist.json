@@ -1,0 +1,13 @@
+{
+  "allowed": [
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Apache-2.0",
+    "0BSD",
+    "CC0-1.0",
+    "BlueOak-1.0.0"
+  ],
+  "exceptions": {}
+}

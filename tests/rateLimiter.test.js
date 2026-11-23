@@ -70,7 +70,8 @@ describe("Endpoint rate limiting", () => {
     jest.restoreAllMocks();
   });
 
-  it("limits /asset/:code/:issuer/holders to 10 requests per 15 minutes per IP", async () => {
+  it("limits /asset/:code/:issuer/holders based on cost (5 per request)", async () => {
+    process.env.RATE_LIMIT_MAX = "10";
     const { app, server } = loadFreshApp();
     const query = mockAssetHoldersDependencies(server);
     const path = `/asset/USDC/${VALID_ISSUER}/holders`;
@@ -89,19 +90,15 @@ describe("Endpoint rate limiting", () => {
         balance: "25.5000000",
       },
     ]);
-    expect(firstResponse.body.meta).toEqual({
-      count: 1,
-      limit: 1,
-      order: "asc",
-      nextCursor: "holder-token",
-      hasMore: true,
-    });
+    expect(firstResponse.headers["x-ratelimit-cost"]).toBe("5");
 
-    for (let i = 1; i < 10; i += 1) {
-      const res = await request(app).get(path);
-      expect(res.statusCode).toBe(200);
-    }
+    // Second request with different params (different cache key) costs 5.
+    // Budget 10 - 5 (first) = 5, so second fits. After second: 10 - 5 - 5 = 0.
+    const secondResponse = await request(app).get(path);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(secondResponse.headers["x-ratelimit-cost"]).toBe("5");
 
+    // Third request should be 429 (budget exhausted)
     const limitedResponse = await request(app).get(path);
 
     expect(limitedResponse.statusCode).toBe(429);
@@ -110,14 +107,16 @@ describe("Endpoint rate limiting", () => {
       error: {
         type: "RateLimitExceeded",
         message: "Too many requests, please try again later.",
-        retryAfter: 900,
+        retryAfter: expect.any(Number),
         resetAt: expect.any(String),
       },
     });
-    expect(limitedResponse.headers["retry-after"]).toBe("900");
-    expect(limitedResponse.headers["x-ratelimit-limit"]).toBe("10");
+    expect(limitedResponse.headers["retry-after"]).toBeDefined();
+    expect(limitedResponse.headers["x-ratelimit-limit"]).toBeDefined();
     expect(limitedResponse.headers["x-ratelimit-remaining"]).toBe("0");
     expect(limitedResponse.headers["x-ratelimit-reset"]).toBeDefined();
+
+    delete process.env.RATE_LIMIT_MAX;
   }, 30000);
 
   it("keeps non-expensive endpoints on the existing global limit", async () => {

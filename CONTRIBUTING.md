@@ -114,6 +114,16 @@ Read it before you add an endpoint.
 
 ## 🧱 Code Style
 
+### Before adding a dependency
+
+Every new production dependency affects the supply chain. Before adding one:
+
+1. **Check the license.** Run `npm run licenses` after installing. The allowlist is `config/license-allowlist.json`. Allowed licences: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, CC0-1.0, BlueOak-1.0.0. If the package uses a disallowed licence, add a written justification to the `exceptions` map in that file (package name → reason).
+2. **Generate the SBOM.** Run `npm run sbom` to regenerate the CycloneDX SBOM in `reports/`.
+3. **Commit.** Include the updated `package-lock.json` and any `config/license-allowlist.json` changes in your PR.
+
+Both commands are local — they read `node_modules` and `config/license-allowlist.json`. No network calls are made.
+
 - An `.editorconfig` file is included at the repo root. Make sure your editor supports it (most do natively or via a plugin: [editorconfig.org](https://editorconfig.org)). It enforces: 2-space indentation, LF line endings, UTF-8 charset, and a final newline on all files.
 - **Line endings:** This repo enforces LF (`\n`) line endings via `.gitattributes`. If you're on Windows, configure Git to not convert line endings: `git config core.autocrlf false`. Your editor should also be set to save files with LF endings.
 - Use `async/await` — no raw promise chains
