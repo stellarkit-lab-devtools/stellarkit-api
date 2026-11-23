@@ -64,6 +64,7 @@ This project is ideal for:
 | GET | `/` | Lists available API endpoints | — |
 | GET | `/health` | Service health check | — |
 | GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
+| GET | `/network-status/:sequence` | Normalized data for one closed ledger (cached for one hour) | `sequence` |
 | GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
 | GET | `/network/validators` | Current validator list grouped by organisation | `fresh` |
 | GET | `/network/base-fee` | Current network base fee in stroops and XLM | `fresh` |
