@@ -10,6 +10,18 @@ const { parseStellarAsset } = require("../utils/asset");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 
+function makeOrderBookEmptyError(sellAsset, buyAsset) {
+  const assetCode = (asset) =>
+    typeof asset === "string" ? asset.split(":")[0] : asset.getCode();
+  const sellCode = assetCode(sellAsset);
+  const buyCode = assetCode(buyAsset);
+  return {
+    type: "OrderBookEmpty",
+    message: `No active order book found for ${sellCode}/${buyCode}.`,
+    suggestion: "Ensure both assets have active offers on the Stellar DEX.",
+  };
+}
+
 /**
  * @route GET /dex/arbitrage/:assetCode/:assetIssuer
  * @desc Finds circular strict-receive paths that start and end in the same asset and flags potentially profitable loops.
@@ -307,28 +319,96 @@ router.get("/imbalance/:sellAsset/:buyAsset", async (req, res, next) => {
 });
 
 /**
- * @route GET /dex/depth/:sellAsset/:buyAsset
- * @desc Summarizes order book depth with side counts, cumulative volumes, top 5 bid/ask levels, and a depth rating.
- * @param {import("express").Request} req - Express request object.
+ * @route GET /dex/order-book-depth/:sellAsset/:buyAsset
+ * @desc Returns order book levels with cumulative volumes and the best-price spread.
  * @param {string} req.params.sellAsset - Asset to sell in `CODE:ISSUER` format or `XLM:native`.
  * @param {string} req.params.buyAsset - Asset to buy in `CODE:ISSUER` format or `XLM:native`.
- * @param {import("express").Response} res - Express response object.
- * @param {import("express").NextFunction} next - Express next middleware function.
- * @returns {Promise<void>} JSON payload containing `bidsCount`, `asksCount`, volume totals, top levels, and `depthRating` (`deep`, `moderate`, `shallow`).
- * @example
- * curl -s "http://localhost:3000/dex/depth/NOVA:GBNOVAISSUERFICTIONALKEY0000000000000000000000000000/FUSD:GBFUSDFICTIONALISSUERKEY000000000000000000000000000000" | jq
- * // {
- * //   "success": true,
- * //   "data": {
- * //     "bidsCount": 64,
- * //     "asksCount": 59,
- * //     "totalBidVolume": "72450.1200000",
- * //     "totalAskVolume": "69110.0000000",
- * //     "top5Bids": [{ "price": "0.9912000", "amount": "1200.0000000" }],
- * //     "top5Asks": [{ "price": "0.9948000", "amount": "980.0000000" }],
- * //     "depthRating": "deep"
- * //   }
- * // }
+ * @param {number} [req.query.depth=20] - Number of bid and ask levels to return (max 200).
+ */
+router.get("/order-book-depth/:sellAsset/:buyAsset", async (req, res, next) => {
+  const { sellAsset, buyAsset } = req.params;
+  let selling;
+  let buying;
+
+  try {
+    selling = parseStellarAsset(sellAsset);
+    buying = parseStellarAsset(buyAsset);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "ValidationError",
+        message: err.message,
+      },
+    });
+  }
+
+  let depth;
+  try {
+    depth =
+      req.query.depth === undefined ? 20 : validateLimit(req.query.depth, 200);
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "ValidationError",
+        message: err.message,
+      },
+    });
+  }
+
+  try {
+    const orderBook = await server.orderbook(selling, buying).limit(depth).call();
+    const bids = orderBook.bids || [];
+    const asks = orderBook.asks || [];
+
+    if (bids.length === 0 && asks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(selling, buying),
+      });
+    }
+
+    const withCumulativeVolume = (orders) => {
+      let cumulativeVolume = 0;
+      const volumes = new Array(orders.length);
+      for (let index = orders.length - 1; index >= 0; index--) {
+        cumulativeVolume += Number(orders[index].amount);
+        volumes[index] = cumulativeVolume.toFixed(7);
+      }
+      return orders.map((order, index) => ({
+        price: order.price,
+        amount: order.amount,
+        cumulativeVolume: volumes[index],
+      }));
+    };
+    const bestBid = bids.length ? Number(bids[0].price) : null;
+    const bestAsk = asks.length ? Number(asks[0].price) : null;
+
+    return success(res, {
+      bids: withCumulativeVolume(bids),
+      asks: withCumulativeVolume(asks),
+      bestBid: bestBid === null ? null : bestBid.toFixed(7),
+      bestAsk: bestAsk === null ? null : bestAsk.toFixed(7),
+      spread:
+        bestBid === null || bestAsk === null
+          ? null
+          : (bestAsk - bestBid).toFixed(7),
+    });
+  } catch (err) {
+    if (err.response && err.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: makeOrderBookEmptyError(selling, buying),
+      });
+    }
+    return next(err);
+  }
+});
+
+/**
+ * @route GET /dex/depth/:sellAsset/:buyAsset
+ * @desc Summarizes order book depth with side counts, top 5 bid/ask levels, and a depth rating.
  */
 router.get("/depth/:sellAsset/:buyAsset", async (req, res, next) => {
   try {

@@ -134,6 +134,7 @@ This project is ideal for:
 | GET | `/dex/price/:sellAsset/:buyAsset` | Effective exchange rate via best DEX path | `amount` |
 | GET | `/dex/spread/:sellAsset/:buyAsset` | Bid-ask spread for a trading pair | — |
 | GET | `/dex/depth/:sellAsset/:buyAsset` | Full order book depth analysis | — |
+| GET | `/dex/order-book-depth/:sellAsset/:buyAsset` | Order book levels with cumulative volumes and spread | `depth` |
 | GET | `/dex/imbalance/:sellAsset/:buyAsset` | Buy/sell pressure imbalance detection | — |
 | GET | `/dex/arbitrage/:assetCode/:assetIssuer` | Circular arbitrage path discovery | — |
 | GET | `/dex/top-markets` | Top markets ranked by recent trade activity | `limit` |
