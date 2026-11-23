@@ -5,6 +5,7 @@
  */
 const redactSeeds = require("../utils/redactSeeds");
 const logger = require("../utils/logger");
+const i18n = require("./i18n");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 const StellarKitError = require("../utils/StellarKitError");
@@ -102,7 +103,10 @@ function errorResponse(res, status, body) {
     metrics.incrementErrorByEndpoint(method, routePattern, status);
   }
 
-  return res.status(status).json(body);
+  // Apply i18n translations to error messages
+  const translatedBody = req ? withTranslations(body, req) : body;
+
+  return res.status(status).json(translatedBody);
 }
 
 const ACCOUNT_MERGE_FAILURES = {
@@ -198,6 +202,31 @@ function buildTransactionSubmissionFailedError(horizonError) {
  */
 function withRequestId(body, req) {
   return { ...body, requestId: req.requestId || null };
+}
+
+/**
+ * Add translated message and suggestion to error body if i18n is available.
+ * Falls back to original values if translation fails or i18n not set.
+ */
+function withTranslations(body, req) {
+  if (!req.i18n || !req.i18n.t) {
+    return body;
+  }
+
+  const error = body && body.error;
+  if (!error || !error.type) {
+    return body;
+  }
+
+  const translated = req.i18n.t(error.type);
+  if (translated && translated.message) {
+    error.message = translated.message;
+  }
+  if (translated && translated.suggestion) {
+    error.suggestion = translated.suggestion;
+  }
+
+  return body;
 }
 
 function errorHandler(err, req, res, next) {

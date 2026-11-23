@@ -1,0 +1,42 @@
+{
+  "Unauthorized": {
+    "message": "Authentication required.",
+    "suggestion": "Provide a valid API key via the X-API-Key header."
+  },
+  "InsufficientScope": {
+    "message": "Insufficient permissions for this operation.",
+    "suggestion": "Use an API key with the required scope (admin)."
+  },
+  "RateLimitExceeded": {
+    "message": "Too many requests, please try again later.",
+    "suggestion": "Wait before retrying or reduce request frequency."
+  },
+  "NotFound": {
+    "message": "The requested resource was not found.",
+    "suggestion": "Verify the identifier is correct and exists on the network."
+  },
+  "AccountNotFound": {
+    "message": "Account not found on the Stellar network.",
+    "suggestion": "Verify the account address is correct and that it has been funded."
+  },
+  "AssetNotFound": {
+    "message": "Asset not found.",
+    "suggestion": "Verify the asset code and issuer address are correct."
+  },
+  "TrustlineNotFound": {
+    "message": "Trustline does not exist for this asset.",
+    "suggestion": "The account must establish a trustline before holding this asset."
+  },
+  "InvalidParameter": {
+    "message": "Invalid parameter value provided.",
+    "suggestion": "Check the parameter format and try again."
+  },
+  "ValidationError": {
+    "message": "Request validation failed.",
+    "suggestion": "Review the field errors and correct the request payload."
+  },
+  "HorizonTimeout": {
+    "message": "The Stellar network did not respond in time.",
+    "suggestion": "Retry the request. If the issue persists, check network status."
+  }
+}
