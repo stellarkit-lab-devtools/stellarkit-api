@@ -1,5 +1,6 @@
 const { Asset } = require("@stellar/stellar-sdk");
 const { validateAssetCode, validateAccountId } = require("./validators");
+const { isNativeAsset } = require("./assetHelpers");
 
 /**
  * Parses a Stellar asset string in the format "CODE:ISSUER" or "XLM:native".
@@ -44,7 +45,7 @@ function getAssetType(code) {
 
 function normalizeAsset(assetCode, assetIssuer, assetType) {
   const type = assetType || getAssetType(assetCode);
-  if (type === "native" || assetCode === undefined || assetCode === null) {
+  if (isNativeAsset({ type }) || assetCode === undefined || assetCode === null) {
     return { code: "XLM", issuer: null, type: "native" };
   }
   return {
@@ -55,7 +56,7 @@ function normalizeAsset(assetCode, assetIssuer, assetType) {
 }
 
 function normalizeAssetFromString(assetString) {
-  if (!assetString || assetString === "native") {
+  if (!assetString || isNativeAsset(assetString)) {
     return { code: "XLM", issuer: null, type: "native" };
   }
   const parts = assetString.split(":");

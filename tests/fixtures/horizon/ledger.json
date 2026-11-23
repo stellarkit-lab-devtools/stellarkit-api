@@ -1,0 +1,17 @@
+{
+  "sequence": 1000,
+  "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "closed_at": "2024-01-01T00:00:00Z",
+  "successful_transaction_count": 10,
+  "failed_transaction_count": 1,
+  "operation_count": 25,
+  "tx_set_operation_count": 30,
+  "total_coins": "100000000.0000000",
+  "fee_pool": "100.0000000",
+  "base_fee_in_stroops": 100,
+  "base_reserve_in_stroops": 10000000,
+  "max_tx_set_size": 1000,
+  "protocol_version": 21,
+  "header_xdr": "AAAAAA==",
+  "paging_token": "1000"
+}

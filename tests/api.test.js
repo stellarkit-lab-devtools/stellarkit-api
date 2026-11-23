@@ -23,6 +23,13 @@ describe("StellarKit API", () => {
     });
 
     it("warms network-status and fee-estimate on startup so the next request is a cache hit", async () => {
+      jest.spyOn(server, "serverInfo").mockResolvedValue({
+        horizon_version: "2.33.0",
+        core_version: "stellar-core 21.0.0",
+        network_passphrase: "Test SDF Network ; September 2015",
+        core_latest_ledger: 12345,
+        history_latest_ledger: 12345,
+      });
       jest.spyOn(server, "ledgers").mockReturnValue({
         order: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
@@ -63,7 +70,7 @@ describe("StellarKit API", () => {
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(networkStatusCache.get("network-status")).toBeTruthy();
-      expect(feeEstimateCache.get("fee-estimate:1")).toBeTruthy();
+      expect(feeEstimateCache.get("fee-estimate?operations=1")).toBeTruthy();
       expect(logger.log).toHaveBeenCalledWith(expect.stringContaining("[CACHE WARM]"));
 
       const warmReq = await request(httpServer).get("/network-status");
@@ -76,6 +83,20 @@ describe("StellarKit API", () => {
 
   // ── Health ─────────────────────────────────────────────────────────────────
   describe("GET /health", () => {
+    beforeEach(() => {
+      jest.spyOn(server, "serverInfo").mockResolvedValue({
+        horizon_version: "2.33.0",
+        core_version: "stellar-core 21.0.0",
+        network_passphrase: "Test SDF Network ; September 2015",
+        core_latest_ledger: 1,
+        history_latest_ledger: 1,
+      });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
     it("returns 200 with required health fields", async () => {
       const res = await request(app).get("/health");
 
@@ -113,6 +134,11 @@ describe("StellarKit API", () => {
       } else {
         process.env.NODE_ENV = originalNodeEnv;
       }
+      jest.restoreAllMocks();
+    });
+
+    beforeEach(() => {
+      jest.spyOn(server, "serverInfo").mockResolvedValue({ horizon_version: "2.33.0" });
     });
 
     it("returns CORS headers for configured origins and supports preflight requests", async () => {
@@ -148,10 +174,30 @@ describe("StellarKit API", () => {
       expect(res.headers["access-control-allow-origin"]).toBe("*");
     });
 
-    it("returns and echoes a request ID header", async () => {
+    it("returns and echoes a valid request ID header", async () => {
       const res = await request(app).get("/health").set("X-Request-ID", "req-123");
       expect(res.statusCode).toBe(200);
       expect(res.headers["x-request-id"]).toBe("req-123");
+    });
+
+    it("generates a new UUID when request ID header is oversized", async () => {
+      const res = await request(app)
+        .get("/health")
+        .set("X-Request-ID", "a".repeat(150));
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-request-id"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
+    });
+
+    it("generates a new UUID when request ID header contains invalid characters", async () => {
+      const res = await request(app)
+        .get("/health")
+        .set("X-Request-ID", "invalid;id<script>");
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["x-request-id"]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      );
     });
   });
 
@@ -206,10 +252,10 @@ describe("StellarKit API", () => {
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("InvalidAccountId");
       expect(res.body.error.message).toBe(
-        "'NOT_A_VALID_KEY' is not a valid Stellar account address."
+        "The supplied value is not a valid Stellar account address."
       );
       expect(res.body.error.suggestion).toBe(
-        "Account addresses start with G and are 56 characters long."
+        "Use a public account address starting with G."
       );
     });
   });
@@ -335,7 +381,7 @@ image = "https://example.com/test.png"
       expect(res.body.success).toBe(false);
       expect(res.body.error.type).toBe("InvalidAccountId");
       expect(res.body.error.message).toBe(
-        "'BADKEY123' is not a valid Stellar account address."
+        "The supplied value is not a valid Stellar account address."
       );
     });
 
@@ -391,19 +437,18 @@ image = "https://example.com/test.png"
   });
 
   describe("Content-Type validation", () => {
-    it("returns 400 when a POST request sends a non-JSON body", async () => {
+    it("returns 415 when a POST request sends a non-JSON body", async () => {
       const res = await request(app)
         .post("/future-route")
         .set("Content-Type", "text/plain")
         .send("not json");
 
-      expect(res.statusCode).toBe(400);
+      expect(res.statusCode).toBe(415);
       expect(res.body).toEqual({
         success: false,
         error: {
-          type: "ValidationError",
-          message:
-            "Content-Type must be application/json for requests with a body.",
+          type: "InvalidContentType",
+          message: "Content-Type must be application/json.",
         },
       });
     });
@@ -976,17 +1021,19 @@ image = "https://example.com/test.png"
   });
 
   // ── HTTP Parameter Pollution ────────────────────────────────────────────────
-  describe("HTTP Parameter Pollution (hpp) protection", () => {
-    it("handles duplicate non-whitelisted params safely", async () => {
+  describe("HTTP Parameter Pollution protection", () => {
+    it("rejects duplicate non-whitelisted params with 400", async () => {
       const res = await request(app).get("/health?foo=1&foo=2");
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error.type).toBe("DuplicateParameter");
     });
 
-    it("handles duplicate whitelisted params safely", async () => {
+    it("rejects duplicate whitelisted params with 400", async () => {
       const res = await request(app).get(
         "/fee-estimate?operations=1&operations=2",
       );
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error.type).toBe("DuplicateParameter");
     });
   });
 
@@ -1695,52 +1742,50 @@ describe("GET /account/:id/trustlines", () => {
   });
 });
 
-  // ── Ledger Sequence to Date Converter ────────────────────────────────────
-  describe("GET /account/ledger/:sequence/date", () => {
-    it("returns approximate date for a valid ledger sequence", async () => {
-      const res = await request(app)
-        .get("/account/ledger/50000000/date")
-        .expect(200);
+describe("GET /account/ledger/:sequence/date", () => {
+  it("returns approximate date for a valid ledger sequence", async () => {
+    const res = await request(app)
+      .get("/account/ledger/50000000/date")
+      .expect(200);
 
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.sequence).toBe(50000000);
-      expect(res.body.data.approximate_date).toBeDefined();
-      expect(res.body.data.unix_timestamp).toBeDefined();
-      expect(res.body.data.human_readable).toBeDefined();
-      expect(res.body.data.note).toContain("approximate");
-    });
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.sequence).toBe(50000000);
+    expect(res.body.data.approximate_date).toBeDefined();
+    expect(res.body.data.unix_timestamp).toBeDefined();
+    expect(res.body.data.human_readable).toBeDefined();
+    expect(res.body.data.note).toContain("approximate");
+  });
 
-    it("returns correct genesis date for sequence 1", async () => {
-      const res = await request(app)
-        .get("/account/ledger/1/date")
-        .expect(200);
+  it("returns correct genesis date for sequence 1", async () => {
+    const res = await request(app)
+      .get("/account/ledger/1/date")
+      .expect(200);
 
-      expect(res.body.data.approximate_date).toBe("2015-09-30T00:00:00.000Z");
-    });
+    expect(res.body.data.approximate_date).toBe("2015-09-30T00:00:00.000Z");
+  });
 
-    it("returns 400 for non-numeric sequence", async () => {
-      const res = await request(app)
-        .get("/account/ledger/abc/date")
-        .expect(400);
+  it("returns 400 for non-numeric sequence", async () => {
+    const res = await request(app)
+      .get("/account/ledger/abc/date")
+      .expect(400);
 
-      expect(res.body.success).toBe(false);
-      expect(res.body.error.field).toBe("sequence");
-    });
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.field).toBe("sequence");
+  });
 
-    it("returns 400 for sequence 0", async () => {
-      const res = await request(app)
-        .get("/account/ledger/0/date")
-        .expect(400);
+  it("returns 400 for sequence 0", async () => {
+    const res = await request(app)
+      .get("/account/ledger/0/date")
+      .expect(400);
 
-      expect(res.body.success).toBe(false);
-    });
+    expect(res.body.success).toBe(false);
+  });
 
-    it("returns 400 for negative sequence", async () => {
-      const res = await request(app)
-        .get("/account/ledger/-5/date")
-        .expect(400);
+  it("returns 400 for negative sequence", async () => {
+    const res = await request(app)
+      .get("/account/ledger/-5/date")
+      .expect(400);
 
-      expect(res.body.success).toBe(false);
-    });
+    expect(res.body.success).toBe(false);
   });
 });

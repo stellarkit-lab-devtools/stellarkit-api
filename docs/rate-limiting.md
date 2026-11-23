@@ -2,6 +2,8 @@
 
 StellarKit API applies per-IP rate limiting to protect the service and the upstream Stellar Horizon servers it depends on. This guide covers the default limits, how to configure them, the headers clients should read to track usage, and how to handle a `429` response.
 
+> **Building a high-volume app?** See **[Staying Within Rate Limits: A Practical Strategies Guide](rate-limiting-strategies.md)** for request batching, caching, `?fresh=true` timing, polling cadence, and a complete exponential-backoff implementation.
+
 ---
 
 ## Default Limits
@@ -38,6 +40,38 @@ RATE_LIMIT_MAX=200
 ```
 
 Both variables are optional; the server falls back to the defaults above when they're unset, invalid, or non-positive. Restart the service after changing them for the new values to take effect.
+
+---
+
+## Client IPs Behind a Reverse Proxy (`TRUST_PROXY`)
+
+Limits are bucketed by `req.ip`. When the API runs behind nginx, a load balancer
+or a PaaS router, the TCP peer is the proxy, not the client — so `TRUST_PROXY`
+must tell Express which proxies may report the real client IP via
+`X-Forwarded-For`.
+
+| Value | Effect |
+| --- | --- |
+| `false` (default) | `X-Forwarded-For` is ignored. A spoofed header cannot change a client's bucket. |
+| `1` (hop count) | The address added by the nearest proxy is used. Set it to the number of proxies you run. |
+| `loopback` | Proxies on `127.0.0.0/8` / `::1` are trusted (proxy on the same host). |
+| `10.0.0.0/8,192.168.1.10` | Only the listed IPs / CIDR ranges are trusted as proxies. |
+
+```bash
+# Single load balancer in front of the API
+TRUST_PROXY=1
+```
+
+> **Shared-IP pitfall:** behind a proxy with `TRUST_PROXY=false`, every client
+> appears to have the proxy's IP and they all share **one** bucket of
+> `RATE_LIMIT_MAX` requests. One noisy client can then rate-limit everyone.
+
+> **`TRUST_PROXY=true` is rejected at startup.** Trusting every hop means the
+> left-most `X-Forwarded-For` entry — which any client can set — becomes
+> `req.ip`, so a caller could choose a new bucket on every request. Use a hop
+> count or explicit CIDRs instead.
+
+See [Running Behind a Reverse Proxy](deployment.md#running-behind-a-reverse-proxy) for deployment examples.
 
 ---
 
@@ -113,6 +147,7 @@ X-RateLimit-Reset: 2026-07-24T15:32:10.000Z
 
 ## Related Docs
 
+- [Staying Within Rate Limits: A Practical Strategies Guide](rate-limiting-strategies.md) — batching, caching, `?fresh=true` timing, polling priority, and exponential backoff
 - [Error Reference](error-reference.md) — all error types and status codes
 - [Getting Started Guide](getting-started.md) — initial setup and environment variables
 - [Environment Configuration](environment-configuration.md) — full `.env` reference

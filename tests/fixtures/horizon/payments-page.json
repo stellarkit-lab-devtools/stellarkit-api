@@ -1,0 +1,23 @@
+{
+  "_embedded": {
+    "records": [
+      {
+        "id": "100-0",
+        "paging_token": "100-0",
+        "type": "payment",
+        "transaction_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "created_at": "2024-01-01T00:00:00Z",
+        "from": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H",
+        "to": "GACQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKBIFAUCQKG7N",
+        "asset_type": "native",
+        "amount": "10.0000000",
+        "source_account": "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "/payments?limit=1"
+    }
+  }
+}

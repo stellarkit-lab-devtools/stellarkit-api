@@ -7,4 +7,6 @@ function createCache() {
 module.exports = {
   networkStatusCache: createCache(),
   feeEstimateCache: createCache(),
+  contractDependenciesCache: createCache(),
+  complianceCheckCache: new NodeCache({ stdTTL: 30, checkperiod: 12, useClones: false }),
 };

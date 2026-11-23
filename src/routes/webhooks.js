@@ -1,0 +1,435 @@
+const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
+const router  = express.Router();
+const webhookStore = require("../services/webhookStore");
+const { success }  = require("../utils/response");
+const StellarKitError = require("../utils/StellarKitError");
+const webhookSignatureAuth = require("../middleware/webhookSignatureAuth");
+
+/**
+ * Validate a webhook registration request body.
+ * Returns an error message string when invalid, null when valid.
+ *
+ * @param {object} body
+ * @returns {string|null}
+ */
+function validateRegistration(body) {
+  if (!body || typeof body !== "object") {
+    return "Request body is required.";
+  }
+  if (!body.url || typeof body.url !== "string" || body.url.trim() === "") {
+    return "url is required and must be a non-empty string.";
+  }
+  // Simple URL format check — must start with http:// or https://
+  if (!/^https?:\/\/.+/.test(body.url.trim())) {
+    return "url must be a valid HTTP or HTTPS URL.";
+  }
+  if (!Array.isArray(body.events) || body.events.length === 0) {
+    return "events must be a non-empty array of event type strings.";
+  }
+  if (body.events.some((e) => typeof e !== "string" || e.trim() === "")) {
+    return "Each event in the events array must be a non-empty string.";
+  }
+  if (body.accountId !== undefined && body.accountId !== null) {
+    if (typeof body.accountId !== "string" || body.accountId.trim() === "") {
+      return "accountId must be a non-empty string when provided.";
+    }
+  }
+  if (body.minAmount !== undefined && body.minAmount !== null && body.minAmount !== "") {
+    const parsedMinAmount = Number(body.minAmount);
+    if (!Number.isFinite(parsedMinAmount) || parsedMinAmount < 0) {
+      return "minAmount must be a non-negative number or numeric string when provided.";
+    }
+  }
+  if (body.assetCode !== undefined && body.assetCode !== null && body.assetCode !== "") {
+    if (typeof body.assetCode !== "string" || body.assetCode.trim() === "") {
+      return "assetCode must be a non-empty string when provided.";
+    }
+  }
+  if (body.assetIssuer !== undefined && body.assetIssuer !== null && body.assetIssuer !== "") {
+    if (typeof body.assetIssuer !== "string" || body.assetIssuer.trim() === "") {
+      return "assetIssuer must be a non-empty string when provided.";
+    }
+  }
+  return null;
+}
+
+/**
+ * Public list shape for a stored webhook entry.
+ *
+ * @param {object} entry
+ * @returns {{ webhookId: string, url: string, events: string[], accountId: string|null, status: string, createdAt: string }}
+ */
+function toWebhookListItem(entry) {
+  return {
+    webhookId: entry.webhookId,
+    url: entry.url,
+    events: entry.events,
+    accountId: entry.accountId ?? null,
+    status: entry.status ?? "active",
+    minAmount: entry.minAmount ?? null,
+    assetCode: entry.assetCode ?? null,
+    assetIssuer: entry.assetIssuer ?? null,
+    createdAt: entry.createdAt || entry.registeredAt,
+  };
+}
+
+/**
+ * Build the webhook delivery health summary from the current store state.
+ *
+ * @returns {{
+ *   totalWebhooks: number,
+ *   activeWebhooks: number,
+ *   pausedWebhooks: number,
+ *   totalDeliveries: number,
+ *   successfulDeliveries: number,
+ *   failedDeliveries: number,
+ *   retryQueueSize: number,
+ *   topFailingWebhooks: Array<{ webhookId: string, failureCount: number }>
+ * }}
+ */
+function buildWebhookStats() {
+  const webhooks = webhookStore.list();
+
+  const totalWebhooks = webhooks.length;
+  const activeWebhooks = webhooks.filter((w) => (w.status ?? "active") === "active").length;
+  const pausedWebhooks = webhooks.filter((w) => w.status === "paused").length;
+
+  const deliveries = typeof webhookStore.listDeliveries === "function"
+    ? webhookStore.listDeliveries()
+    : [];
+
+  const totalDeliveries = deliveries.length;
+  const successfulDeliveries = deliveries.filter((d) => d.status === "success" || d.success === true).length;
+  const failedDeliveries = deliveries.filter((d) => d.status === "failed" || d.success === false).length;
+
+  const retryQueueSize = typeof webhookStore.retryQueueSize === "function"
+    ? webhookStore.retryQueueSize()
+    : deliveries.filter((d) => d.status === "retrying" || d.retryScheduled === true).length;
+
+  const failureCounts = new Map();
+  for (const delivery of deliveries) {
+    const failed = delivery.status === "failed" || delivery.success === false;
+    if (!failed || !delivery.webhookId) continue;
+    failureCounts.set(delivery.webhookId, (failureCounts.get(delivery.webhookId) || 0) + 1);
+  }
+
+  const topFailingWebhooks = Array.from(failureCounts.entries())
+    .map(([webhookId, failureCount]) => ({ webhookId, failureCount }))
+    .sort((a, b) => b.failureCount - a.failureCount)
+    .slice(0, 5);
+
+  return {
+    totalWebhooks,
+    activeWebhooks,
+    pausedWebhooks,
+    totalDeliveries,
+    successfulDeliveries,
+    failedDeliveries,
+    retryQueueSize,
+    topFailingWebhooks,
+  };
+}
+
+/**
+ * POST /webhooks/register
+ *
+ * Register a new webhook via the /register path.
+ * Accepts { url, events, accountId? }, validates that url is a valid https URL,
+ * stores the registration, and returns { webhookId, url, events, accountId }.
+ *
+ * Response 201:
+ *   { "success": true, "data": { "webhookId", "url", "events", "accountId" } }
+ *
+ * Response 400: invalid URL or missing required fields.
+ */
+router.post("/register", validateBody(schemas.webhook), (req, res, next) => {
+  try {
+    const body = req.body || {};
+
+    if (!body.url || typeof body.url !== "string" || body.url.trim() === "") {
+      return next(new StellarKitError("url is required and must be a non-empty string.", 400, "ValidationError"));
+    }
+    if (!/^https:\/\/.+/.test(body.url.trim())) {
+      return next(new StellarKitError("url must be a valid https URL.", 400, "ValidationError"));
+    }
+    if (!Array.isArray(body.events) || body.events.length === 0) {
+      return next(new StellarKitError("events must be a non-empty array of event type strings.", 400, "ValidationError"));
+    }
+    if (body.events.some((e) => typeof e !== "string" || e.trim() === "")) {
+      return next(new StellarKitError("Each event in the events array must be a non-empty string.", 400, "ValidationError"));
+    }
+
+    const entry = webhookStore.register({
+      url: body.url.trim(),
+      events: body.events.map((e) => String(e).trim()),
+      accountId: body.accountId ? String(body.accountId).trim() : null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        webhookId: entry.webhookId,
+        url: entry.url,
+        events: entry.events,
+        accountId: entry.accountId,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /webhooks
+ *
+ * Register a new webhook. The caller provides a callback URL and the list of
+ * event types to subscribe to.  A unique webhookId is assigned and returned.
+ *
+ * Request body:
+ *   {
+ *     "url":    "https://example.com/hooks",
+ *     "events": ["payment", "account_funded"]
+ *   }
+ *
+ * Response 201:
+ *   {
+ *     "success": true,
+ *     "data": {
+ *       "webhookId":    "wh_...",
+ *       "url":          "https://example.com/hooks",
+ *       "events":       ["payment", "account_funded"],
+ *       "registeredAt": "2026-08-26T00:00:00.000Z"
+ *     }
+ *   }
+ *
+ * Response 400: { "success": false, "error": { "type": "ValidationError", ... } }
+ */
+router.post("/", webhookSignatureAuth, validateBody(schemas.webhook), (req, res, next) => {
+  try {
+    const validationError = validateRegistration(req.body);
+    if (validationError) {
+      return next(new StellarKitError(validationError, 400, "ValidationError"));
+    }
+
+    const entry = webhookStore.register({
+      url:       req.body.url.trim(),
+      events:    req.body.events.map((e) => String(e).trim()),
+      accountId: req.body.accountId ? String(req.body.accountId).trim() : null,
+      minAmount: req.body.minAmount ?? null,
+      assetCode: req.body.assetCode ?? null,
+      assetIssuer: req.body.assetIssuer ?? null,
+    });
+
+    return res.status(201).json({ success: true, data: entry });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /webhooks
+ *
+ * List registered webhooks. Optional `?accountId=` filters to that account only.
+ * An empty match returns `{ webhooks: [], total: 0 }` (never 404).
+ *
+ * Response 200:
+ *   {
+ *     "success": true,
+ *     "data": {
+ *       "webhooks": [
+ *         { "webhookId": "wh_...", "url": "...", "events": [...], "accountId": "G...", "createdAt": "..." }
+ *       ],
+ *       "total": 2
+ *     }
+ *   }
+ */
+router.get("/", webhookSignatureAuth, (req, res) => {
+  const accountId = typeof req.query.accountId === "string" ? req.query.accountId.trim() : "";
+  const webhooks = webhookStore.list(accountId || undefined).map(toWebhookListItem);
+  return success(res, { webhooks, total: webhooks.length });
+});
+
+/**
+ * GET /webhooks/stats
+ *
+ * Delivery health dashboard for operators. Reports how many webhooks are
+ * registered (and how many are active vs paused), delivery outcome totals,
+ * the current retry queue size, and the webhooks with the most failures.
+ */
+router.get("/stats", webhookSignatureAuth, (req, res) => {
+  return success(res, buildWebhookStats());
+});
+
+/**
+ * DELETE /webhooks/:webhookId
+ *
+ * Unregister a webhook by its ID.  Verifies the webhook exists before removal.
+ *
+ * Response 200 (success):
+ *   {
+ *     "success": true,
+ *     "data": {
+ *       "webhookId":    "wh_...",
+ *       "unregistered": true
+ *     }
+ *   }
+ *
+ * Response 404 (not found):
+ *   {
+ *     "success": false,
+ *     "error": {
+ *       "type":    "WebhookNotFound",
+ *       "message": "Webhook 'wh_...' was not found."
+ *     }
+ *   }
+ */
+router.delete("/:webhookId", webhookSignatureAuth, (req, res, next) => {
+  try {
+    const { webhookId } = req.params;
+
+    // Verify the webhook exists before attempting removal
+    const existing = webhookStore.find(webhookId);
+    if (!existing) {
+      return next(
+        new StellarKitError(
+          `Webhook '${webhookId}' was not found.`,
+          404,
+          "WebhookNotFound",
+          null,
+          "Verify the webhookId is correct. Use GET /webhooks to list all registered webhooks.",
+        ),
+      );
+    }
+
+    webhookStore.remove(webhookId);
+
+    return success(res, { webhookId, unregistered: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /webhooks/:webhookId/pause
+ *
+ * Pause a webhook by setting its status to "paused".
+ * Paused webhooks will not receive events during delivery.
+ *
+ * Response 200 (success):
+ *   {
+ *     "success": true,
+ *     "data": {
+ *       "webhookId": "wh_...",
+ *       "status": "paused",
+ *       "url": "https://...",
+ *       "events": [...],
+ *       "createdAt": "..."
+ *     }
+ *   }
+ *
+ * Response 404 (not found):
+ *   {
+ *     "success": false,
+ *     "error": {
+ *       "type":    "WebhookNotFound",
+ *       "message": "Webhook 'wh_...' was not found."
+ *     }
+ *   }
+ * Paused webhooks will not receive event deliveries until resumed.
+ *
+ * Response 200:
+ *   { "success": true, "data": { "webhookId": "wh_...", "status": "paused" } }
+ *
+ * Response 404: webhook not found.
+ */
+router.post("/:webhookId/pause", webhookSignatureAuth, validateBody(schemas.webhookAction), (req, res, next) => {
+  try {
+    const { webhookId } = req.params;
+
+    // Verify the webhook exists before attempting to pause
+    const existing = webhookStore.find(webhookId);
+    if (!existing) {
+      return next(
+        new StellarKitError(
+          `Webhook '${webhookId}' was not found.`,
+          404,
+          "WebhookNotFound",
+          null,
+          "Verify the webhookId is correct. Use GET /webhooks to list all registered webhooks.",
+        ),
+      );
+    }
+
+    const updated = webhookStore.updateStatus(webhookId, "paused");
+    return success(res, toWebhookListItem(updated));
+    webhookStore.updateStatus(webhookId, "paused");
+    return success(res, { webhookId, status: "paused" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /webhooks/:webhookId/resume
+ *
+ * Resume a webhook by setting its status back to "active".
+ * Resumed webhooks will receive events during delivery.
+ *
+ * Response 200 (success):
+ *   {
+ *     "success": true,
+ *     "data": {
+ *       "webhookId": "wh_...",
+ *       "status": "active",
+ *       "url": "https://...",
+ *       "events": [...],
+ *       "createdAt": "..."
+ *     }
+ *   }
+ *
+ * Response 404 (not found):
+ *   {
+ *     "success": false,
+ *     "error": {
+ *       "type":    "WebhookNotFound",
+ *       "message": "Webhook 'wh_...' was not found."
+ *     }
+ *   }
+ * Resume a paused webhook by setting its status back to "active".
+ *
+ * Response 200:
+ *   { "success": true, "data": { "webhookId": "wh_...", "status": "active" } }
+ *
+ * Response 404: webhook not found.
+ */
+router.post("/:webhookId/resume", webhookSignatureAuth, validateBody(schemas.webhookAction), (req, res, next) => {
+  try {
+    const { webhookId } = req.params;
+
+    // Verify the webhook exists before attempting to resume
+    const existing = webhookStore.find(webhookId);
+    if (!existing) {
+      return next(
+        new StellarKitError(
+          `Webhook '${webhookId}' was not found.`,
+          404,
+          "WebhookNotFound",
+          null,
+          "Verify the webhookId is correct. Use GET /webhooks to list all registered webhooks.",
+        ),
+      );
+    }
+
+    const updated = webhookStore.updateStatus(webhookId, "active");
+    return success(res, toWebhookListItem(updated));
+    webhookStore.updateStatus(webhookId, "active");
+    return success(res, { webhookId, status: "active" });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;
+module.exports = router;

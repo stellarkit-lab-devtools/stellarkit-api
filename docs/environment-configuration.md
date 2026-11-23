@@ -106,7 +106,69 @@ STELLAR_NETWORK=mainnet
 
 ---
 
+## LOG_LEVEL
+
+**Variable:** `LOG_LEVEL`  
+**Default:** `info`  
+**Accepted values:** `fatal`, `error`, `warn`, `info`, `debug`, `trace`  
+**Required:** No
+
+### What Does It Do?
+
+This variable controls the verbosity of application logs. StellarKit uses Pino for structured logging and emits logs at different severity levels.
+
+### Log Levels (in order of severity)
+
+| Level | Use Case | Examples |
+|-------|----------|----------|
+| `fatal` | Critical failures, process will likely exit | Database connection lost |
+| `error` | Runtime errors that need attention | Request failed, validation error |
+| `warn` | Unexpected but recoverable situations | Cache miss on expected hit |
+| `info` | Important state changes and events | Request completed, service started |
+| `debug` | Developer diagnostic info | Cache hit/miss details, env config |
+| `trace` | Extremely detailed execution flow | Function entry/exit, data values |
+
+### Configuration Examples
+
+```bash
+# Production: catch errors and important events only
+LOG_LEVEL=info
+
+# Development: include debug diagnostics
+LOG_LEVEL=debug
+
+# Troubleshooting: maximum detail
+LOG_LEVEL=trace
+```
+
+Or in your `.env` file:
+
+```env
+LOG_LEVEL=debug
+```
+
+### Log Output Formats
+
+The logging format depends on the `NODE_ENV` setting:
+
+- **Development** (`NODE_ENV != production`): Pretty-printed logs with colors and timestamps
+- **Production** (`NODE_ENV=production`): JSON (newline-delimited), machine-parseable for log aggregation
+
+See [Logging Guide](./logging.md) for full details on structured logging, log parsing, and production monitoring.
+
+### Performance Considerations
+
+- `LOG_LEVEL=debug` or `trace` generates more logs and increases I/O usage
+- In production, `LOG_LEVEL=info` is recommended for normal operation
+- High verbosity (debug/trace) should be used temporarily for troubleshooting
+
+---
+
 ## HORIZON_URL
+
+For an ordered list of endpoints and sticky recovery, see
+[Horizon failover](horizon-failover.md). Non-empty `HORIZON_URLS` takes precedence
+over `HORIZON_URL`; `HORIZON_FAILOVER_STICKY_MS` defaults to 60000.
 
 **Variable:** `HORIZON_URL`  
 **Default:** (empty — automatically selected based on `STELLAR_NETWORK`)  
@@ -168,6 +230,81 @@ Horizon is Stellar's official REST API. StellarKit uses it to:
 - Retrieve order book data and trading information
 
 Every API endpoint in StellarKit ultimately queries Horizon for blockchain data.
+
+---
+
+## NODE_ENV
+
+**Variable:** `NODE_ENV`  
+**Default:** `development`  
+**Accepted values:** `development`, `production`, `test`  
+**Required:** No
+
+### Development vs Production
+
+Setting `NODE_ENV=production` enables:
+
+- JSON log output (instead of pretty-print)
+- Optimized error messages (sensitive details suppressed)
+- Production-ready performance tuning
+
+Example:
+
+```env
+# Development
+NODE_ENV=development
+LOG_LEVEL=debug
+
+# Production
+NODE_ENV=production
+LOG_LEVEL=info
+```
+
+See [Logging Guide](./logging.md) for more on how `NODE_ENV` affects logging behavior.
+
+---
+
+## MIN_RESPONSE_TIME_MS
+
+**Variable:** `MIN_RESPONSE_TIME_MS`  
+**Default:** `200`  
+**Accepted values:** Any non-negative integer (milliseconds). Invalid, negative, or non-numeric values fall back to the default.  
+**Required:** No
+
+### What Does It Do?
+
+This variable sets a floor on how quickly **format-validation rejections** (HTTP 400) are returned by account routes, to prevent account enumeration through response timing.
+
+A malformed account ID fails synchronously during format validation, before any Horizon request is made. A well-formed but non-existent account, by contrast, requires a full Horizon round trip before the API can return its 404. Without padding, an attacker can measure the difference: a fast 400 means the address was structurally invalid, while a slow response means the address was well formed and therefore potentially real.
+
+When set, `MIN_RESPONSE_TIME_MS` delays the targeted validation 400 responses until at least this many milliseconds have elapsed since the request entered the account router. The delay applies only to these validation errors:
+
+- `InvalidAccountId` — malformed account address
+- `ValidationError` — invalid query/route parameters (e.g. bad asset code or date)
+- `MissingParameter` — required route parameter is empty
+
+Successful responses (2xx) and Horizon-backed responses (including 404 `AccountNotFound`) are **never** delayed.
+
+### Configuration Examples
+
+```env
+# Production: match typical Horizon round-trip latency
+MIN_RESPONSE_TIME_MS=200
+
+# Lower the floor (e.g. in fast internal environments)
+MIN_RESPONSE_TIME_MS=100
+
+# Disable padding entirely (not recommended in production)
+MIN_RESPONSE_TIME_MS=0
+```
+
+### Performance Considerations
+
+- A larger value increases the latency of invalid requests only; valid requests are unaffected.
+- The default of 200 ms approximates a real Horizon round trip and keeps the two rejection kinds indistinguishable.
+- Setting the value to `0` disables padding and reintroduces the timing difference.
+
+See [Error Codes](./error-codes.md) for the `InvalidAccountId` response shape.
 
 ---
 
@@ -389,8 +526,9 @@ Error: Account GBXX... does not exist on the network
 
 ---
 
-## References
+## Related Documentation
 
+- [Logging Guide](./logging.md) - Configure log levels, understand structured logging, and parse production JSON logs
 - [Stellar Networks Documentation](https://developers.stellar.org/docs/learn/networks)
 - [Horizon API Reference](https://developers.stellar.org/docs/data/apis/horizon)
 - [Stellar Status Page](https://stellar.statuspage.io)
@@ -405,6 +543,7 @@ Error: Account GBXX... does not exist on the network
 | `STELLAR_NETWORK` | `testnet` | `mainnet` |
 | `HORIZON_URL` | (empty) | (empty) |
 | `NODE_ENV` | `development` | `production` |
+| `MIN_RESPONSE_TIME_MS` | `200` | `200` |
 | Data persistence | ❌ Resets periodically | ✅ Permanent |
 | Real value at risk | ❌ No | ✅ Yes |
 | Friendbot available | ✅ Yes | ❌ No |
