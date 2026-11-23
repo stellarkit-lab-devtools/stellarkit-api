@@ -1,3 +1,4 @@
+const { getDocsUrl } = require("../src/utils/errorTypes");
 const errorHandler = require("../src/middleware/errorHandler");
 
 function makeHorizonSubmissionError(status, resultCodes, detail = "Transaction submission failed.") {
@@ -5,6 +6,7 @@ function makeHorizonSubmissionError(status, resultCodes, detail = "Transaction s
     response: {
       status,
       data: {
+        type: "transaction_failed",
         title: "Transaction Failed",
         detail,
         extras: { result_codes: resultCodes },
@@ -33,13 +35,14 @@ describe("TransactionSubmissionFailed error handling", () => {
     expect(res.status).toHaveBeenCalledWith(409);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: {
-        type: "TransactionSubmissionFailed",
-        message: "Transaction failed.",
-        resultCodes: { transaction: "tx_bad_seq", operations: [] },
-        suggestion:
-          "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
+      error: { type: "TransactionSubmissionFailed", docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+        title: "Transaction Failed",
+        detail: "Transaction submission failed.",
+        message: "Transaction sequence number does not match the account's current sequence. Reload the account and rebuild the transaction.",
+        resultCodes: { transaction: "tx_bad_seq" },
+        code: "tx_bad_seq",
       },
+      requestId: null,
     });
   });
 
@@ -51,9 +54,9 @@ describe("TransactionSubmissionFailed error handling", () => {
     expect(res.status).toHaveBeenCalledWith(422);
     expect(res.json.mock.calls[0][0].error).toMatchObject({
       type: "TransactionSubmissionFailed",
-      resultCodes: { transaction: "tx_insufficient_fee", operations: [] },
-      suggestion:
-        "Transaction fee is too low. Increase the fee or use the current base fee from Horizon multiplied by the number of operations.",
+      docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+      resultCodes: { transaction: "tx_insufficient_fee" },
+      message: "Transaction fee is too low. Increase the fee or use the current base fee from Horizon multiplied by the number of operations.",
     });
   });
 
@@ -65,11 +68,12 @@ describe("TransactionSubmissionFailed error handling", () => {
 
     errorHandler(err, req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json.mock.calls[0][0].error).toMatchObject({
       type: "TransactionSubmissionFailed",
+      docsUrl: getDocsUrl("TransactionSubmissionFailed"),
       resultCodes: { transaction: "tx_failed", operations: ["op_underfunded"] },
-      suggestion: "The source account does not have enough funds. Add funds or reduce the operation amount.",
+      message: "Transaction submission failed.",
     });
   });
 
@@ -83,9 +87,9 @@ describe("TransactionSubmissionFailed error handling", () => {
 
     expect(res.json.mock.calls[0][0].error).toMatchObject({
       type: "TransactionSubmissionFailed",
+      docsUrl: getDocsUrl("TransactionSubmissionFailed"),
       resultCodes: { transaction: "tx_failed", operations: ["op_success", "op_no_trust"] },
-      suggestion:
-        "The destination account does not have a trustline for this asset. The destination must create a trustline before receiving the asset.",
+      message: "Transaction submission failed.",
     });
   });
 
@@ -97,9 +101,9 @@ describe("TransactionSubmissionFailed error handling", () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json.mock.calls[0][0].error).toMatchObject({
       type: "TransactionSubmissionFailed",
-      resultCodes: { transaction: "tx_bad_auth", operations: [] },
-      suggestion:
-        "Transaction is missing a required signature or has an invalid signature. Sign with all required signers and verify the network passphrase.",
+      docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+      resultCodes: { transaction: "tx_bad_auth" },
+      message: "Transaction is missing a required signature or has an invalid signature. Sign with all required signers and verify the network passphrase.",
     });
   });
 
@@ -110,8 +114,9 @@ describe("TransactionSubmissionFailed error handling", () => {
 
     expect(res.json.mock.calls[0][0].error).toMatchObject({
       type: "TransactionSubmissionFailed",
-      resultCodes: { transaction: "tx_some_future_code", operations: [] },
-      suggestion: "Review the transaction result codes and adjust the transaction before resubmitting.",
+      docsUrl: getDocsUrl("TransactionSubmissionFailed"),
+      resultCodes: { transaction: "tx_some_future_code" },
+      message: "Transaction submission failed.",
     });
   });
 

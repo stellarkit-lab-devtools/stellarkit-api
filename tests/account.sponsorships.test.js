@@ -3,10 +3,11 @@
 /**
  * Tests for GET /account/:id/sponsorships
  *
- * Verifies the typed sponsorship summary endpoint that returns:
- *   - sponsoredBy: array of { type, address, sponsor, reserveAmount }
- *   - sponsoring:  array of account IDs this account sponsors
- *   - count:       number of sponsoredBy entries
+ * Verifies the consolidated sponsorship endpoint that returns:
+ *   - accountId, accountSponsor, sponsoredEntries, accountsSponsoring, total
+ *   - sponsoredEntries: array of { type, asset|key|offerId, sponsor, reserveAmount }
+ *   - accountsSponsoring: array of account IDs this account sponsors
+ *   - total: count of sponsoredEntries
  */
 
 const request = require("supertest");
@@ -19,6 +20,7 @@ jest.mock("../src/config/stellar", () => {
     server: {
       loadAccount: jest.fn(),
       accounts: jest.fn(),
+      offers: jest.fn(),
     },
   };
 });
@@ -35,9 +37,10 @@ describe("GET /account/:id/sponsorships", () => {
     jest.clearAllMocks();
   });
 
-  it("returns full typed sponsorship summary", async () => {
+  it("returns full consolidated sponsorship summary", async () => {
     server.loadAccount.mockResolvedValue({
       id: accountId,
+      sponsor: sponsorId,
       balances: [
         { asset_type: "native", balance: "10.0000000", sponsor: sponsorId },
         {
@@ -61,6 +64,16 @@ describe("GET /account/:id/sponsorships", () => {
       call: jest.fn().mockResolvedValue({ records: [{ id: sponsoredAccountId }] }),
     });
 
+    server.offers.mockReturnValue({
+      forAccount: jest.fn().mockReturnThis(),
+      call: jest.fn().mockResolvedValue({ 
+        records: [
+          { id: "OFFER_1", sponsor: sponsorId },
+          { id: "OFFER_2", sponsor: null },
+        ]
+      }),
+    });
+
     const res = await request(app).get(`/account/${accountId}/sponsorships`);
 
     expect(res.statusCode).toBe(200);
@@ -68,34 +81,35 @@ describe("GET /account/:id/sponsorships", () => {
 
     const { data } = res.body;
     expect(data.accountId).toBe(accountId);
-    expect(data.count).toBe(4); // 2 trustlines + 1 signer + 1 data entry
+    expect(data.accountSponsor).toBe(sponsorId);
+    expect(data.total).toBe(5); // 2 trustlines + 1 signer + 1 data entry + 1 offer
+    expect(data.sponsoredEntries).toHaveLength(5);
 
-    // Check sponsoredBy shape
-    expect(Array.isArray(data.sponsoredBy)).toBe(true);
-    expect(data.sponsoredBy).toHaveLength(4);
-
-    const trustlines = data.sponsoredBy.filter((e) => e.type === "trustline");
+    // Check sponsoredEntries shape
+    const trustlines = data.sponsoredEntries.filter((e) => e.type === "trustline");
     expect(trustlines).toHaveLength(2);
-    expect(trustlines[0].address).toBe("XLM");
     expect(trustlines[0].sponsor).toBe(sponsorId);
     expect(trustlines[0].reserveAmount).toBe("0.5000000");
-    expect(trustlines[1].address).toBe(
-      "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
-    );
 
-    const signers = data.sponsoredBy.filter((e) => e.type === "signer");
+    const signers = data.sponsoredEntries.filter((e) => e.type === "signer");
     expect(signers).toHaveLength(1);
-    expect(signers[0].address).toBe(sponsorId);
+    expect(signers[0].sponsor).toBe(sponsorId);
     expect(signers[0].reserveAmount).toBe("0.5000000");
 
-    const dataEntries = data.sponsoredBy.filter((e) => e.type === "data_entry");
+    const dataEntries = data.sponsoredEntries.filter((e) => e.type === "data_entry");
     expect(dataEntries).toHaveLength(1);
-    expect(dataEntries[0].address).toBe("myKey");
+    expect(dataEntries[0].sponsor).toBe(sponsorId);
     expect(dataEntries[0].reserveAmount).toBe("0.5000000");
 
+    const offers = data.sponsoredEntries.filter((e) => e.type === "offer");
+    expect(offers).toHaveLength(1);
+    expect(offers[0].sponsor).toBe(sponsorId);
+    expect(offers[0].offerId).toBe("OFFER_1");
+    expect(offers[0].reserveAmount).toBe("0.5000000");
+
     // Check sponsoring array
-    expect(Array.isArray(data.sponsoring)).toBe(true);
-    expect(data.sponsoring).toEqual([sponsoredAccountId]);
+    expect(Array.isArray(data.accountsSponsoring)).toBe(true);
+    expect(data.accountsSponsoring).toEqual([sponsoredAccountId]);
   });
 
   it("returns empty arrays when account has no sponsorships", async () => {
@@ -111,12 +125,17 @@ describe("GET /account/:id/sponsorships", () => {
       call: jest.fn().mockResolvedValue({ records: [] }),
     });
 
+    server.offers.mockReturnValue({
+      forAccount: jest.fn().mockReturnThis(),
+      call: jest.fn().mockResolvedValue({ records: [] }),
+    });
+
     const res = await request(app).get(`/account/${accountId}/sponsorships`);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.data.sponsoredBy).toHaveLength(0);
-    expect(res.body.data.sponsoring).toHaveLength(0);
-    expect(res.body.data.count).toBe(0);
+    expect(res.body.data.sponsoredEntries).toHaveLength(0);
+    expect(res.body.data.accountsSponsoring).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
   });
 
   it("returns 400 for an invalid account ID", async () => {
@@ -137,37 +156,5 @@ describe("GET /account/:id/sponsorships", () => {
     expect(res.statusCode).toBe(404);
     expect(res.body.success).toBe(false);
     expect(res.body.error.type).toBe("AccountNotFound");
-  });
-
-  it("each sponsoredBy entry always contains type, address, sponsor, and reserveAmount", async () => {
-    server.loadAccount.mockResolvedValue({
-      id: accountId,
-      balances: [
-        {
-          asset_code: "USDC",
-          asset_issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
-          asset_type: "credit_alphanum4",
-          balance: "5.0000000",
-          sponsor: sponsorId,
-        },
-      ],
-      signers: [],
-      data_attr: {},
-    });
-
-    server.accounts.mockReturnValue({
-      sponsor: jest.fn().mockReturnThis(),
-      call: jest.fn().mockResolvedValue({ records: [] }),
-    });
-
-    const res = await request(app).get(`/account/${accountId}/sponsorships`);
-
-    expect(res.statusCode).toBe(200);
-    const entry = res.body.data.sponsoredBy[0];
-    expect(entry).toHaveProperty("type");
-    expect(entry).toHaveProperty("address");
-    expect(entry).toHaveProperty("sponsor");
-    expect(entry).toHaveProperty("reserveAmount");
-    expect(entry.reserveAmount).toBe("0.5000000");
   });
 });

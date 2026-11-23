@@ -97,7 +97,7 @@ describe("GET /account/:id/trustlines", () => {
       `,
     });
 
-    const res = await request(app).get(`/account/${ACCOUNT_ID}/trustlines`);
+    const res = await request(app).get(`/account/${ACCOUNT_ID}/trustlines?includeMetadata=true`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
@@ -108,7 +108,7 @@ describe("GET /account/:id/trustlines", () => {
       expect.objectContaining({
         asset: { code: "USDC", issuer: RESOLVED_ISSUER, type: "credit_alphanum4" },
         balance: "25.0000000",
-        toml: {
+        metadata: {
           name: "USD Coin",
           description: "Fully reserved digital dollar.",
           image: "https://assets.example.com/usdc.png",
@@ -117,7 +117,7 @@ describe("GET /account/:id/trustlines", () => {
       expect.objectContaining({
         asset: { code: "NOHOME", issuer: UNRESOLVED_ISSUER, type: "credit_alphanum12" },
         balance: "2.5000000",
-        toml: null,
+        metadata: null,
       }),
     ]);
     expect(axios.get).toHaveBeenCalledWith(
@@ -138,14 +138,14 @@ describe("GET /account/:id/trustlines", () => {
     });
     axios.get.mockRejectedValue(new Error("network failed"));
 
-    const res = await request(app).get(`/account/${ACCOUNT_ID}/trustlines`);
+    const res = await request(app).get(`/account/${ACCOUNT_ID}/trustlines?includeMetadata=true`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.items).toEqual([
       expect.objectContaining({
         asset: expect.objectContaining({ code: "USDC" }),
-        toml: null,
+        metadata: null,
       }),
     ]);
   });

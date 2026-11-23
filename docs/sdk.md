@@ -106,6 +106,37 @@ const status = await client.getNetworkStatus();
 
 ---
 
+## Request and response hooks
+
+The unified `StellarKitClient` accepts lifecycle hooks that run around **every** SDK call — no need to wrap each method. Each hook may be a single function or an array of functions, executed in registration order:
+
+- `onRequest({ url, method, headers, body })` — may mutate `headers` to add tracing/auth headers.
+- `onResponse({ url, method, status, durationMs })` — runs after the response is received.
+- `onError(error)` — receives the typed `StellarKitError` (status/type) on non-2xx or network failures.
+
+A hook that throws never fails the SDK call; the error is passed to the optional `onHookError(error, hookName)` callback.
+
+```ts
+import { randomUUID } from "node:crypto";
+import { StellarKitClient } from "stellarkit-api/sdk/stellarkit-client";
+
+const client = new StellarKitClient({
+  baseUrl: "https://api.stellarkit.io",
+  hooks: {
+    onRequest: ({ headers }) => {
+      headers["x-trace-id"] = randomUUID(); // trace header on every call
+    },
+    onResponse: ({ url, status, durationMs }) => {
+      console.log(`${url} ${status} ${durationMs}ms`);
+    },
+    onError: (err) => console.error(err.type, err.status, err.message),
+  },
+  onHookError: (err, hookName) => console.warn(`hook ${hookName} failed`, err),
+});
+
+await client.getHealth();
+```
+
 ## Error handling
 
 All modules throw **`StellarKitError`** on non-2xx responses:

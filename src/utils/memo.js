@@ -1,6 +1,21 @@
 /**
- * Memo decoding utilities for Stellar memos.
+ * Memo decoding and validation utilities for Stellar memos.
  */
+const TEXT_MEMO_MAX_BYTES = 28;
+const HASH_MEMO_BYTES = 32;
+const UINT64_MAX = 18446744073709551615n;
+const VALID_MEMO_TYPES = ["none", "text", "id", "hash", "return"];
+
+function invalidMemo(type, value, error, byteLength = null) {
+  return {
+    valid: false,
+    type,
+    value: value === undefined ? null : value,
+    byteLength,
+    error,
+  };
+}
+
 function decodeBase64ToUtf8(value) {
   try {
     return Buffer.from(value, "base64").toString("utf8");
@@ -93,4 +108,100 @@ function decodeMemo(type, value) {
   throw err;
 }
 
-module.exports = { decodeMemo };
+/**
+ * Validate a memo value against its declared Stellar memo type, without
+ * touching Horizon.
+ *
+ * Stellar memo rules enforced here:
+ *   - `none`   — no value may be attached.
+ *   - `text`   — UTF-8, at most 28 bytes.
+ *   - `id`     — decimal string that fits in an unsigned 64-bit integer.
+ *   - `hash`   — exactly 32 bytes, given as 64 hex characters or base64.
+ *   - `return` — same encoding and length rules as `hash`.
+ *
+ * @param {string} type - one of: none, text, id, hash, return
+ * @param {string} [value] - the memo value to validate
+ * @returns {{valid:boolean, type:string, value:string|null, byteLength:number, error:string|null, errors:string[]}}
+ * @throws {Error} when no type is supplied (flagged with `isValidation`, statusCode 400)
+ */
+function validateMemo(type, value) {
+  if (type === undefined || type === null || String(type).trim() === "") {
+    const err = new Error("Missing memo type");
+    err.statusCode = 400;
+    err.isValidation = true;
+    throw err;
+  }
+
+  const t = String(type).toLowerCase();
+  const errors = [];
+  let byteLength = 0;
+
+  if (!VALID_MEMO_TYPES.includes(t)) {
+    errors.push(`Unsupported memo type: ${type}`);
+  } else if (t === "none") {
+    if (value !== undefined && value !== null && value !== "") {
+      errors.push("A 'none' memo must not carry a value");
+    }
+    return { valid: true, type: "none", value: null, byteLength: 0, error: null };
+  }
+
+  if (t === "text") {
+    if (typeof value !== "string" || value === "") {
+      return invalidMemo(t, value, "Missing memo value for text type");
+    }
+    const byteLength = Buffer.byteLength(value, "utf8");
+    if (byteLength > TEXT_MEMO_MAX_BYTES) {
+      return invalidMemo(
+        t,
+        value,
+        `Text memo must not exceed ${TEXT_MEMO_MAX_BYTES} bytes (got ${byteLength})`,
+        byteLength
+      );
+    }
+    return { valid: true, type: "text", value, byteLength, error: null };
+  }
+
+  if (t === "id") {
+    if (typeof value !== "string" || value === "") {
+      return invalidMemo(t, value, "Missing memo value for id type");
+    }
+    if (!/^[0-9]+$/.test(value)) {
+      return invalidMemo(t, value, "ID memo must be an unsigned integer string");
+    }
+    if (BigInt(value) > UINT64_MAX) {
+      return invalidMemo(t, value, "ID memo must fit in an unsigned 64-bit integer");
+    }
+    return { valid: true, type: "id", value, byteLength: null, error: null };
+  }
+
+  // hash / return
+  if (typeof value !== "string" || value === "") {
+    return invalidMemo(t, value, `Missing memo value for ${t} type`);
+  }
+
+  let bytes;
+  if (/^[0-9a-fA-F]{64}$/.test(value)) {
+    bytes = Buffer.from(value, "hex");
+  } else if (/^[A-Za-z0-9+/]*={0,2}$/.test(value) && value.length % 4 === 0) {
+    bytes = Buffer.from(value, "base64");
+  } else {
+    return invalidMemo(
+      t,
+      value,
+      "Memo value must be a 64-character hex string or a valid base64 string"
+    );
+  }
+
+  if (bytes.length !== HASH_MEMO_BYTES) {
+    return invalidMemo(
+      t,
+      value,
+      `Hash memo must be exactly ${HASH_MEMO_BYTES} bytes (got ${bytes.length})`,
+      bytes.length
+    );
+  }
+
+  return { valid: true, type: t, value, byteLength: bytes.length, error: null };
+}
+
+module.exports = { decodeMemo, validateMemo, TEXT_MEMO_MAX_BYTES, HASH_MEMO_BYTES };
