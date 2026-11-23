@@ -22,6 +22,8 @@
 
 require("dotenv").config();
 const express = require("express");
+const { installProcessHandlers } = require("./services/processHandlers");
+installProcessHandlers({ exit: process.exit });
 const helmet = require("helmet");
 const hpp = require("hpp");
 const cors = require("cors");
@@ -62,6 +64,7 @@ const webhooksRouter = require("./routes/webhooks");
 const contractEventPoller = require("./services/contractEventPoller");
 const feeEstimateRouter = require("./routes/feeEstimate");
 const accountRouter = require("./routes/account");
+const recurringPaymentsRouter = require("./routes/recurringPayments");
 const accountsRouter = require("./routes/accounts");
 const transactionsRouter = require("./routes/transactions");
 const assetRouter = require("./routes/asset");
@@ -388,6 +391,7 @@ accountsBatchRouter.post("/multisig-info", validateBody(schemas.multisigInfo), a
 });
 app.use("/accounts", accountsBatchRouter);
 app.use("/account", etagMiddleware, accountRouter);
+app.use("/account", recurringPaymentsRouter);
 app.use("/account", etagMiddleware, accountCounterpartiesRouter);
 app.use("/accounts", accountsRouter);
 app.use("/transactions", transactionsRouter);
