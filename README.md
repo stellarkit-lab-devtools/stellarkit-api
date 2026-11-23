@@ -88,6 +88,7 @@ This project is ideal for:
 | GET | `/account/:id/sequence` | Current sequence number | — |
 | GET | `/account/:id/trustlines` | Trustlines with TOML asset metadata resolved | `assetCode` |
 | GET | `/account/:id/payments` | Payment and create_account operations | `limit`, `order`, `cursor`, `assetCode`, `assetIssuer` |
+| GET | `/account/:id/funded-accounts` | Accounts created by this account, with total starting balance | `limit`, `order`, `cursor` |
 | GET | `/account/:id/trades` | DEX trades for the account | `limit`, `order`, `cursor`, `fresh` |
 | GET | `/account/:id/offers` | Open DEX offers for an account | `limit`, `cursor` |
 | GET | `/account/:id/offer-history` | Historical offer operations | `limit`, `order`, `cursor` |
@@ -604,6 +605,14 @@ curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJT
 
 # Paginate to the next page using a cursor
 curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/payments?limit=20&cursor=163305704040034305"
+```
+
+### `GET /account/:id/funded-accounts`
+
+Lists accounts created by this account through `create_account` operations. Each entry includes `address`, seven-decimal `startingBalanceXLM`, ISO 8601 `createdAt`, and `transactionHash`; `totalStartingBalanceXLM` sums only entries on the returned page. Supports the standard `limit`, `cursor`, and `order` query parameters. Since Horizon cannot filter operations by type, this route scans at most 10 pages of operations; the top-level `meta.partial` is `true` if the scan cap is reached before the requested page is filled.
+
+```bash
+curl -X GET "http://localhost:3000/account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN/funded-accounts?limit=20&order=desc"
 ```
 
 ### `GET /account/:id/trades`
@@ -1137,6 +1146,7 @@ The following StellarKit API endpoints support cursor-based pagination:
 * **`GET /transactions/:id`**: Returns paginated transaction history for an account.
 * **`GET /transactions/:id/operations`**: Returns paginated operation history for an account.
 * **`GET /account/:id/payments`**: Returns paginated payment and create_account operations for an account.
+* **`GET /account/:id/funded-accounts`**: Returns accounts created by the account, with pagination metadata and a partial-result indicator when the 10-page Horizon scan cap is reached.
 * **`GET /account/:id/timeline`**: Returns a unified chronological timeline of events for an account.
 * **`GET /account/:id/transactions/search`**: Searches transaction history filtered by memo content.
 * **`GET /asset/:code/:issuer/holders`**: Returns accounts holding a trustline for a specific asset.
