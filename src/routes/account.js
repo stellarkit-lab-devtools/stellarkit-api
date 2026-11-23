@@ -1273,6 +1273,96 @@ router.get("/:id/payments", async (req, res, next) => {
 });
 
 /**
+ * GET /account/:id/funded-accounts
+ * Returns accounts created by this account, scanning up to 10 Horizon pages.
+ */
+router.get("/:id/funded-accounts", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+    const { limit, order, cursor } = parsePaginationParams(req.query);
+
+    // Account operations cannot be filtered by type, so scan bounded pages.
+    await server.loadAccount(id);
+
+    const HORIZON_PAGE_SIZE = 200;
+    const MAX_PAGES = 10;
+    const fundedAccounts = [];
+    let totalStartingBalance = 0;
+    let nextCursor = cursor || null;
+    let partial = false;
+
+    for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
+      let query = server
+        .operations()
+        .forAccount(id)
+        .limit(HORIZON_PAGE_SIZE)
+        .order(order);
+      if (nextCursor) query = query.cursor(nextCursor);
+
+      const response = await query.call();
+      const records = response.records || [];
+      let reachedLimit = false;
+
+      for (const operation of records) {
+        if (operation.type === "create_account" && operation.funder === id) {
+          const startingBalance = Number(operation.starting_balance || 0);
+          fundedAccounts.push({
+            address: operation.account,
+            startingBalanceXLM: startingBalance.toFixed(7),
+            createdAt: toISOTimestamp(operation.created_at),
+            transactionHash: operation.transaction_hash,
+          });
+          totalStartingBalance += startingBalance;
+          if (fundedAccounts.length === limit) {
+            nextCursor = operation.paging_token || nextCursor;
+            reachedLimit = true;
+            break;
+          }
+        }
+
+        nextCursor = operation.paging_token || nextCursor;
+      }
+
+      if (reachedLimit) break;
+      if (records.length < HORIZON_PAGE_SIZE) {
+        nextCursor = records.length
+          ? records[records.length - 1].paging_token || nextCursor
+          : null;
+        break;
+      }
+      if (pageNumber === MAX_PAGES - 1) partial = true;
+    }
+
+    return success(
+      res,
+      {
+        items: fundedAccounts,
+        total: fundedAccounts.length,
+        totalStartingBalanceXLM: totalStartingBalance.toFixed(7),
+        limit,
+        cursor: nextCursor,
+      },
+      { meta: { partial } },
+    );
+  } catch (err) {
+    if (err && err.response && err.response.status === 404) {
+      const notFound = makeAccountNotFoundError(req.params.id, NETWORK);
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "AccountNotFound",
+          message: notFound.message,
+          suggestion:
+            "Verify the account address is correct and that the account has been funded.",
+        },
+      });
+    }
+    handleAccountNotFound(err, next, req.params.id);
+  }
+});
+
+/**
  * GET /account/:id/trades
  *
  * Returns a normalised, paginated list of trades executed by the account.
