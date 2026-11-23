@@ -9194,6 +9194,230 @@ router.get("/:id/operation-type-breakdown", async (req, res, next) => {
   }
 });
 
+const DATA_ENTRY_HISTORY_PAGE_SIZE = 200;
+const DATA_ENTRY_HISTORY_MAX_PAGES = 10;
+const DATA_ENTRY_HISTORY_CACHE_TTL = 60; // seconds
+
+/**
+ * GET /account/:id/data-entry-history
+ *
+ * Returns how an account's data entries changed over time, including creation,
+ * updates, and removals. Each event shows the entry key, value, operation type,
+ * ledger sequence, timestamp, and transaction hash.
+ *
+ * Query parameters:
+ *   - limit (number, 1–200, default: 50) — Maximum number of events to return
+ *   - cursor (string, optional) — Pagination cursor
+ *   - order (asc|desc, default: desc) — Sort direction
+ *   - key (string, optional) — Filter to a specific data entry key
+ *   - decoded (boolean, default: true) — Return values UTF-8 decoded (false → base64)
+ *
+ * Response shape:
+ *   {
+ *     entries: [
+ *       {
+ *         type: "created|updated|removed",
+ *         key: "setting-name",
+ *         value: "decoded_value or base64",
+ *         valueEncoding: "utf8|base64",
+ *         ledger: 12345,
+ *         timestamp: "2024-01-15T10:30:00Z",
+ *         transactionHash: "...",
+ *       },
+ *       ...
+ *     ],
+ *     meta: {
+ *       total: <number>,
+ *       partial: <boolean>,  // true if we hit the page limit
+ *       nextCursor: <string|null>,
+ *     }
+ *   }
+ *
+ * Notes:
+ *   - Scans up to 10 pages of effects (200 per page = 2000 max effects checked)
+ *   - partial: true means we stopped early; call again with nextCursor to continue
+ *   - Invalid account returns 404
+ *   - Values are UTF-8 decoded by default; non-UTF-8 values fall back to base64
+ *
+ * @example
+ *   GET /account/GABC.../data-entry-history
+ *   GET /account/GABC.../data-entry-history?key=settings&limit=100
+ *   GET /account/GABC.../data-entry-history?decoded=false
+ */
+router.get("/:id/data-entry-history", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    validateAccountId(id);
+
+    // Parse pagination parameters
+    const rawLimit = req.query.limit || 50;
+    const parsed = parseInt(rawLimit, 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: "ValidationError",
+          message: "limit must be an integer between 1 and 200.",
+        },
+      });
+    }
+    const limit = parsed;
+
+    const order = validateOrder(req.query.order) || "desc";
+    const cursor = req.query.cursor || undefined;
+    const keyFilter = req.query.key || undefined;
+    const decoded = req.query.decoded !== "false"; // default true
+
+    // Build cache key
+    const cacheKey = `account:${id}:data-entry-history:${limit}:${order}:${keyFilter || "all"}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached !== undefined) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    // Verify account exists
+    try {
+      await withHorizonTiming(req, () => server.loadAccount(id));
+    } catch (err) {
+      if (err && err.response && err.response.status === 404) {
+        return handleAccountNotFound(err, next, id);
+      }
+      throw err;
+    }
+
+    // Fetch effects for data_created, data_updated, data_removed
+    const entries = [];
+    let effectsCursor = cursor;
+    let pagesScanned = 0;
+    let partial = false;
+
+    while (pagesScanned < DATA_ENTRY_HISTORY_MAX_PAGES && entries.length < limit) {
+      let query = server
+        .effects()
+        .forAccount(id)
+        .limit(DATA_ENTRY_HISTORY_PAGE_SIZE)
+        .order(order);
+
+      if (effectsCursor) {
+        query = query.cursor(effectsCursor);
+      }
+
+      const response = await withHorizonTiming(req, () => query.call());
+      const records = response.records || [];
+
+      if (records.length === 0) {
+        break;
+      }
+
+      for (const effect of records) {
+        const type = effect.type;
+
+        // Filter for data-related effects
+        if (type === "data_created" || type === "data_updated" || type === "data_removed") {
+          const entryKey = effect.name || effect.key || null;
+          if (!entryKey) continue;
+
+          // Apply key filter if provided
+          if (keyFilter && entryKey !== keyFilter) {
+            continue;
+          }
+
+          // Decode value
+          let value = null;
+          let valueEncoding = "utf8";
+
+          if (effect.value && (type === "data_created" || type === "data_updated")) {
+            try {
+              // Try to decode base64 value as UTF-8
+              const buffer = Buffer.from(effect.value, "base64");
+              const decoded_text = buffer.toString("utf8");
+
+              // Check if it's valid UTF-8 by round-tripping
+              if (Buffer.from(decoded_text, "utf8").toString("base64") === effect.value) {
+                value = decoded ? decoded_text : effect.value;
+                valueEncoding = decoded ? "utf8" : "base64";
+              } else {
+                // Not valid UTF-8, return as base64
+                value = effect.value;
+                valueEncoding = "base64";
+              }
+            } catch (e) {
+              // Fall back to base64
+              value = effect.value;
+              valueEncoding = "base64";
+            }
+          }
+
+          entries.push({
+            type: type === "data_created" ? "created" : type === "data_updated" ? "updated" : "removed",
+            key: entryKey,
+            value,
+            valueEncoding,
+            ledger: effect.ledger_sequence || null,
+            timestamp: effect.created_at ? toISOTimestamp(effect.created_at) : null,
+            transactionHash: effect.transaction_hash || null,
+          });
+
+          if (entries.length >= limit) {
+            partial = true;
+            break;
+          }
+        }
+      }
+
+      // Update cursor for next page
+      if (records.length > 0) {
+        const lastRecord = records[records.length - 1];
+        effectsCursor = lastRecord.paging_token;
+      }
+
+      pagesScanned++;
+
+      // If we got fewer records than requested, we've hit the end
+      if (records.length < DATA_ENTRY_HISTORY_PAGE_SIZE) {
+        break;
+      }
+
+      if (partial) {
+        break;
+      }
+    }
+
+    // If we scanned the max pages and still have entries to fetch, mark as partial
+    if (pagesScanned >= DATA_ENTRY_HISTORY_MAX_PAGES && entries.length >= limit) {
+      partial = true;
+    }
+
+    const result = {
+      entries: entries.slice(0, limit),
+      meta: {
+        total: entries.length,
+        partial,
+        nextCursor: partial && effectsCursor ? effectsCursor : null,
+      },
+    };
+
+    cacheService.set(cacheKey, result, DATA_ENTRY_HISTORY_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, result);
+  } catch (err) {
+    if (err && err.isAccountNotFound) {
+      return handleAccountNotFound(err, next, id);
+    }
+    if (err && err.isValidation) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          type: err.type || "ValidationError",
+          message: err.message,
+        },
+      });
+    }
+    next(err);
+  }
+});
+
 module.exports = router;
 
 // SHELL_SYNC_MARKER

@@ -932,4 +932,159 @@ router.get("/soroban-stats", async (req, res, next) => {
   }
 });
 
+const OPERATION_STATS_CACHE_TTL = 30;
+const OPERATION_STATS_DEFAULT_SAMPLE = 1000;
+const OPERATION_STATS_MAX_SAMPLE = 5000;
+const OPERATION_STATS_PAGE_SIZE = 200;
+
+// Soroban operation types that count toward soroban share
+const SOROBAN_OPERATION_TYPES = [
+  "invoke_host_function",
+  "extend_footprint_ttl",
+  "restore_footprint",
+];
+
+/**
+ * GET /network/operation-stats
+ * Samples the most recent operations and returns a breakdown by type.
+ *
+ * Query parameters:
+ *   sample (number, default: 1000, max: 5000) — Number of operations to sample
+ *
+ * Response shape:
+ *   {
+ *     sampledOperations: <number>,
+ *     fromLedger: <number>,
+ *     toLedger: <number>,
+ *     byType: [
+ *       { type: "payment", count: 450, percent: 45.0 },
+ *       ...
+ *     ],
+ *     sorobanSharePercent: <number>
+ *   }
+ *
+ * byType is sorted by count descending, percentages sum to ~100.
+ * Results are cached for 30 seconds.
+ *
+ * Errors:
+ *   400 — sample is not a number or is out of range (1–5000)
+ *
+ * @example
+ * GET /network/operation-stats
+ * GET /network/operation-stats?sample=2000
+ */
+router.get("/operation-stats", async (req, res, next) => {
+  try {
+    // Parse and validate sample parameter
+    let sample = OPERATION_STATS_DEFAULT_SAMPLE;
+    if (req.query.sample !== undefined) {
+      const parsed = parseInt(req.query.sample, 10);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > OPERATION_STATS_MAX_SAMPLE) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            type: "ValidationError",
+            message: `sample must be an integer between 1 and ${OPERATION_STATS_MAX_SAMPLE}.`,
+          },
+        });
+      }
+      sample = parsed;
+    }
+
+    const cacheKey = `network-operation-stats:${sample}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached !== undefined) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    // Fetch operations in pages
+    const operationCounts = {}; // { type: count }
+    let fetchedCount = 0;
+    let minLedger = Infinity;
+    let maxLedger = -Infinity;
+    let cursor = undefined;
+
+    while (fetchedCount < sample) {
+      const remaining = sample - fetchedCount;
+      const pageSize = Math.min(OPERATION_STATS_PAGE_SIZE, remaining);
+
+      let query = server.operations().limit(pageSize).order("desc");
+      if (cursor) {
+        query = query.cursor(cursor);
+      }
+
+      const response = await withHorizonTiming(req, () => query.call());
+      const records = response.records || [];
+
+      if (records.length === 0) {
+        // No more operations available
+        break;
+      }
+
+      for (const op of records) {
+        const type = op.type || "unknown";
+        operationCounts[type] = (operationCounts[type] || 0) + 1;
+        fetchedCount++;
+
+        if (op.ledger_sequence !== undefined) {
+          minLedger = Math.min(minLedger, op.ledger_sequence);
+          maxLedger = Math.max(maxLedger, op.ledger_sequence);
+        }
+
+        if (fetchedCount >= sample) {
+          break;
+        }
+      }
+
+      // Set cursor for next page
+      if (records.length > 0) {
+        const lastRecord = records[records.length - 1];
+        cursor = lastRecord.paging_token;
+      }
+
+      // If we got fewer records than requested, we've hit the end
+      if (records.length < pageSize) {
+        break;
+      }
+    }
+
+    // Calculate statistics
+    const totalOperations = fetchedCount;
+    const byType = [];
+    let sorobanCount = 0;
+
+    for (const [type, count] of Object.entries(operationCounts)) {
+      const percent = totalOperations > 0 ? parseFloat(((count / totalOperations) * 100).toFixed(2)) : 0;
+      byType.push({ type, count, percent });
+
+      if (SOROBAN_OPERATION_TYPES.includes(type)) {
+        sorobanCount += count;
+      }
+    }
+
+    // Sort by count descending
+    byType.sort((a, b) => b.count - a.count);
+
+    const sorobanSharePercent =
+      totalOperations > 0
+        ? parseFloat(((sorobanCount / totalOperations) * 100).toFixed(2))
+        : 0;
+
+    const data = {
+      sampledOperations: totalOperations,
+      fromLedger: minLedger === Infinity ? null : minLedger,
+      toLedger: maxLedger === -Infinity ? null : maxLedger,
+      byType,
+      sorobanSharePercent,
+    };
+
+    cacheService.set(cacheKey, data, OPERATION_STATS_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
