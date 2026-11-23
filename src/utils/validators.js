@@ -1,4 +1,5 @@
 const { StrKey } = require("@stellar/stellar-sdk");
+const { parseUTCDate } = require("./date");
 
 /**
  * Format a query-parameter validation message.
@@ -18,12 +19,29 @@ function qp(param, msg) {
  * @returns {Error}
  */
 function makeInvalidAccountIdError(accountId) {
-  const err = new Error(
-    `"${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
-  );
+  const value = typeof accountId === "string" ? accountId : "";
+  let reason;
+  if (value.startsWith("S")) reason = "secret_seed";
+  else if (value.startsWith("M")) reason = "muxed_address";
+  else if (value.startsWith("C")) reason = "contract_address";
+  else if (!value.startsWith("G")) reason = "wrong_prefix";
+  else if (value.length !== 56) reason = "wrong_length";
+  else if (!/^[A-Z2-7]+$/.test(value)) reason = "invalid_characters";
+  else reason = "bad_checksum";
+  const suggestions = {
+    wrong_prefix: "Use a public account address starting with G.",
+    wrong_length: "Use a G... account address exactly 56 characters long.",
+    invalid_characters: "Use uppercase Base32 characters A-Z and 2-7 only.",
+    bad_checksum: "Check for a typo and copy the account address again.",
+    muxed_address: "Use the base G... account instead of the muxed M... address.",
+    contract_address: "Use a G... account address instead of a C... contract address.",
+    secret_seed: "Never share a secret seed. Use the public G... account address instead.",
+  };
+  const err = new Error("The supplied value is not a valid Stellar account address.");
   err.isInvalidAccountId = true;
-  err.accountId = accountId;
-  err.suggestion = "Account addresses start with G and are 56 characters long.";
+  err.type = "InvalidAccountId";
+  err.details = { reason };
+  err.suggestion = suggestions[reason];
   err.status = 400;
   return err;
 }
@@ -72,6 +90,38 @@ function validateAccountId(accountId) {
   if (typeof accountId !== "string" || !StrKey.isValidEd25519PublicKey(accountId)) {
     throw makeInvalidAccountIdError(accountId);
   }
+}
+
+/**
+ * Validate a Stellar public key in lightweight boolean form.
+ *
+ * @param {string|null|undefined} address
+ * @returns {boolean}
+ */
+function validateStellarAddress(address) {
+  if (typeof address !== "string") return false;
+  const trimmed = address.trim();
+  if (!trimmed) return false;
+  if (!trimmed.startsWith("G")) return false;
+  if (trimmed.length !== 56) return false;
+  return StrKey.isValidEd25519PublicKey(trimmed);
+}
+
+/**
+ * Validate a credential type token.
+ *
+ * Allowed characters: letters, digits, underscore, dash, and dot.
+ * Maximum length: 64 characters.
+ *
+ * @param {string|null|undefined} type
+ * @returns {boolean}
+ */
+function validateCredentialType(type) {
+  if (typeof type !== "string") return false;
+  const trimmed = type.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > 64) return false;
+  return /^[A-Za-z0-9._-]+$/.test(trimmed);
 }
 
 function validateContractId(contractId) {
@@ -133,7 +183,11 @@ function validateAssetCode(code) {
 function validateLimit(limit, max = 100) {
   const parsed = parseInt(limit, 10);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
-    const err = new Error("limit must be a number between 1 and 100.");
+    const defaultMessage = "limit must be a number between 1 and 100.";
+    const message = max !== 100
+      ? `limit must be a number between 1 and ${max}.`
+      : defaultMessage;
+    const err = new Error(message);
     err.isInvalidLimit = true;
     err.status = 400;
     err.receivedValue = limit !== undefined ? String(limit).slice(0, 50) : undefined;
@@ -154,7 +208,6 @@ function validateOrder(order) {
   const lowerOrder = String(order).toLowerCase();
   if (!["asc", "desc"].includes(lowerOrder)) {
     throw makeValidationError(
-      `Invalid order parameter: "${order}". Valid values are "asc" or "desc".`,
       qp("order", 'must be either "asc" or "desc".'),
       "order",
       order,
@@ -181,7 +234,7 @@ function validateAsset(code, issuer) {
   if (!code) {
     throw makeInvalidAssetError(
       "Asset code is required.",
-      "Provide a valid asset code (1–12 alphanumeric characters), e.g. USDC."
+      "Provide a valid asset code (14–12 alphanumeric characters), e.g. USDC."
     );
   }
 
@@ -202,14 +255,14 @@ function validateAsset(code, issuer) {
   if (!issuer) {
     throw makeInvalidAssetError(
       "Asset issuer is required.",
-      "Provide the issuer's Stellar public key (a G... address), e.g. GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN."
+      "Provide the issuer's Stellar public key (a G... address), e.g. GA5ZSEYJB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN."
     );
   }
 
   if (!StrKey.isValidEd25519PublicKey(issuer)) {
     throw makeInvalidAssetError(
       `Issuer address "${String(issuer).slice(0, 10)}..." is not a valid Stellar public key.`,
-      "The issuer must be a valid Ed25519 public key starting with G (56 characters), e.g. GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN."
+      "The issuer must be a valid Ed25519 public key starting with G (56 characters), e.g. GA5ZSEYJB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN."
     );
   }
 }
@@ -236,17 +289,140 @@ function validateAsset(code, issuer) {
  *   validateCursor(req.query.cursor);
  * }
  */
+const CURSOR_PATTERN = /^[A-Za-z0-9-]+$/;
+
 function validateCursor(cursor) {
-  if (cursor === null || cursor === undefined || typeof cursor !== "string" || cursor.trim() === "") {
+  if (
+    cursor === null ||
+    cursor === undefined ||
+    typeof cursor !== "string" ||
+    cursor.trim() === "" ||
+    !CURSOR_PATTERN.test(cursor)
+  ) {
     const err = new Error("The provided cursor value is invalid.");
     err.isInvalidCursor = true;
     err.type = "InvalidCursor";
-    err.suggestion =
-      "Use the cursor value returned in the previous response's data.cursor field.";
+    err.suggestion = "Use the cursor returned in the previous response.";
     err.status = 400;
     throw err;
   }
   return cursor;
+}
+
+/**
+ * Validate and parse an ISO 8601 date string supplied as a query parameter.
+ *
+ * Accepts ISO 8601 dates and date-times (e.g. "2024-01-15",
+ * "2024-01-15T12:00:00Z", "2024-01-15T12:00:00+02:00"). Values without a zone
+ * designator are interpreted as UTC, never as server-local time. Empty strings
+ * and values that are not valid ISO 8601 dates are rejected with a structured
+ * 400 error.
+ *
+ * @param {string} value - Raw query-parameter value to validate.
+ * @param {string} field - Parameter name used in error messages (e.g. "startDate").
+ * @returns {Date} A valid Date object.
+ * @throws {Error} A validation error (isValidation = true, status = 400) when invalid.
+ */
+function validateISODate(value, field) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw makeValidationError(
+      `Query param '${field}' must be a valid ISO 8601 date string (e.g. "2024-01-15" or "2024-01-15T12:00:00Z").`,
+      field,
+      value,
+      "ISO 8601 date string"
+    );
+  }
+  // Parse as UTC: a zone-less "2024-01-15T12:00:00" must mean the same instant
+  // on every server, not the server's local time.
+  const date = parseUTCDate(value);
+  if (isNaN(date.getTime())) {
+    throw makeValidationError(
+      `Query param '${field}' is not a valid date: "${String(value).slice(0, 50)}".`,
+      field,
+      value,
+      "ISO 8601 date string"
+    );
+  }
+  return date;
+}
+
+/**
+ * Validate a transaction hash.
+ *
+ * A valid transaction hash is a 64-character hexadecimal string.
+ * Throws an error with `isInvalidTransactionHash = true` and the standardised
+ * { type: "InvalidTransactionHash", message, suggestion } shape when invalid.
+ *
+ * @param {string} hash - The transaction hash to validate.
+ * @returns {string} The validated hash (same value).
+ * @throws {Error} Throws an error with `isInvalidTransactionHash = true` when invalid.
+ */
+function validateTransactionHash(hash) {
+  const isHex64 = typeof hash === "string" && /^[0-9a-fA-F]{64}$/.test(hash);
+  if (!isHex64) {
+    const err = new Error(`'${hash}' is not a valid transaction hash.`);
+    err.isInvalidTransactionHash = true;
+    err.type = "InvalidTransactionHash";
+    err.suggestion = "Transaction hashes are 64-character hexadecimal strings.";
+    err.status = 400;
+    throw err;
+  }
+  return hash;
+}
+
+/**
+ * Returns true when the given string is a valid Stellar liquidity pool ID.
+ *
+ * A pool ID is a 64-character lowercase hexadecimal string as returned by
+ * Horizon. We validate the format before hitting Horizon so callers receive a
+ * clean 400 error rather than a Horizon 404 for a syntactically wrong ID.
+ *
+ * @param {string|null|undefined} poolId
+ * @returns {boolean}
+ */
+function isValidPoolId(poolId) {
+  return typeof poolId === "string" && /^[0-9a-f]{64}$/.test(poolId);
+}
+
+/**
+ * Validate and parse the `days` lookback query parameter.
+ *
+ * Defaults to 30 when the value is absent (undefined or null). Rejects
+ * non-numeric, non-integer, zero, and negative values with a structured
+ * validation error (isValidation = true, status = 400, field = "days").
+ *
+ * @param {string|number|null|undefined} value - Raw query-parameter value.
+ * @param {number} [defaultDays=30] - Value used when the parameter is absent.
+ * @returns {number} The parsed positive integer number of days.
+ * @throws {Error} A validation error when the value is invalid.
+ */
+function validateDaysLookback(value, defaultDays = 30) {
+  if (value === undefined || value === null || value === "") {
+    return defaultDays;
+  }
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    const err = makeValidationError(
+      qp("days", "must be a positive integer."),
+      "days",
+      value,
+      "positive integer (e.g. 30)"
+    );
+    err.status = 400;
+    throw err;
+  }
+  const parsed = parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    const err = makeValidationError(
+      qp("days", "must be a positive integer."),
+      "days",
+      value,
+      "positive integer (e.g. 30)"
+    );
+    err.status = 400;
+    throw err;
+  }
+  return parsed;
 }
 
 module.exports = {
@@ -257,4 +433,10 @@ module.exports = {
   validateOrder,
   validateAsset,
   validateCursor,
+  validateISODate,
+  validateStellarAddress,
+  validateCredentialType,
+  validateTransactionHash,
+  isValidPoolId,
+  validateDaysLookback,
 };

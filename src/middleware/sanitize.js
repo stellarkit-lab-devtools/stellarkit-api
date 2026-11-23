@@ -2,10 +2,34 @@
  * Sanitize middleware for all incoming route parameters and query strings.
  * - Trims whitespace from all req.params and req.query string values
  * - Strips null bytes (\0) from all string inputs
+ * - Validates route params against injection patterns and a 100-character limit
  * - Returns 400 if any single param or query value exceeds 500 characters
  */
 
 const MAX_PARAM_LENGTH = 500;
+const MAX_ROUTE_PARAM_LENGTH = 100;
+const ROUTE_PARAM_INJECTION_PATTERN = /[<>'";]|--/;
+
+function invalidRouteParamResponse(res, message) {
+  return res.status(400).json({
+    success: false,
+    error: {
+      type: "InvalidParameter",
+      message,
+    },
+  });
+}
+
+function validateRouteParam(value) {
+  if (typeof value !== "string") return null;
+  if (value.length > MAX_ROUTE_PARAM_LENGTH) {
+    return `Route parameter exceeds maximum allowed length of ${MAX_ROUTE_PARAM_LENGTH} characters.`;
+  }
+  if (ROUTE_PARAM_INJECTION_PATTERN.test(value)) {
+    return "Route parameter contains disallowed characters.";
+  }
+  return null;
+}
 
 function sanitizeString(value) {
   return value.trim().replace(/\0/g, "");
@@ -55,11 +79,7 @@ function sanitizeAny(value, res) {
 }
 
 function sanitize(req, res, next) {
-  const sources = [
-    req.params || null,
-    req.query || null,
-    req.body || null,
-  ];
+  const sources = [req.query || null, req.body || null];
 
   // Validate max-length for any string field first (without mutating)
   function walkValidate(value) {
@@ -84,6 +104,14 @@ function sanitize(req, res, next) {
         message: `Input exceeds maximum allowed length of ${MAX_PARAM_LENGTH} characters.`,
       },
     });
+  }
+
+  // Validate route params for injection patterns and length before sanitizing
+  for (const key of Object.keys(req.params || {})) {
+    const paramError = validateRouteParam(req.params[key]);
+    if (paramError) {
+      return invalidRouteParamResponse(res, paramError);
+    }
   }
 
   // Sanitize req.params
@@ -112,3 +140,4 @@ function sanitize(req, res, next) {
 }
 
 module.exports = sanitize;
+module.exports.sanitizeAny = sanitizeAny;

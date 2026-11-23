@@ -19,9 +19,14 @@ jest.mock("../src/config/stellar", () => ({
   },
 }));
 
+jest.mock("../src/utils/tomlResolver", () => ({
+  getAssetMetadataFromToml: jest.fn(),
+}))
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
 const cacheService = require("../src/services/cache");
+const { getAsset } = require("node:sea");
+const { getAssetMetadataFromToml } = require("../src/utils/tomlResolver");
 
 const ACCOUNT_ID = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
 const ISSUER_A = "GD62SRSGF4XVUHZYLZNAMTUTOH7CKJ2WZWX6HNUTZ4G5SFKNAM6G2OXD";
@@ -127,4 +132,66 @@ describe("GET /account/:id/trustlines?assetCode=", () => {
       isAuthorizedToMaintainLiabilities: true,
     });
   });
+});
+
+describe("GET /account/:id/trustlines?includeMetadata=", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    cacheService.flush();
+    server.loadAccount.mockImplementation(async (id) => {
+      if (id === ACCOUNT_ID) return makeAccount();
+      return { id, home_domain: "example.com" };
+    });
+  });
+
+  it("does not include metadata field by default", async () => {
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/trustlines`,
+    );
+
+    expect(res.statusCode).toBe(200);
+    res.body.data.items.forEach((trustline) => {
+      expect(trustline).not.toHaveProperty("metadata");
+    });
+    expect(getAssetMetadataFromToml).not.toHaveBeenCalled();
+
+
+  });
+
+
+  it("embeds metadata when includeMetadata=true", async () => {
+    getAssetMetadataFromToml.mockResolvedValue({
+      name: "USD Coin",
+      image: "https://example.com/usdc.png",
+      description: "A fully collateralized US dollar stablecoin",
+    });
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/trustlines?includeMetadata=true`,
+    );
+
+    expect(res.statusCode).toBe(200);
+    res.body.data.items.forEach((trustline) => {
+      expect(trustline.metadata).toEqual({
+        name: "USD Coin",
+        image: "https://example.com/usdc.png",
+        description: "A fully collateralized US dollar stablecoin",
+      });
+    });
+  });
+
+
+  it("returns null metadata when TOML data is missing", async () => {
+    getAssetMetadataFromToml.mockResolvedValue(null);
+
+    const res = await request(app).get(
+      `/account/${ACCOUNT_ID}/trustlines?includeMetadata=true`,
+    );
+
+    expect(res.statusCode).toBe(200);
+    res.body.data.items.forEach((trustline) => {
+      expect(trustline.metadata).toBeNull();
+    });
+  });
+
 });

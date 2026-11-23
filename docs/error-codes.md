@@ -64,6 +64,7 @@ This document lists all HTTP status codes returned by the StellarKit API, along 
 - Invalid asset code (empty, too long, or contains special characters)
 - Invalid query parameters
 - Malformed request body
+- Missing or non-numeric `?amount=` query param on `GET /dex/price-impact/:sellAsset/:buyAsset` (returns `ValidationError`)
 
 **Example scenario:** Requesting account details with an invalid account ID.
 
@@ -79,6 +80,14 @@ This document lists all HTTP status codes returned by the StellarKit API, along 
   }
 }
 ```
+
+**Timing note:** To prevent account enumeration, format-validation 400s on account
+routes (`InvalidAccountId`, `ValidationError`, `MissingParameter`) are padded to
+take at least `MIN_RESPONSE_TIME_MS` (default: 200 ms). This makes them
+indistinguishable by timing from an `AccountNotFound` 404, which requires a
+Horizon round trip. See
+[Environment Configuration](./environment-configuration.md#min_response_time_ms)
+for details.
 
 ---
 
@@ -116,6 +125,7 @@ This document lists all HTTP status codes returned by the StellarKit API, along 
 - Requesting a transaction that doesn't exist
 - Requesting an asset that isn't found
 - Invalid API route
+- No order book exists for the requested pair on `GET /dex/price-impact/:sellAsset/:buyAsset` (returns `OrderBookEmpty`)
 
 **Example scenario:** Requesting details for an unfunded account.
 

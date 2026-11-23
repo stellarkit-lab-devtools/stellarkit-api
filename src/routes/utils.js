@@ -1,17 +1,48 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const axios = require("axios");
 const router = express.Router();
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 const { success } = require("../utils/response");
 const { validateAccountId } = require("../utils/validators");
-const { Transaction, Networks, Keypair } = require("@stellar/stellar-sdk");
+const {
+  Account,
+  MuxedAccount,
+  Transaction,
+  TransactionBuilder,
+  FeeBumpTransaction,
+  Networks,
+  Keypair,
+  Asset,
+  LiquidityPoolAsset,
+  Claimant,
+  Address,
+} = require("@stellar/stellar-sdk");
+const { normalizeAsset } = require("../utils/asset");
 const { server } = require("../config/stellar");
+
+router.post("/muxed-address", (req, res, next) => {
+  try {
+    const { baseAccount, id } = req.body || {};
+    validateAccountId(baseAccount);
+    if (typeof id !== "string" || !/^[0-9]+$/.test(id) || BigInt(id) > 18446744073709551615n) {
+      throw createValidationError("id must be a string containing a uint64 from 0 to 18446744073709551615.");
+    }
+    const muxed = new MuxedAccount(new Account(baseAccount, "0"), BigInt(id).toString());
+    return success(res, { muxedAddress: muxed.accountId(), baseAccount, id });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const FRIENDBOT_URL = "https://friendbot.stellar.org";
 const STROOPS_PER_XLM = 10000000n;
+const INT64_MAX = (1n << 63n) - 1n;
+const { xlmToStroops } = require("../utils/parseStellarAmount");
 const AVERAGE_LEDGER_CLOSE_SECONDS = 5;
-const { decodeMemo } = require("../utils/memo");
+const { decodeMemo, validateMemo } = require("../utils/memo");
 
 function createValidationError(message) {
   const err = new Error(message);
@@ -35,16 +66,13 @@ function parseXlmToStroops(value) {
     );
   }
 
-  const [whole, fractional = ""] = value.split(".");
-  const stroops =
-    BigInt(whole) * STROOPS_PER_XLM +
-    BigInt(fractional.padEnd(7, "0"));
+  const stroops = xlmToStroops(value);
 
-  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw createValidationError("Converted stroop value exceeds the safe integer range.");
+  if (stroops > INT64_MAX) {
+    throw createValidationError("Converted stroop value exceeds the int64 range.");
   }
 
-  return Number(stroops);
+  return stroops;
 }
 
 function parseStroops(value) {
@@ -61,11 +89,11 @@ function parseStroops(value) {
   }
 
   const stroops = BigInt(value);
-  if (stroops > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw createValidationError("Query parameter 'stroops' exceeds the safe integer range.");
+  if (stroops > INT64_MAX) {
+    throw createValidationError("Query parameter 'stroops' exceeds the int64 range.");
   }
 
-  return Number(stroops);
+  return stroops;
 }
 
 function formatStroopsToXlm(stroops) {
@@ -73,6 +101,12 @@ function formatStroopsToXlm(stroops) {
   const whole = stroopValue / STROOPS_PER_XLM;
   const fractional = (stroopValue % STROOPS_PER_XLM).toString().padStart(7, "0");
   return `${whole}.${fractional}`;
+}
+
+// Keep small values numeric for backwards compatibility; expose larger
+// int64 values as strings so JSON clients never lose precision.
+function serializeStroops(stroops) {
+  return stroops <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(stroops) : stroops.toString();
 }
 
 /**
@@ -154,6 +188,34 @@ router.get("/memo", (req, res, next) => {
 });
 
 /**
+ * POST /utils/validate-memo
+ * Validate a memo value for its declared Stellar memo type without touching
+ * Horizon. Mirrors GET /utils/validate-account and GET /utils/validate-hash,
+ * but takes the declared type and raw value in the JSON body.
+ *
+ * @param {string} type - one of: none, text, id, hash, return
+ * @param {string} [value] - the memo value to validate
+ *
+ * @returns {{ valid: boolean, type: string, value: string|null,
+ *   byteLength: number|null, error: string|null }}
+ * @throws {Error} 400 when `type` is missing
+ *
+ * @example
+ * POST /utils/validate-memo
+ * { "type": "text", "value": "invoice-123" }
+ * Validate a memo value before it is attached to a transaction.
+ */
+router.post("/validate-memo", validateBody(schemas.validateMemo), (req, res, next) => {
+  try {
+    const { type, value } = req.body || {};
+    const result = validateMemo(type, value);
+    return success(res, result);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/**
  * GET /utils/base64
  * Encode or decode a string using Base64.
  *
@@ -230,14 +292,14 @@ router.get("/convert", (req, res, next) => {
       const convertedStroops = parseXlmToStroops(xlm);
       return success(res, {
         xlm: formatStroopsToXlm(convertedStroops),
-        stroops: convertedStroops,
+        stroops: serializeStroops(convertedStroops),
       });
     }
 
     const convertedStroops = parseStroops(stroops);
     return success(res, {
       xlm: formatStroopsToXlm(convertedStroops),
-      stroops: convertedStroops,
+      stroops: serializeStroops(convertedStroops),
     });
   } catch (err) {
     next(err);
@@ -454,7 +516,7 @@ router.get("/validate-hash", (req, res, next) => {
  * POST /utils/decode-xdr
  * { "xdr": "AAAAAgAAAAD..." }
  */
-router.post("/decode-xdr", (req, res, next) => {
+router.post("/decode-xdr", validateBody(schemas.decodeXdr), (req, res, next) => {
   try {
     const { xdr } = req.body;
 
@@ -513,6 +575,270 @@ router.post("/decode-xdr", (req, res, next) => {
   }
 });
 
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * Converts an SDK camelCase operation type (e.g. "pathPaymentStrictSend")
+ * into the snake_case form Horizon uses (e.g. "path_payment_strict_send").
+ */
+function toSnakeCaseType(type) {
+  return String(type).replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+
+function formatAssetLabel(asset) {
+  if (!asset || typeof asset !== "object") return String(asset);
+  if (asset.type === "native") return "XLM";
+  if (asset.code) return `${asset.code}:${asset.issuer}`;
+  if (asset.liquidityPoolId) return `liquidity pool ${asset.liquidityPoolId}`;
+  return asset.type || "unknown asset";
+}
+
+/**
+ * Recursively converts values found on SDK operation objects (Asset
+ * instances, Claimants, Buffers, XDR structs, BigInts) into plain JSON with
+ * camelCase keys.
+ */
+function toPlainValue(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "bigint") return value.toString();
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return Buffer.from(value).toString("base64");
+  }
+  if (Array.isArray(value)) return value.map(toPlainValue);
+  if (value instanceof Asset) {
+    return value.isNative()
+      ? normalizeAsset("XLM", null, "native")
+      : normalizeAsset(value.getCode(), value.getIssuer(), value.getAssetType());
+  }
+  if (value instanceof LiquidityPoolAsset) {
+    const params = value.getLiquidityPoolParameters();
+    return {
+      type: "liquidity_pool_shares",
+      assetA: toPlainValue(value.assetA),
+      assetB: toPlainValue(value.assetB),
+      fee: params.fee,
+    };
+  }
+  if (value instanceof Claimant) {
+    return {
+      destination: value.destination,
+      predicate: value.predicate.toXDR("base64"),
+    };
+  }
+  if (typeof value === "object") {
+    if (typeof value.toXDR === "function") return value.toXDR("base64");
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !key.startsWith("_"))
+        .map(([key, v]) => [key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), toPlainValue(v)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Extracts contract id / function name from an invokeHostFunction operation.
+ */
+function describeHostFunction(func) {
+  try {
+    const kind = func.switch().name;
+    if (kind === "hostFunctionTypeInvokeContract") {
+      const invoke = func.invokeContract();
+      return {
+        hostFunctionType: "invoke_contract",
+        contractId: Address.fromScAddress(invoke.contractAddress()).toString(),
+        function: invoke.functionName().toString(),
+        argsCount: invoke.args().length,
+      };
+    }
+    if (kind === "hostFunctionTypeCreateContract" || kind === "hostFunctionTypeCreateContractV2") {
+      return { hostFunctionType: "create_contract" };
+    }
+    if (kind === "hostFunctionTypeUploadContractWasm") {
+      return { hostFunctionType: "upload_contract_wasm" };
+    }
+    return { hostFunctionType: kind };
+  } catch (_) {
+    return { hostFunctionType: "unknown" };
+  }
+}
+
+/**
+ * Produces a short plain-language description of a decoded operation.
+ */
+function summarizeOperation(op, source) {
+  const who = source || "the transaction source";
+  switch (op.type) {
+    case "create_account":
+      return `${who} creates account ${op.destination} with a starting balance of ${op.startingBalance} XLM`;
+    case "payment":
+      return `${who} pays ${op.amount} ${formatAssetLabel(op.asset)} to ${op.destination}`;
+    case "path_payment_strict_receive":
+      return `${who} sends at most ${op.sendMax} ${formatAssetLabel(op.sendAsset)} so that ${op.destination} receives exactly ${op.destAmount} ${formatAssetLabel(op.destAsset)}`;
+    case "path_payment_strict_send":
+      return `${who} sends exactly ${op.sendAmount} ${formatAssetLabel(op.sendAsset)} so that ${op.destination} receives at least ${op.destMin} ${formatAssetLabel(op.destAsset)}`;
+    case "manage_sell_offer":
+      return `${who} offers to sell ${op.amount} ${formatAssetLabel(op.selling)} for ${formatAssetLabel(op.buying)} at price ${op.price}`;
+    case "manage_buy_offer":
+      return `${who} offers to buy ${op.buyAmount} ${formatAssetLabel(op.buying)} with ${formatAssetLabel(op.selling)} at price ${op.price}`;
+    case "create_passive_sell_offer":
+      return `${who} creates a passive offer to sell ${op.amount} ${formatAssetLabel(op.selling)} for ${formatAssetLabel(op.buying)} at price ${op.price}`;
+    case "set_options":
+      return `${who} updates account options`;
+    case "change_trust":
+      return `${who} sets a trustline for ${formatAssetLabel(op.line)} with limit ${op.limit}`;
+    case "allow_trust":
+      return `${who} ${op.authorize ? "authorizes" : "deauthorizes"} ${op.trustor} to hold ${op.assetCode}`;
+    case "account_merge":
+      return `${who} merges its account into ${op.destination}`;
+    case "manage_data":
+      return op.value === null || op.value === undefined
+        ? `${who} deletes data entry "${op.name}"`
+        : `${who} sets data entry "${op.name}"`;
+    case "bump_sequence":
+      return `${who} bumps its sequence number to ${op.bumpTo}`;
+    case "create_claimable_balance":
+      return `${who} creates a claimable balance of ${op.amount} ${formatAssetLabel(op.asset)}`;
+    case "claim_claimable_balance":
+      return `${who} claims claimable balance ${op.balanceId}`;
+    case "begin_sponsoring_future_reserves":
+      return `${who} begins sponsoring future reserves for ${op.sponsoredId}`;
+    case "end_sponsoring_future_reserves":
+      return `${who} ends sponsoring future reserves`;
+    case "clawback":
+      return `${who} claws back ${op.amount} ${formatAssetLabel(op.asset)} from ${op.from}`;
+    case "invoke_host_function":
+      return op.contractId
+        ? `${who} invokes function "${op.function}" on contract ${op.contractId}`
+        : `${who} invokes a Soroban host function (${op.hostFunctionType})`;
+    default:
+      return `${who} performs a ${op.type.replace(/_/g, " ")} operation`;
+  }
+}
+
+/**
+ * Formats a single SDK operation into a camelCase, JSON-safe breakdown.
+ */
+function formatDecodedOperation(op, index) {
+  const { type, source, ...fields } = op;
+  const formatted = {
+    index,
+    type: toSnakeCaseType(type),
+    source: source || null,
+  };
+
+  const plainFields = toPlainValue(fields);
+  if (type === "invokeHostFunction") {
+    Object.assign(formatted, describeHostFunction(op.func));
+    formatted.auth = plainFields.auth || [];
+  } else {
+    Object.assign(formatted, plainFields);
+  }
+
+  formatted.description = summarizeOperation(formatted, source);
+  return formatted;
+}
+
+function formatTimeBound(value) {
+  const seconds = Number(value || 0);
+  return {
+    unix: seconds,
+    iso: seconds > 0 ? new Date(seconds * 1000).toISOString() : null,
+  };
+}
+
+/**
+ * POST /utils/decode-transaction
+ * Decode a base64 transaction envelope XDR into a human-readable breakdown:
+ * fee (stroops and XLM), source account, sequence number, time bounds, memo
+ * and each operation with its type, source and type-specific fields in
+ * camelCase plus a plain-language description.
+ *
+ * Fee-bump envelopes are supported: the outer fee and fee source are reported
+ * and the inner transaction is decoded for the remaining fields.
+ *
+ * Body: { xdr: string }
+ *
+ * @returns {{ fee, feeXLM, sourceAccount, sequenceNumber, timeBounds, memo,
+ *   operationCount, operations, envelopeType, feeBump }}
+ * @throws {Error} 400 when xdr is missing, not valid base64, or not a valid
+ *   transaction envelope
+ *
+ * @example
+ * POST /utils/decode-transaction
+ * { "xdr": "AAAAAgAAAAD..." }
+ */
+router.post("/decode-transaction", validateBody(schemas.decodeTransaction), (req, res, next) => {
+  try {
+    const { xdr: envelopeXdr } = req.body || {};
+
+    if (typeof envelopeXdr !== "string" || envelopeXdr.trim() === "") {
+      throw createValidationError("Field 'xdr' is required and must be a base64-encoded transaction envelope.");
+    }
+
+    const input = envelopeXdr.trim();
+    if (!BASE64_PATTERN.test(input) || input.length % 4 !== 0) {
+      throw createValidationError("Field 'xdr' is not valid base64.");
+    }
+
+    const networkPassphrase = process.env.STELLAR_NETWORK === "mainnet"
+      ? Networks.PUBLIC
+      : Networks.TESTNET;
+
+    let envelope;
+    try {
+      envelope = TransactionBuilder.fromXDR(input, networkPassphrase);
+    } catch (e) {
+      throw createValidationError(
+        `Field 'xdr' is valid base64 but could not be decoded as a Stellar transaction envelope: ${e.message}`,
+      );
+    }
+
+    const isFeeBump = envelope instanceof FeeBumpTransaction;
+    const tx = isFeeBump ? envelope.innerTransaction : envelope;
+    const fee = String(envelope.fee);
+
+    const memo = tx.memo && tx.memo.type !== "none"
+      ? {
+          type: tx.memo.type,
+          value: Buffer.isBuffer(tx.memo.value)
+            ? tx.memo.value.toString("hex")
+            : String(tx.memo.value),
+        }
+      : null;
+
+    const timeBounds = tx.timeBounds
+      ? {
+          minTime: formatTimeBound(tx.timeBounds.minTime),
+          maxTime: formatTimeBound(tx.timeBounds.maxTime),
+        }
+      : null;
+
+    const operations = tx.operations.map((op, index) => formatDecodedOperation(op, index));
+
+    return success(res, {
+      envelopeType: isFeeBump ? "fee_bump" : "transaction",
+      fee,
+      feeXLM: formatStroopsToXlm(fee),
+      sourceAccount: tx.source,
+      sequenceNumber: tx.sequence,
+      timeBounds,
+      memo,
+      operationCount: operations.length,
+      operations,
+      feeBump: isFeeBump
+        ? {
+            feeSource: envelope.feeSource,
+            innerFee: String(tx.fee),
+            innerFeeXLM: formatStroopsToXlm(tx.fee),
+          }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /**
  * GET /utils/network-passphrase
  * Returns the Stellar network passphrase for the currently configured network.
@@ -559,6 +885,228 @@ router.get("/keypair", (req, res, next) => {
       publicKey: keypair.publicKey(),
       secretKey: keypair.secret(),
       warning: "Never share your secret key",
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /utils/simulate-payment
+ * Dry-runs a payment against live account state without submitting anything.
+ *
+ * Body: { source, destination, amount, assetCode?, assetIssuer? }
+ * Omit assetCode (or pass "XLM") for native payments.
+ *
+ * Checks performed:
+ *   - sender exists and has enough spendable balance (XLM keeps the minimum reserve)
+ *   - destination exists
+ *   - destination holds an authorized trustline for non-native assets
+ *
+ * @returns {{ canSend: boolean, warnings: Array<{ type: string, message: string }> }}
+ */
+router.post("/simulate-payment", validateBody(schemas.simulatePayment), async (req, res, next) => {
+  try {
+    const { source, destination, amount, assetCode, assetIssuer } = req.body || {};
+    validateAccountId(source);
+    validateAccountId(destination);
+
+    const amountNum = Number(amount);
+    if (amount === undefined || amount === null || !Number.isFinite(amountNum) || amountNum <= 0) {
+      throw createValidationError("Field 'amount' must be a positive number.");
+    }
+
+    const isNative = !assetCode || String(assetCode).toUpperCase() === "XLM";
+    if (!isNative) validateAccountId(assetIssuer);
+    const code = isNative ? "XLM" : String(assetCode).toUpperCase();
+
+    const matchesAsset = (b) =>
+      isNative
+        ? b.asset_type === "native"
+        : b.asset_code === code && b.asset_issuer === assetIssuer;
+
+    const isNotFound = (err) =>
+      (err && err.response && err.response.status === 404) || (err && err.name === "NotFoundError");
+
+    const warnings = [];
+
+    let sender = null;
+    try {
+      sender = await server.loadAccount(source);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+      warnings.push({ type: "sender_not_found", message: `Sender account ${source} does not exist.` });
+    }
+
+    if (sender) {
+      const bal = (sender.balances || []).find(matchesAsset);
+      if (!bal) {
+        warnings.push({ type: "balance", message: `Sender does not hold ${code}.` });
+      } else {
+        let available = parseFloat(bal.balance) - parseFloat(bal.selling_liabilities || "0");
+        if (isNative) {
+          const subentries = Number(sender.subentry_count || 0);
+          const sponsoring = Number(sender.num_sponsoring || 0);
+          const sponsored = Number(sender.num_sponsored || 0);
+          available -= (2 + subentries + sponsoring - sponsored) * 0.5;
+        }
+        if (available < amountNum) {
+          warnings.push({
+            type: "balance",
+            message: `Insufficient ${code} balance: ${Math.max(available, 0).toFixed(7)} available, ${amountNum.toFixed(7)} required.`,
+          });
+        }
+      }
+    }
+
+    let recipient = null;
+    try {
+      recipient = await server.loadAccount(destination);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+      warnings.push({
+        type: "destination_not_found",
+        message: `Destination account ${destination} does not exist.${isNative ? " Use create_account instead." : ""}`,
+      });
+    }
+
+    if (recipient && !isNative) {
+      const line = (recipient.balances || []).find(matchesAsset);
+      if (!line) {
+        warnings.push({ type: "trustline", message: `Recipient has no trustline for ${code}:${assetIssuer}.` });
+      } else if (line.is_authorized === false) {
+        warnings.push({ type: "trustline", message: `Recipient trustline for ${code} is not authorized.` });
+      }
+    }
+
+    return success(res, {
+      canSend: warnings.length === 0,
+      source,
+      destination,
+      amount: amountNum.toFixed(7),
+      asset: isNative ? { code: "XLM", issuer: null, type: "native" } : { code, issuer: assetIssuer, type: code.length <= 4 ? "credit_alphanum4" : "credit_alphanum12" },
+      warnings,
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+/**
+ * GET /utils/asset-contract-id
+ * Derive the Soroban contract ID for any Stellar asset
+ *
+ * Query params:
+ *   - asset: Asset string ("XLM" for native, or "CODE:ISSUER" for credit assets)
+ *   - network: Optional network override ("testnet" or "mainnet")
+ *
+ * @returns {{ asset, contractId, network, networkPassphrase }}
+ * @throws {Error} 400 for invalid assets or unknown networks
+ *
+ * @example
+ * GET /utils/asset-contract-id?asset=XLM
+ * GET /utils/asset-contract-id?asset=USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+ * GET /utils/asset-contract-id?asset=XLM&network=mainnet
+ */
+router.get("/asset-contract-id", (req, res, next) => {
+  try {
+    const { asset, network: networkOverride } = req.query;
+
+    if (!asset || typeof asset !== "string" || asset.trim() === "") {
+      const err = new Error("Query parameter 'asset' is required (e.g. 'XLM' or 'USDC:ISSUER').");
+      err.statusCode = 400;
+      err.isValidation = true;
+      throw err;
+    }
+
+    const assetStr = asset.trim();
+    let stellarAsset;
+    let assetDisplay;
+
+    // Parse asset string
+    if (assetStr.toUpperCase() === "XLM") {
+      stellarAsset = Asset.native();
+      assetDisplay = "XLM";
+    } else {
+      const parts = assetStr.split(":");
+      if (parts.length !== 2) {
+        const err = new Error(
+          `Invalid asset format. Use "XLM" for native or "CODE:ISSUER" for credit assets.`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      const [code, issuer] = parts;
+
+      // Validate asset code
+      if (!code || code.length === 0 || code.length > 12) {
+        const err = new Error(
+          `Invalid asset code "${code}". Asset codes must be 1-12 alphanumeric characters.`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      if (!/^[A-Za-z0-9]+$/.test(code)) {
+        const err = new Error(
+          `Invalid asset code "${code}". Only alphanumeric characters are allowed.`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      // Validate issuer
+      const { StrKey } = require("@stellar/stellar-sdk");
+      if (!issuer || !StrKey.isValidEd25519PublicKey(issuer)) {
+        const err = new Error(
+          `Invalid issuer address "${issuer}". Must be a valid Stellar public key (G...).`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+
+      stellarAsset = new Asset(code, issuer);
+      assetDisplay = `${code}:${issuer}`;
+    }
+
+    // Determine network
+    let network, passphrase;
+    if (networkOverride) {
+      const lowerNetwork = networkOverride.toLowerCase();
+      if (lowerNetwork === "testnet") {
+        network = "testnet";
+        passphrase = Networks.TESTNET;
+      } else if (lowerNetwork === "mainnet") {
+        network = "mainnet";
+        passphrase = Networks.PUBLIC;
+      } else {
+        const err = new Error(
+          `Unknown network "${networkOverride}". Valid values: "testnet", "mainnet".`
+        );
+        err.statusCode = 400;
+        err.isValidation = true;
+        throw err;
+      }
+    } else {
+      // Use configured network
+      const configuredNetwork = process.env.STELLAR_NETWORK || "testnet";
+      network = configuredNetwork;
+      passphrase = configuredNetwork === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+    }
+
+    // Derive contract ID
+    const contractId = stellarAsset.contractId(passphrase);
+
+    return success(res, {
+      asset: assetDisplay,
+      contractId,
+      network,
+      networkPassphrase: passphrase,
     });
   } catch (err) {
     next(err);

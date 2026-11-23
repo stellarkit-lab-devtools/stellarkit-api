@@ -49,6 +49,35 @@ interface RequestOptions {
   body?: unknown;
 }
 
+/** Context passed to `onRequest` hooks. Mutate `headers` to add request headers. */
+export interface RequestHookContext {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+/** Summary passed to `onResponse` hooks after a successful or failed HTTP response. */
+export interface ResponseHookInfo {
+  url: string;
+  method: string;
+  status: number;
+  durationMs: number;
+}
+
+type Hook<T> = ((value: T) => void | Promise<void>);
+
+/** Optional lifecycle hooks shared by every SDK request. */
+export interface ClientHooks {
+  onRequest?: Hook<RequestHookContext> | Array<Hook<RequestHookContext>>;
+  onResponse?: Hook<ResponseHookInfo> | Array<Hook<ResponseHookInfo>>;
+  onError?: Hook<StellarKitError> | Array<Hook<StellarKitError>>;
+  onHookError?: HookErrorHandler;
+}
+
+/** Called when a hook itself throws; hook failures never fail the SDK call. */
+export type HookErrorHandler = (error: unknown, hookName: string) => void;
+
 /**
  * StellarKit API Client for TypeScript
  *
@@ -119,17 +148,40 @@ export class StellarKitClient {
     const response = await request(this.fetchImplementation, urlString, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : null,
-    });
+      body,
+    }, "onRequest");
+
+    let response: Response;
+    try {
+      response = await fetch(urlString, {
+        method,
+        headers,
+        body: requestBody,
+      });
+    } catch (error) {
+      await this.runHooks<StellarKitError>(this.hooks.onError, error instanceof StellarKitError
+        ? error
+        : new StellarKitError(String((error as Error)?.message || error), 0, "NetworkError"), "onError");
+      throw error;
+    }
 
     const result = await response.json();
+    const durationMs = Date.now() - startedAt;
+    await this.runHooks<ResponseHookInfo>(this.hooks.onResponse, {
+      url: urlString,
+      method,
+      status: response.status,
+      durationMs,
+    }, "onResponse");
 
     if (!response.ok) {
-      throw new StellarKitError(
+      const error = new StellarKitError(
         result.error?.message || response.statusText,
         response.status,
         result.error?.type || "ApiError",
       );
+      await this.runHooks<StellarKitError>(this.hooks.onError, error, "onError");
+      throw error;
     }
 
     return result.data;
@@ -789,6 +841,28 @@ export class StellarKitClient {
    */
   async getPoolReserveRatio(poolId: string): Promise<unknown> {
     return this._request(`/liquidity-pools/${poolId}/reserve-ratio`);
+  }
+
+  // ── Soroban Contracts ─────────────────────────────────────────────────────
+
+  /**
+   * Get Soroban contract metadata backed by live Stellar RPC data.
+   *
+   * @param contractId - Soroban contract ID
+   * @returns Contract metadata including deployer and expiry status
+   */
+  async getSorobanContract(contractId: string): Promise<unknown> {
+    return this._request(`/soroban/contract/${contractId}`);
+  }
+
+  /**
+   * Get the status and decoded return value of a Soroban transaction.
+   *
+   * @param hash - 64-character hex transaction hash
+   * @returns Transaction status, return value, and ledger metadata
+   */
+  async getSorobanTransaction(hash: string): Promise<unknown> {
+    return this._request(`/soroban/transactions/${hash}`);
   }
 
   // ── Claimable Balances ─────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ const router = express.Router();
 const registerParamValidation = require("../middleware/validateRouteParams");
 registerParamValidation(router);
 
-const { server, NETWORK } = require("../config/stellar");
+const { server, NETWORK  } = require("../config/stellar");
 const { success, toISOTimestamp } = require("../utils/response");
 const { makeAccountNotFoundError } = require("../utils/errors");
 const { validateOrder } = require("../utils/validators");
@@ -12,13 +12,14 @@ const { validateOrder } = require("../utils/validators");
 function validateTransactionHash(hash) {
     const hashRegex = /^[0-9a-fA-F]{64}$/;
     if (!hashRegex.test(hash)) {
-        const err = new Error(
-            `Invalid transaction hash. Must be a 64-character hex string.`
-        );
+        const err = new Error(`\${'hash'} is not a valid transaction hash.`);
         err.isValidation = true;
         err.field = "hash";
         err.receivedValue = hash;
         err.expectedFormat = "64-character hex string";
+        err.status = 400;
+        err.type = "InvalidTransactionHash";
+        err.suggestion = "Transaction hashes are 64-character hexadecimal strings.";
         throw err;
     }
 }
@@ -112,7 +113,7 @@ router.get("/:hash/effects", async (req, res, next) => {
                 return next(
                     new (class extends Error {
                         constructor() {
-                            super(`Transaction ${hash} was not found on the Stellar ${NETWORK} network.`);
+                            super(`Transaction ${'hash'} was not found on the Stellar ${	NETWORG} network.`);
                             this.isTransactionNotFound = true;
                             this.hash = hash;
                             this.status = 404;

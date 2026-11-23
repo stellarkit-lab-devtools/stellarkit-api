@@ -46,3 +46,68 @@ describe("GET /utils/memo", () => {
     expect(res.body.error).toHaveProperty("type");
   });
 });
+
+describe("POST /utils/validate-memo", () => {
+  it("validates text memos by UTF-8 byte length", async () => {
+    const valid = await request(app)
+      .post("/utils/validate-memo")
+      .send({ type: "text", value: "Stellar memo" });
+    expect(valid.statusCode).toBe(200);
+    expect(valid.body.data).toEqual({
+      valid: true,
+      type: "text",
+      value: "Stellar memo",
+      byteLength: 12,
+      error: null,
+      errors: [],
+    });
+
+    const tooLong = await request(app)
+      .post("/utils/validate-memo")
+      .send({ type: "text", value: "é".repeat(15) });
+    expect(tooLong.body.data.valid).toBe(false);
+    expect(tooLong.body.data.byteLength).toBe(30);
+    expect(tooLong.body.data.errors[0]).toContain("28-byte limit");
+  });
+
+  it("validates ID memos as unsigned 64-bit integers", async () => {
+    const valid = await request(app)
+      .post("/utils/validate-memo")
+      .send({ type: "id", value: "18446744073709551615" });
+    expect(valid.body.data).toEqual({
+      valid: true,
+      type: "id",
+      value: "18446744073709551615",
+      byteLength: 8,
+      error: null,
+      errors: [],
+    });
+
+    const invalid = await request(app)
+      .post("/utils/validate-memo")
+      .send({ type: "id", value: "18446744073709551616" });
+    expect(invalid.body.data.valid).toBe(false);
+    expect(invalid.body.data.errors[0]).toContain("unsigned 64-bit integer range");
+  });
+
+  it.each(["hash", "return"])("validates %s memos as exactly 32 bytes", async (type) => {
+    const valid = await request(app)
+      .post("/utils/validate-memo")
+      .send({ type, value: "ab".repeat(32) });
+    expect(valid.body.data).toEqual({
+      valid: true,
+      type,
+      value: "ab".repeat(32),
+      byteLength: 32,
+      error: null,
+      errors: [],
+    });
+
+    const invalid = await request(app)
+      .post("/utils/validate-memo")
+      .send({ type, value: "ab".repeat(31) });
+    expect(invalid.body.data.valid).toBe(false);
+    expect(invalid.body.data.byteLength).toBe(31);
+    expect(invalid.body.data.errors[0]).toContain("exactly 32 bytes");
+  });
+});
