@@ -876,3 +876,160 @@ router.get("/contract/:id/invoke-simulation", async (req, res, next) => {
 });
 
 module.exports = router;
+
+/**
+ * GET /soroban/transactions/:hash
+ *
+ * Returns the status and decoded return value of a Soroban transaction.
+ *
+ * Wraps the Stellar RPC `getTransaction` method and decodes the result XDR
+ * into a native JSON value (BigInt values become strings). On FAILED
+ * transactions the errorCode is extracted from the result XDR. A NOT_FOUND
+ * response distinguishes "not yet seen" from "older than the RPC retention
+ * window" using the oldestLedger field.
+ *
+ * Path param:
+ *   - hash: 64-character hex transaction hash
+ *
+ * Response shape:
+ *   {
+ *     success: true,
+ *     data: {
+ *       hash:               string,
+ *       status:             "SUCCESS" | "FAILED" | "NOT_FOUND",
+ *       ledger:             number | null,
+ *       createdAt:          string | null,       // ISO timestamp
+ *       applicationOrder:   number | null,
+ *       feeBump:            boolean | null,
+ *       returnValue:        any | null,           // decoded ScVal
+ *       errorCode:          string | null,        // e.g. "wasm_vm"
+ *       latestLedger:       number,
+ *       oldestLedger:       number
+ *     }
+ *   }
+ *
+ * Errors:
+ *   400 — malformed hash
+ *   404 — transaction not found (with reason in error.detail)
+ *   500 — Soroban RPC not configured (SOROBAN_RPC_URL missing)
+ *
+ * @example
+ * GET /soroban/transactions/abc123...def456
+ */
+router.get("/transactions/:hash", async (req, res, next) => {
+  try {
+    const { hash } = req.params;
+
+    // ── 1. Validate hash format ──────────────────────────────────────────────
+    const { validateTransactionHash } = require("../utils/validators");
+    validateTransactionHash(hash);
+
+    const rpcServer = requireSorobanServer();
+
+    // ── 2. Call getTransaction ───────────────────────────────────────────────
+    let txResult;
+    try {
+      txResult = await rpcServer.getTransaction(hash);
+    } catch (rpcErr) {
+      // Some RPC servers throw on NOT_FOUND rather than returning the status
+      throw rpcErr;
+    }
+
+    const latestLedger = txResult.latestLedger ?? null;
+    const oldestLedger = txResult.oldestLedger ?? null;
+
+    // ── 3. NOT_FOUND ─────────────────────────────────────────────────────────
+    // getTransaction returns status "NOT_FOUND" when the hash is unknown.
+    // Distinguish "not yet ingested" vs "older than retention window".
+    if (txResult.status === "NOT_FOUND") {
+      const detail =
+        latestLedger !== null && oldestLedger !== null
+          ? `Transaction not found. The RPC node retains ledgers ${oldestLedger}–${latestLedger}. ` +
+            `The transaction may be pending or older than the retention window.`
+          : "Transaction not found. It may be pending or outside the RPC retention window.";
+
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "TransactionNotFound",
+          message: detail,
+          latestLedger,
+          oldestLedger,
+        },
+      });
+    }
+
+    // ── 4. Decode return value ────────────────────────────────────────────────
+    let returnValue = null;
+    if (txResult.status === "SUCCESS" && txResult.returnValue != null) {
+      try {
+        returnValue = toJsonSafe(scValToNative(txResult.returnValue));
+      } catch {
+        // If decoding fails, return the raw base64 XDR
+        try {
+          returnValue = txResult.returnValue.toXDR
+            ? txResult.returnValue.toXDR("base64")
+            : null;
+        } catch {
+          returnValue = null;
+        }
+      }
+    }
+
+    // ── 5. Extract errorCode from result XDR on FAILED ───────────────────────
+    let errorCode = null;
+    if (txResult.status === "FAILED" && txResult.resultXdr) {
+      try {
+        const resultXdr =
+          typeof txResult.resultXdr === "string"
+            ? xdr.TransactionResult.fromXDR(txResult.resultXdr, "base64")
+            : txResult.resultXdr;
+
+        // The result code lives at resultXdr.result().results()[0].tr().invokeHostFunctionResult().switch().name
+        // We walk the XDR defensively — not all FAILED transactions are contract calls.
+        const innerResults = resultXdr.result().results?.() ?? [];
+        if (innerResults.length > 0) {
+          const firstResult = innerResults[0];
+          const tr = typeof firstResult.tr === "function" ? firstResult.tr() : null;
+          if (tr) {
+            const invokeResult =
+              typeof tr.invokeHostFunctionResult === "function"
+                ? tr.invokeHostFunctionResult()
+                : null;
+            if (invokeResult) {
+              const switchVal = invokeResult.switch?.();
+              if (switchVal && typeof switchVal.name === "string") {
+                // e.g. "invokeHostFunctionTrapped" → strip the prefix for a clean code
+                errorCode = switchVal.name
+                  .replace(/^invokeHostFunction/, "")
+                  .replace(/^[A-Z]/, (c) => c.toLowerCase());
+              }
+            }
+          }
+        }
+      } catch {
+        // Error extraction is best-effort; leave errorCode as null
+      }
+    }
+
+    // ── 6. Build response ────────────────────────────────────────────────────
+    const data = {
+      hash,
+      status: txResult.status,
+      ledger: txResult.ledger ?? null,
+      createdAt: txResult.createdAt
+        ? new Date(txResult.createdAt * 1000).toISOString()
+        : null,
+      applicationOrder: txResult.applicationOrder ?? null,
+      feeBump: txResult.feeBump ?? null,
+      returnValue,
+      errorCode,
+      latestLedger,
+      oldestLedger,
+    };
+
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});

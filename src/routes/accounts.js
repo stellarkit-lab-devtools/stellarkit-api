@@ -9,6 +9,7 @@ const {
 } = require("../utils/validators");
 const { isNativeAsset, isNonNativeAsset } = require("../utils/assetHelpers");
 const { formatAmount } = require("../utils/formatAmount");
+const { mapLimit, UPSTREAM_CONCURRENCY } = require("../utils/mapLimit");
 
 const ZERO_NATIVE_BALANCE = {
   balance: "0.0000000",
@@ -140,20 +141,18 @@ router.post("/native-balances", async (req, res, next) => {
 
     const results = {};
 
-    await Promise.all(
-      addresses.map(async (address) => {
-        try {
-          const account = await server.loadAccount(address);
-          results[address] = extractNativeBalance(account);
-        } catch (err) {
-          if (err && err.response && err.response.status === 404) {
-            results[address] = { ...ZERO_NATIVE_BALANCE };
-          } else {
-            throw err;
-          }
+    await mapLimit(addresses, UPSTREAM_CONCURRENCY, async (address) => {
+      try {
+        const account = await server.loadAccount(address);
+        results[address] = extractNativeBalance(account);
+      } catch (err) {
+        if (err && err.response && err.response.status === 404) {
+          results[address] = { ...ZERO_NATIVE_BALANCE };
+        } else {
+          throw err;
         }
-      }),
-    );
+      }
+    });
 
     return success(res, { results });
   } catch (err) {
@@ -187,27 +186,25 @@ router.post("/effects", async (req, res, next) => {
 
     const results = {};
 
-    await Promise.all(
-      addresses.map(async (address) => {
-        try {
-          const response = await server
-            .effects()
-            .forAccount(address)
-            .order("desc")
-            .limit(normalizedLimit)
-            .call();
+    await mapLimit(addresses, UPSTREAM_CONCURRENCY, async (address) => {
+      try {
+        const response = await server
+          .effects()
+          .forAccount(address)
+          .order("desc")
+          .limit(normalizedLimit)
+          .call();
 
-          const effects = (response.records || []).map((effect) => accountRouter.normalizeEffect(effect));
-          results[address] = { effects };
-        } catch (err) {
-          if (err && err.response && err.response.status === 404) {
-            results[address] = { effects: [] };
-            return;
-          }
-          throw err;
+        const effects = (response.records || []).map((effect) => accountRouter.normalizeEffect(effect));
+        results[address] = { effects };
+      } catch (err) {
+        if (err && err.response && err.response.status === 404) {
+          results[address] = { effects: [] };
+          return;
         }
-      }),
-    );
+        throw err;
+      }
+    });
 
     return success(res, { results });
   } catch (err) {
@@ -274,10 +271,10 @@ router.post("/trust-status", async (req, res, next) => {
 
     const normalizedCode = code.toUpperCase();
 
-    // Fetch account data in parallel
+    // Fetch account data with bounded concurrency
     const results = {};
 
-    const accountDataPromises = addresses.map(async (address) => {
+    const accountDataPromises = mapLimit(addresses, UPSTREAM_CONCURRENCY, async (address) => {
       try {
         const account = await server.loadAccount(address);
         const trustlines = account.balances || [];
@@ -319,7 +316,7 @@ router.post("/trust-status", async (req, res, next) => {
       }
     });
 
-    await Promise.all(accountDataPromises);
+    await accountDataPromises;
 
     return success(res, { results });
   } catch (err) {
@@ -430,25 +427,23 @@ router.post("/signers", async (req, res, next) => {
 
     const results = {};
 
-    await Promise.all(
-      addresses.map(async (address) => {
-        try {
-          const account = await server.loadAccount(address);
-          results[address] = normalizeSignerPayload(account);
-        } catch (err) {
-          if (err && err.response && err.response.status === 404) {
-            results[address] = {
-              error: {
-                type: "AccountNotFound",
-                message: `Account ${address} was not found on the Stellar ${NETWORK} network.`,
-              },
-            };
-            return;
-          }
-          throw err;
+    await mapLimit(addresses, UPSTREAM_CONCURRENCY, async (address) => {
+      try {
+        const account = await server.loadAccount(address);
+        results[address] = normalizeSignerPayload(account);
+      } catch (err) {
+        if (err && err.response && err.response.status === 404) {
+          results[address] = {
+            error: {
+              type: "AccountNotFound",
+              message: `Account ${address} was not found on the Stellar ${NETWORK} network.`,
+            },
+          };
+          return;
         }
-      }),
-    );
+        throw err;
+      }
+    });
 
     return success(res, { results });
   } catch (err) {
