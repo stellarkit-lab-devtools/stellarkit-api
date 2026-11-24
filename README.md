@@ -57,6 +57,7 @@ This project is ideal for:
 - [Production Deployment Guide](docs/deployment.md) - Deploy to production with Node.js, Docker, Railway, Render, or Fly.io
 - [API Design Guidelines](docs/api-design.md) - Design conventions and response patterns
 - [Response Format Guide](docs/response-format.md) - Standard response envelopes, pagination, and data formats
+- [Advanced Pagination Patterns](docs/pagination-patterns.md) - Sequential pagination with cursor resumption, parallel fetching across multiple endpoints, detecting last page, recommended page sizes, and complete Node.js streaming examples
 - [Amounts and Precision Guide](docs/amounts-and-precision.md) - Why amounts are seven-decimal strings, stroops/int64, the 2^53 boundary, rounding behaviour, and safe handling in JS/Python/Go
 - [Streaming Guide](docs/streaming.md) - SSE and WebSocket streaming endpoints, event payloads, reconnection, and clean close handling
 - [Advanced Streaming Patterns](docs/streaming-advanced.md) - Production streaming patterns: exponential backoff reconnection, multi-stream management, client-side filtering, graceful shutdown, and memory management
