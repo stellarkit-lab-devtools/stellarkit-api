@@ -56,10 +56,6 @@
     "restoreMocks": true,
     "detectOpenHandles": true,
     "forceExit": true
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/.kilo/"
-    ]
   },
   "devDependencies": {
     "@types/compression": "^1.7.5",
