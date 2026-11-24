@@ -86,7 +86,7 @@ function createLimiter({ max, message, keyGenerator }) {
     keyGenerator: keyGenerator || undefined,
     handler: limiterHandler,
     skip: (req) => {
-      return req.path === "/health";
+      return req.path === "/health" || req.path === "/health/live" || req.path === "/health/ready";
     },
   });
 }

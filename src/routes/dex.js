@@ -41,18 +41,6 @@ router.get("/offers/:offerId", async (req, res, next) => {
   }
 });
 
-function makeOrderBookEmptyError(sellAsset, buyAsset) {
-  const assetCode = (asset) =>
-    typeof asset === "string" ? asset.split(":")[0] : asset.getCode();
-  const sellCode = assetCode(sellAsset);
-  const buyCode = assetCode(buyAsset);
-  return {
-    type: "OrderBookEmpty",
-    message: `No active order book found for ${sellCode}/${buyCode}.`,
-    suggestion: "Ensure both assets have active offers on the Stellar DEX.",
-  };
-}
-
 /**
  * @route GET /dex/arbitrage/:assetCode/:assetIssuer
  * @desc Finds circular strict-receive paths that start and end in the same asset and flags potentially profitable loops.

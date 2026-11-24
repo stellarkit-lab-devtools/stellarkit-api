@@ -92,6 +92,7 @@ This project is ideal for:
 - [Tax Reporting Guide](docs/tax-reporting-guide.md) - Gather Stellar tax inputs (transactions, trades, fee spending, historical balances, cross-asset conversions) and compute cost basis
 - [Analytics Endpoints Guide](docs/analytics-endpoints.md) - Account analytics endpoints grouped by activity, volume, and compliance use cases, with an account health dashboard example
 - [SEP-10 Authentication Guide](docs/sep10-authentication.md) - Complete SEP-10 challenge-response flow using StellarKit for discovery, preflight, and inspection, with Node.js signing example
+- [Portfolio Tracker Guide](docs/portfolio-guide.md) - Build investment portfolio trackers: account balance aggregation, historical tracking, diversity measurement, LP monitoring, and total value computation
 
 ---
 
@@ -103,6 +104,8 @@ This project is ideal for:
 | ------ | ---- | ----------- | ------------ |
 | GET | `/` | Lists available API endpoints | — |
 | GET | `/health` | Service health check | — |
+| GET | `/health/live` | Liveness probe (always 200, no upstream calls) | — |
+| GET | `/health/ready` | Readiness probe (200 when Horizon probe is fresh, 503 otherwise) | — |
 | GET | `/network-status` | Latest ledger, fees, and protocol info | `fresh` |
 | GET | `/network-status/:sequence` | Normalized data for one closed ledger (cached for one hour) | `sequence` |
 | GET | `/network/ledger-timing` | Analyze ledger close time consistency | — |
@@ -143,6 +146,11 @@ This project is ideal for:
 | GET | `/account/:id/inactivity` | Days since last transaction and status | — |
 | GET | `/account/:id/funding-history` | Initial funding sources sorted by amount descending | — |
 | GET | `/account/:id/volume` | Transaction volume by asset over a time period (default: 30 days, max: 90 days) | `days` (default: 30, max: 90) |
+| GET | `/account/:id/portfolio` | Full financial snapshot: XLM, assets with DEX prices, total value in XLM, open offers, LP positions | `fresh` |
+| GET | `/account/:id/token-holdings` | Non-native asset balances with resolved TOML metadata (name, description, image) | `fresh` |
+| GET | `/account/:id/historical-balances` | Balance snapshots over time reconstructed from payment and trade history | `asset`, `interval`, `limit` |
+| GET | `/account/:id/asset-diversity` | Portfolio concentration (HHI) with diversity level and per-asset breakdown | `fresh` |
+| GET | `/account/:id/liquidity-contribution` | Aggregate liquidity pool contributions: deposited value, current value, fees earned | `fresh` |
 | GET | `/account/:id/risk-score` | Computed risk score and contributing factors | — |
 | GET | `/account/:id/fee-spending` | Network fees paid, broken down by operation type | `days` (default: 30, max: 90) |
 | GET | `/account/:id/smart-contract-interactions` | Soroban contract calls (contractId, function, timestamp, success) | `limit`, `cursor` |
