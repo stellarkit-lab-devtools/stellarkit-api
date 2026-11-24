@@ -48,6 +48,13 @@ function etagMiddleware(req, res, next) {
 
   // Override the json method to intercept the response
   res.json = function (data) {
+    // Routes that opt out of caching (Cache-Control: no-store) must never be
+    // served a 304 or have their Cache-Control overwritten.
+    const existingCacheControl = res.get('Cache-Control');
+    if (existingCacheControl && existingCacheControl.includes('no-store')) {
+      return originalJson(data);
+    }
+
     // Only apply ETag logic for successful responses (200-299)
     const statusCode = res.statusCode;
     if (statusCode >= 200 && statusCode < 300) {

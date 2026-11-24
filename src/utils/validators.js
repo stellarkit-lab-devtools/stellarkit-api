@@ -1,4 +1,5 @@
 const { StrKey } = require("@stellar/stellar-sdk");
+const { parseUTCDate } = require("./date");
 
 /**
  * Format a query-parameter validation message.
@@ -18,12 +19,29 @@ function qp(param, msg) {
  * @returns {Error}
  */
 function makeInvalidAccountIdError(accountId) {
-  const err = new Error(
-    `""${String(accountId).slice(0, 60)}" is not a valid Stellar account address.`
-  );
+  const value = typeof accountId === "string" ? accountId : "";
+  let reason;
+  if (value.startsWith("S")) reason = "secret_seed";
+  else if (value.startsWith("M")) reason = "muxed_address";
+  else if (value.startsWith("C")) reason = "contract_address";
+  else if (!value.startsWith("G")) reason = "wrong_prefix";
+  else if (value.length !== 56) reason = "wrong_length";
+  else if (!/^[A-Z2-7]+$/.test(value)) reason = "invalid_characters";
+  else reason = "bad_checksum";
+  const suggestions = {
+    wrong_prefix: "Use a public account address starting with G.",
+    wrong_length: "Use a G... account address exactly 56 characters long.",
+    invalid_characters: "Use uppercase Base32 characters A-Z and 2-7 only.",
+    bad_checksum: "Check for a typo and copy the account address again.",
+    muxed_address: "Use the base G... account instead of the muxed M... address.",
+    contract_address: "Use a G... account address instead of a C... contract address.",
+    secret_seed: "Never share a secret seed. Use the public G... account address instead.",
+  };
+  const err = new Error("The supplied value is not a valid Stellar account address.");
   err.isInvalidAccountId = true;
-  err.accountId = accountId;
-  err.suggestion = "Account addresses start with G and are 56 characters long.";
+  err.type = "InvalidAccountId";
+  err.details = { reason };
+  err.suggestion = suggestions[reason];
   err.status = 400;
   return err;
 }
@@ -165,7 +183,11 @@ function validateAssetCode(code) {
 function validateLimit(limit, max = 100) {
   const parsed = parseInt(limit, 10);
   if (isNaN(parsed) || parsed < 1 || parsed > max) {
-    const err = new Error("limit must be a number between 1 and 100.");
+    const defaultMessage = "limit must be a number between 1 and 100.";
+    const message = max !== 100
+      ? `limit must be a number between 1 and ${max}.`
+      : defaultMessage;
+    const err = new Error(message);
     err.isInvalidLimit = true;
     err.status = 400;
     err.receivedValue = limit !== undefined ? String(limit).slice(0, 50) : undefined;
@@ -290,9 +312,11 @@ function validateCursor(cursor) {
 /**
  * Validate and parse an ISO 8601 date string supplied as a query parameter.
  *
- * Accepts any string that JavaScript's Date constructor recognises as a valid
- * date (e.g. "2024-01-15", "2024-01-15T12:00:00Z"). Empty strings and values
- * that produce an invalid Date are rejected with a structured 400 error.
+ * Accepts ISO 8601 dates and date-times (e.g. "2024-01-15",
+ * "2024-01-15T12:00:00Z", "2024-01-15T12:00:00+02:00"). Values without a zone
+ * designator are interpreted as UTC, never as server-local time. Empty strings
+ * and values that are not valid ISO 8601 dates are rejected with a structured
+ * 400 error.
  *
  * @param {string} value - Raw query-parameter value to validate.
  * @param {string} field - Parameter name used in error messages (e.g. "startDate").
@@ -308,7 +332,9 @@ function validateISODate(value, field) {
       "ISO 8601 date string"
     );
   }
-  const date = new Date(value);
+  // Parse as UTC: a zone-less "2024-01-15T12:00:00" must mean the same instant
+  // on every server, not the server's local time.
+  const date = parseUTCDate(value);
   if (isNaN(date.getTime())) {
     throw makeValidationError(
       `Query param '${field}' is not a valid date: "${String(value).slice(0, 50)}".`,
@@ -358,6 +384,47 @@ function isValidPoolId(poolId) {
   return typeof poolId === "string" && /^[0-9a-f]{64}$/.test(poolId);
 }
 
+/**
+ * Validate and parse the `days` lookback query parameter.
+ *
+ * Defaults to 30 when the value is absent (undefined or null). Rejects
+ * non-numeric, non-integer, zero, and negative values with a structured
+ * validation error (isValidation = true, status = 400, field = "days").
+ *
+ * @param {string|number|null|undefined} value - Raw query-parameter value.
+ * @param {number} [defaultDays=30] - Value used when the parameter is absent.
+ * @returns {number} The parsed positive integer number of days.
+ * @throws {Error} A validation error when the value is invalid.
+ */
+function validateDaysLookback(value, defaultDays = 30) {
+  if (value === undefined || value === null || value === "") {
+    return defaultDays;
+  }
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) {
+    const err = makeValidationError(
+      qp("days", "must be a positive integer."),
+      "days",
+      value,
+      "positive integer (e.g. 30)"
+    );
+    err.status = 400;
+    throw err;
+  }
+  const parsed = parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    const err = makeValidationError(
+      qp("days", "must be a positive integer."),
+      "days",
+      value,
+      "positive integer (e.g. 30)"
+    );
+    err.status = 400;
+    throw err;
+  }
+  return parsed;
+}
+
 module.exports = {
   validateAccountId,
   validateContractId,
@@ -371,4 +438,5 @@ module.exports = {
   validateCredentialType,
   validateTransactionHash,
   isValidPoolId,
+  validateDaysLookback,
 };

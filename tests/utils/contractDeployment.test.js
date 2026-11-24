@@ -1,4 +1,4 @@
-const { fetchContractDeployment } = require("../src/utils/contractDeployment");
+const { fetchContractDeployment } = require("../../src/utils/contractDeployment");
 
 describe("fetchContractDeployment", () => {
   const contractId = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";

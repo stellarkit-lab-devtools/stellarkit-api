@@ -19,6 +19,8 @@ This guide walks through a complete developer workflow for interacting with Soro
 11. [Error Reference](#error-reference)
 12. [Configuration](#configuration)
 
+> **Already deployed?** The [Soroban Contract Monitoring Guide](soroban-monitoring.md) covers ongoing monitoring of contract health and activity: expiry, storage changes, upgrades, caller failure rates, and network context. It ends with a complete dashboard that sends webhook alerts.
+
 ---
 
 ## Overview
@@ -354,6 +356,8 @@ fi
 
 Soroban contracts emit structured events when executing state-changing operations. StellarKit API provides a streaming endpoint for real-time event delivery and a polling mechanism for catching up on missed events.
 
+For continuous monitoring, including alert thresholds, tracking which accounts call the contract, and a ready-to-run dashboard, see the [Soroban Contract Monitoring Guide](soroban-monitoring.md).
+
 ### Server-Sent Events (SSE) stream
 
 ```
@@ -562,6 +566,8 @@ curl -sS "$API/fee-estimate/surge-status" | jq '{isSurging: .data.isSurging, rec
 # 7. Confirm the network is synced before broadcasting
 curl -sS "$API/network-status" | jq '{isSynced: .data.isSynced, currentLedger: .data.currentLedger}'
 ```
+
+Once the contract is live, see the [Soroban Contract Monitoring Guide](soroban-monitoring.md) to keep watching it.
 
 ---
 

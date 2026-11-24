@@ -3,6 +3,8 @@
  * Pure functions — no I/O, no SDK calls, no side effects.
  */
 
+const { toUTCMillis } = require("./date");
+
 // Maturity thresholds (in days)
 const MATURITY_NEW_THRESHOLD_DAYS = 30;
 const MATURITY_ESTABLISHED_THRESHOLD_DAYS = 365;
@@ -21,8 +23,8 @@ const AVG_DAYS_PER_YEAR = 365.25;
  * @returns {number} Integer number of complete days elapsed
  */
 function calculateAgeInDays(createdAt, now) {
-  const currentTime = now || new Date();
-  const createdTime = new Date(createdAt);
+  const currentTime = now ? toUTCMillis(now) : Date.now();
+  const createdTime = toUTCMillis(createdAt);
   const millisPerDay = 24 * 60 * 60 * 1000;
   const daysDiff = (currentTime - createdTime) / millisPerDay;
   return Math.floor(daysDiff);

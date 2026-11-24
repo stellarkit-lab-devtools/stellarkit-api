@@ -131,4 +131,96 @@ function parsePaginationParams(query = {}, maxLimit = 100) {
   return { limit, order, cursor: undefined };
 }
 
-module.exports = { parsePaginationParams, resolveCursorForPage };
+/**
+ * Decode a single query-string component, treating "+" as a space the way
+ * HTML forms and Express's own query parser do. Malformed percent escapes are
+ * returned unchanged rather than throwing.
+ *
+ * @param {string} component
+ * @returns {string}
+ */
+function decodeQueryComponent(component) {
+  const spaced = component.replace(/\+/g, " ");
+  try {
+    return decodeURIComponent(spaced);
+  } catch {
+    return spaced;
+  }
+}
+
+/**
+ * Build the absolute URL of the next page for an RFC 8288 Link header.
+ *
+ * Every original query parameter is kept in its original order and only
+ * `cursor` is replaced (or appended when absent). Keys and values are
+ * re-encoded with encodeURIComponent, so asset parameters such as
+ * `USDC:GABC...` become `USDC%3AGABC...` and spaces become `%20`.
+ *
+ * The origin is built from `req.protocol` and the Host header, so it follows
+ * Express's "trust proxy" setting: behind a trusted proxy the forwarded
+ * protocol is used; otherwise the socket's protocol is.
+ *
+ * @param {import('express').Request} req
+ * @param {string} nextCursor - The paging token for the next page.
+ * @returns {string|null} Absolute next-page URL, or null when it cannot be built.
+ */
+function buildNextPageUrl(req, nextCursor) {
+  if (!req || nextCursor === null || nextCursor === undefined || nextCursor === "") {
+    return null;
+  }
+
+  const host = typeof req.get === "function" ? req.get("host") : undefined;
+  if (!host) return null;
+
+  const originalUrl = req.originalUrl || req.url || "/";
+  const queryIndex = originalUrl.indexOf("?");
+  const pathname = queryIndex === -1 ? originalUrl : originalUrl.slice(0, queryIndex);
+  const rawQuery = queryIndex === -1 ? "" : originalUrl.slice(queryIndex + 1);
+
+  const pairs = [];
+  let cursorWritten = false;
+
+  for (const part of rawQuery.split("&")) {
+    if (!part) continue;
+    const eq = part.indexOf("=");
+    const key = decodeQueryComponent(eq === -1 ? part : part.slice(0, eq));
+    const value = eq === -1 ? "" : decodeQueryComponent(part.slice(eq + 1));
+
+    if (key === "cursor") {
+      // Replace the first cursor in place and drop any duplicates.
+      if (!cursorWritten) {
+        pairs.push(["cursor", String(nextCursor)]);
+        cursorWritten = true;
+      }
+      continue;
+    }
+    pairs.push([key, value]);
+  }
+
+  if (!cursorWritten) pairs.push(["cursor", String(nextCursor)]);
+
+  const query = pairs
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+
+  return `${req.protocol}://${host}${pathname}?${query}`;
+}
+
+/**
+ * Format an RFC 8288 Link header value pointing at the next page.
+ *
+ * @param {import('express').Request} req
+ * @param {string} nextCursor
+ * @returns {string|null} e.g. `<https://host/path?cursor=123>; rel="next"`
+ */
+function buildNextLinkHeader(req, nextCursor) {
+  const url = buildNextPageUrl(req, nextCursor);
+  return url ? `<${url}>; rel="next"` : null;
+}
+
+module.exports = {
+  parsePaginationParams,
+  resolveCursorForPage,
+  buildNextPageUrl,
+  buildNextLinkHeader,
+};

@@ -6,6 +6,8 @@ Webhook registrations are stored in process memory. They are lost on server rest
 
 For the complete per-event reference — trigger conditions, full payload examples, and a description of every field — see [webhook-events.md](./webhook-events.md).
 
+Building the endpoint that receives deliveries? See the [Webhook Receiver Implementation Guide](./webhook-implementation.md) for a complete Express receiver with signature verification, correct `200` timing, idempotency, and error handling.
+
 ---
 
 ## Table of Contents
@@ -246,13 +248,15 @@ Failed deliveries are retried automatically.
 
 | Setting | Value |
 | --- | --- |
-| Maximum attempts | 3 (initial try + 2 retries) |
-| Backoff | Exponential: 1s after the first failure, 2s after the second |
+| Maximum attempts | 4 (initial try + 3 retries) |
+| Backoff | Exponential: 5s, 25s, then 125s |
 | Per-attempt timeout | 30 seconds |
-| Success | HTTP response received without a transport error |
+| Success | Any `2xx` response. Network errors, timeouts, and non-`2xx` statuses are failures |
 | After exhaustion | Delivery is dropped and logged. There is no dead-letter queue |
 
 Retries happen in-process. A process restart abandons in-flight retries. Your endpoint should be **idempotent** — the same payment or contract event may be delivered more than once if a timeout succeeded on your side but failed on ours.
+
+See [Idempotency for duplicate deliveries](./webhook-implementation.md#idempotency-for-duplicate-deliveries) for a de-duplication pattern based on `webhookId` and the event timestamp.
 
 Trustline deliveries use a separate worker with the same 3-attempt cap and delays of 5s then 10s.
 

@@ -64,6 +64,293 @@
 - [x] Add/Update tests for the new endpoint (shape + validation + 404 behavior)
 - [x] Ensure routing is registered in src/index.js (and docs list if applicable)
 - [x] Run targeted unit tests for the endpoint only (no build)
+# StellarKit API 🚀
+
+<p align="center">
+  <a href="README.md">English 🇺🇸</a> | <b>Français 🇫🇷</b> | <a href="README.es.md">Español 🇪🇸</a>
+</p>
+
+> Une API REST utilitaire pour les développeurs sur la blockchain Stellar — construite avec Express.js et le SDK Stellar officiel.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+[![Stellar](https://img.shields.io/badge/Stellar-SDK-blue)](https://stellar.org)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+StellarKit API encapsule l'[API Horizon de Stellar](https://developers.stellar.org/api/horizon) dans des points de terminaison (endpoints) REST clairs et adaptés aux développeurs. Elle aide les développeurs créant sur Stellar à accéder rapidement aux estimations de frais, aux données de compte, à l'historique des transactions, à l'état du réseau et aux métadonnées des actifs — sans avoir à analyser les réponses brutes d'Horizon.
+
+---
+
+## ✨ Fonctionnalités
+
+- 📊 **État du réseau** — Informations sur le dernier registre (ledger), frais de base, version du protocole
+- 💸 **Estimation des frais** — Niveaux de frais Économique / Standard / Prioritaire pour n'importe quel nombre d'opérations
+- 👤 **Informations de compte** — Soldes (XLM + tous les actifs), signataires, seuils, solde disponible (spendable balance)
+- 📜 **Historique des transactions** — Transactions et opérations paginées par compte
+- 🪙 **Métadonnées des actifs** — Statistiques pour n'importe quel actif Stellar, ainsi qu'une recherche multi-émetteur
+- 🛡️ **Prêt pour la production** — Limitation du taux (rate limiting), en-têtes de sécurité Helmet, gestion centralisée des erreurs
+- ✅ **Testé** — Suite de tests Jest avec couverture (coverage)
+
+---
+
+## 🚀 Démarrage rapide
+
+### Prérequis
+
+- Node.js >= 18
+- npm >= 9
+
+### Installation
+
+```bash
+git clone https://github.com/stellarkit-lab-devtools/stellarkit-api.git
+cd stellarkit-api
+npm install
+cp .env.example .env
+```
+
+### Configuration
+
+Modifiez le fichier `.env` :
+
+```env
+STELLAR_NETWORK=testnet     # ou "mainnet"
+PORT=3000
+```
+
+### Exécution
+
+```bash
+# Développement (rechargement automatique)
+npm run dev
+
+# Production
+npm start
+```
+
+L'API sera disponible sur `http://localhost:3000`.
+
+---
+
+## 📡 Points de terminaison de l'API (Endpoints)
+
+### `GET /`
+Retourne la liste complète des points de terminaison disponibles.
+
+---
+
+### `GET /health`
+Vérification de l'état de santé du service.
+
+**Réponse :**
+```json
+{
+  "success": true,
+  "data": {
+    "status": "ok",
+    "service": "StellarKit API",
+    "version": "1.0.0",
+    "network": "testnet"
+  }
+}
+```
+
+---
+
+### `GET /network-status`
+Retourne les informations du dernier registre (ledger), les frais et la version du protocole.
+
+**Réponse :**
+```json
+{
+  "success": true,
+  "data": {
+    "network": "testnet",
+    "latestLedger": {
+      "sequence": 123456,
+      "closedAt": "2024-07-01T12:00:00Z",
+      "transactionCount": 42,
+      "operationCount": 89
+    },
+    "fees": {
+      "baseFeeInStroops": 100,
+      "baseFeeInXLM": "0.0000100"
+    },
+    "protocol": { "version": 21 }
+  }
+}
+```
+
+---
+
+### `GET /fee-estimate`
+Retourne les niveaux de frais Économique / Standard / Prioritaire basés sur les statistiques en direct du réseau.
+
+**Paramètres de requête (Query params) :**
+| Paramètre | Type | Par défaut | Description |
+|-----------|------|------------|-------------|
+| `operations` | number | `1` | Nombre d'opérations dans votre transaction |
+
+**Exemple :**
+```
+GET /fee-estimate?operations=3
+```
+
+**Réponse :**
+```json
+{
+  "success": true,
+  "data": {
+    "operationCount": 3,
+    "perOperation": {
+      "economy":  { "stroops": 100, "xlm": "0.0000100" },
+      "standard": { "stroops": 200, "xlm": "0.0000200" },
+      "priority": { "stroops": 500, "xlm": "0.0000500" }
+    },
+    "totalFee": {
+      "economy":  { "stroops": 300, "xlm": "0.0000300" },
+      "standard": { "stroops": 600, "xlm": "0.0000600" },
+      "priority": { "stroops": 1500, "xlm": "0.0001500" }
+    }
+  }
+}
+```
+
+---
+
+### `GET /account/:id`
+Retourne les détails complets d'un compte pour une clé publique Stellar donnée.
+
+**Exemple :**
+```
+GET /account/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN
+```
+
+**Réponse :**
+```json
+{
+  "success": true,
+  "data": {
+    "accountId": "GAAZI4...",
+    "sequence": "12345678",
+    "xlm": {
+      "balance": "100.0000000",
+      "minimumBalance": "1.0000000",
+      "spendableBalance": "99.0000000"
+    },
+    "assets": [...],
+    "signers": [...],
+    "flags": {...}
+  }
+}
+```
+
+---
+
+### `GET /transactions/:id`
+Retourne l'historique paginé des transactions d'un compte.
+
+**Paramètres de requête (Query params) :**
+| Paramètre | Type | Par défaut | Description |
+|-----------|------|------------|-------------|
+| `limit` | number | `10` | Nombre de résultats (max 200) |
+| `order` | string | `desc` | `asc` ou `desc` |
+| `cursor` | string | — | Curseur de pagination de la réponse précédente |
+
+---
+
+### `GET /transactions/:id/operations`
+Retourne l'historique paginé des opérations d'un compte. Même paramètres de requête que ci-dessus.
+
+---
+
+### `GET /asset/:code/:issuer`
+Retourne les métadonnées et statistiques pour un actif Stellar spécifique.
+
+**Exemple :**
+```
+GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN
+```
+
+---
+
+### `GET /asset/search?code=:code`
+Recherche tous les actifs correspondant à un code donné à travers tous les émetteurs.
+
+**Exemple :**
+```
+GET /asset/search?code=USDC
+```
+
+---
+
+## 🧪 Exécution des tests
+
+```bash
+npm test
+```
+
+Les tests utilisent [Jest](https://jestjs.io/) + [Supertest](https://github.com/ladjs/supertest). Le rapport de couverture est généré dans `coverage/`.
+
+---
+
+## 🤝 Contribution
+
+Les contributions sont les bienvenues ! Ce projet participe au programme **[Stellar Wave Program on Drips](https://www.drips.network/wave/stellar)** — vous pouvez gagner des récompenses en résolvant des issues ouvertes.
+
+**Pour contribuer :**
+
+1. Forkez le dépôt
+2. Créez une branche de fonctionnalité : `git checkout -b feat/votre-fonctionnalite`
+3. Commitez vos modifications : `git commit -m "feat: ajouter votre fonctionnalité"`
+4. Poussez et ouvrez une Pull Request (PR)
+
+Veuillez lire [CONTRIBUTING.md](CONTRIBUTING.md) avant de soumettre.
+
+---
+
+## 📁 Structure du Projet
+
+```
+stellarkit-api/
+├── src/
+│   ├── config/
+│   │   └── stellar.js         # Configuration du SDK Stellar + Horizon
+│   ├── middleware/
+│   │   ├── errorHandler.js    # Formatage centralisé des erreurs
+│   │   └── rateLimiter.js     # Limitation du taux (rate limiting)
+│   ├── routes/
+│   │   ├── account.js         # Points de terminaison /account
+│   │   ├── asset.js           # Points de terminaison /asset
+│   │   ├── feeEstimate.js     # Point de terminaison /fee-estimate
+│   │   ├── networkStatus.js   # Point de terminaison /network-status
+│   │   └── transactions.js    # Points de terminaison /transactions
+│   ├── utils/
+│   │   ├── response.js        # Utilitaires de réponse
+│   │   └── validators.js      # Utilitaires de validation des entrées
+│   └── index.js               # Point d'entrée de l'application
+├── tests/
+│   └── api.test.js
+├── .env.example
+├── package.json
+└── README.md
+```
+
+---
+
+## 🌐 Ressources Stellar
+
+- [Portail des Développeurs Stellar](https://developers.stellar.org)
+- [SDK JavaScript Stellar](https://github.com/stellar/js-stellar-sdk)
+- [Référence de l'API Horizon](https://developers.stellar.org/api/horizon)
+- [Discord Stellar](https://discord.gg/stellardev)
+- [Programme Stellar Wave](https://www.drips.network/wave/stellar)
+
+---
+
+## 📄 Licence
+
+[MIT](LICENSE)
 TODO: Add Output Encoding to Error Message Interpolation
 
 Description:
@@ -1213,3 +1500,825 @@ TODO: Automated Scanner User-Agent Blocking Middleware
 298. [ ] Review the final Git diff and remove unrelated changes.
 299. [ ] Confirm the PR description includes "Closes #786".
 300. [ ] Confirm all acceptance criteria are satisfied and the documentation is ready for review.
+# README.md: Reserve Health Endpoint & Integration Tests
+
+An implementation and testing guide for the `GET /account/:id/reserve-health` endpoint. This service evaluates a Stellar account's spendable XLM balance relative to its network-enforced minimum reserve requirement and returns a `healthStatus` classification (`healthy`, `warning`, or `critical`) to prevent accounts from becoming bricked or unable to pay transaction fees.
+
+---
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Stellar Reserve Calculation Rules](#stellar-reserve-calculation-rules)
+3. [Endpoint Specification](#endpoint-specification)
+4. [Project Structure](#project-structure)
+5. [Implementation Details](#implementation-details)
+   - [Route Handler](#route-handler)
+   - [Horizon Service](#horizon-service)
+6. [Testing Framework & Strategy](#testing-framework--strategy)
+7. [Comprehensive Test Suite](#comprehensive-test-suite)
+8. [Setup & Execution Guide](#setup--execution-guide)
+9. [Acceptance Criteria Verification](#acceptance-criteria-verification)
+
+---
+
+## Overview
+
+On the Stellar network, every account must maintain a **Minimum Reserve** of native XLM. The base reserve requirement is governed by protocol parameters:
+- **Base Reserve ($R$):** $0.5\text{ XLM}$ per entry.
+- **Account Base:** $2 \times R = 1.0\text{ XLM}$ (required just to exist on-chain).
+- **Subentries:** Every trustline, signers (beyond master), offer, and data entry adds $1 \times R = 0.5\text{ XLM}$ to the minimum reserve.
+- **Selling Liabilities:** Outstanding sell offers lock up additional XLM.
+
+If an account's spendable XLM buffer drops too low, the user will be unable to send transactions, open trustlines, or submit orders. This endpoint calculates the exact buffer and returns a clear health status indicator for wallet interfaces.
+
+---
+
+## Stellar Reserve Calculation Rules
+
+The minimum reserve for any Stellar account is calculated using the following formula:
+
+$$\text{Minimum Reserve} = (2 + \text{subentry\_count}) \times 0.5\text{ XLM}$$
+
+$$\text{Spendable Balance} = \text{Current XLM Balance} - \text{Minimum Reserve} - \text{Selling Liabilities}$$
+
+$$\text{Buffer XLM} = \text{Spendable Balance}$$
+
+### Health Status Classification Thresholds
+
+| Health Status | Buffer Condition | User Experience Impact |
+| :--- | :--- | :--- |
+| **`critical`** | $\text{Buffer} < 1.0000000\text{ XLM}$ | Immediate risk of transaction failures due to insufficient fee/reserve margin. |
+| **`warning`** | $1.0000000\text{ XLM} \le \text{Buffer} < 5.0000000\text{ XLM}$ | Low buffer margin. Recommend topping up before adding trustlines/offers. |
+| **`healthy`** | $\text{Buffer} \ge 5.0000000\text{ XLM}$ | Sufficient liquidity for operations and fee coverage. |
+
+---
+
+## Endpoint Specification
+
+### `GET /account/:id/reserve-health`
+
+#### Path Parameters
+- `id` *(string, required)*: Valid Stellar Public Key (`G...`).
+
+#### Response Amounts Formatting
+All numerical amounts (`minimumReserve`, `currentBalance`, `spendableBalance`, `bufferXLM`) are strictly formatted as **seven-decimal fixed-precision strings** (e.g., `"10.5000000"`).
+
+#### Success Response (`200 OK`)
+```json
+{
+  "success": true,
+  "data": {
+    "accountId": "GC3KG2S4L2S5XZ...",
+    "minimumReserve": "2.5000000",
+    "currentBalance": "100.0000000",
+    "spendableBalance": "97.5000000",
+    "bufferXLM": "97.5000000",
+    "healthStatus": "healthy"
+  }
+}
+
+Warning Buffer Response (200 OK)
+{
+  "success": true,
+  "data": {
+    "accountId": "GACAUTIONACCOUNT...",
+    "minimumReserve": "2.0000000",
+    "currentBalance": "5.5000000",
+    "spendableBalance": "3.5000000",
+    "bufferXLM": "3.5000000",
+    "healthStatus": "warning"
+  }
+}
+
+Critical Buffer Response (200 OK)
+{
+  "success": true,
+  "data": {
+    "accountId": "GACRITICALACCOUNT...",
+    "minimumReserve": "1.0000000",
+    "currentBalance": "1.5000000",
+    "spendableBalance": "0.5000000",
+    "bufferXLM": "0.5000000",
+    "healthStatus": "critical"
+  }
+}
+
+Error Response (404 Not Found)
+{
+  "success": false,
+  "error": "Account not found"
+}
+
+Project Structure
+stellar-reserve-service/
+├── src/
+│   ├── app.js
+│   ├── routes/
+│   │   └── account.js
+│   └── services/
+│       └── horizon.js
+├── tests/
+│   └── routes/
+│       └── account.reserveHealth.test.js
+├── package.json
+└── README.md
+
+Implementation Details
+Route Handler: src/routes/account.js
+const express = require('express');
+const router = express.Router();
+const { fetchAccountData } = require('../services/horizon');
+
+const BASE_RESERVE = 0.5;
+
+function formatSevenDecimals(amount) {
+  return Number(amount).toFixed(7);
+}
+
+router.get('/account/:id/reserve-health', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const accountData = await fetchAccountData(id);
+
+    if (!accountData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found'
+      });
+    }
+
+    const nativeBalanceObj = accountData.balances.find(
+      (b) => b.asset_type === 'native'
+    );
+
+    const currentBalanceNum = nativeBalanceObj ? parseFloat(nativeBalanceObj.balance) : 0;
+    const sellingLiabilities = nativeBalanceObj && nativeBalanceObj.selling_liabilities
+      ? parseFloat(nativeBalanceObj.selling_liabilities)
+      : 0;
+
+    const subentries = accountData.subentry_count || 0;
+    const minimumReserveNum = (2 + subentries) * BASE_RESERVE;
+
+    const spendableNum = Math.max(0, currentBalanceNum - minimumReserveNum - sellingLiabilities);
+    const bufferNum = spendableNum;
+
+    let healthStatus = 'healthy';
+    if (bufferNum < 1.0) {
+      healthStatus = 'critical';
+    } else if (bufferNum < 5.0) {
+      healthStatus = 'warning';
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        accountId: id,
+        minimumReserve: formatSevenDecimals(minimumReserveNum),
+        currentBalance: formatSevenDecimals(currentBalanceNum),
+        spendableBalance: formatSevenDecimals(spendableNum),
+        bufferXLM: formatSevenDecimals(bufferNum),
+        healthStatus
+      }
+    });
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found'
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      error: 'Internal Server Error'
+    });
+  }
+});
+
+module.exports = router;
+
+Horizon Service: src/services/horizon.js
+const { Server } = require('@stellar/stellar-sdk');
+
+const HORIZON_URL = process.env.HORIZON_URL || '[https://horizon.stellar.org](https://horizon.stellar.org)';
+const server = new Server(HORIZON_URL);
+
+async function fetchAccountData(accountId) {
+  try {
+    return await server.loadAccount(accountId);
+  } catch (error) {
+    if (error.response && error.response.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+module.exports = { fetchAccountData };
+
+Testing Framework & Strategy
+We use Jest and Supertest to test the API route. Horizon Stellar SDK responses are completely mocked to allow deterministic testing of boundary conditions, exact string precision, and error handling.
+Test Scenarios
+ * Healthy Status Buffer (\ge 5\text{ XLM}): Account with ample XLM buffer returns healthStatus: "healthy".
+ * Warning Status Buffer (1\text{ XLM} \le \text{Buffer} < 5\text{ XLM}): Account with buffer in range returns healthStatus: "warning".
+ * Critical Status Buffer (< 1\text{ XLM}): Account with minimal buffer returns healthStatus: "critical".
+ * Non-Existent Account: Horizon returning 404 maps to API 404 Not Found.
+ * Exact Seven-Decimal Formatting: Verifies amounts match X.XXXXXXX precision.
+Comprehensive Test Suite
+Location: tests/routes/account.reserveHealth.test.js
+const request = require('supertest');
+const express = require('express');
+const accountRouter = require('../../src/routes/account');
+const horizonService = require('../../src/services/horizon');
+
+jest.mock('../../src/services/horizon');
+
+const app = express();
+app.use(express.json());
+app.use('/', accountRouter);
+
+describe('GET /account/:id/reserve-health Integration Tests', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('1. Returns healthy status when buffer is 5 XLM or greater', async () => {
+    const accountId = 'GAHEALTHYACCOUNT12345678901234567890123456789012345678901';
+
+    // 2 base + 2 subentries = 4 * 0.5 = 2.0 XLM reserve
+    // 50.0 balance - 2.0 reserve = 48.0 spendable buffer
+    horizonService.fetchAccountData.mockResolvedValue({
+      id: accountId,
+      subentry_count: 2,
+      balances: [
+        {
+          asset_type: 'native',
+          balance: '50.0000000',
+          selling_liabilities: '0.0000000'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get(`/account/${accountId}/reserve-health`)
+      .expect('Content-Type', /json/)
+      .expect(200);
+
+    expect(response.body).toEqual({
+      success: true,
+      data: {
+        accountId,
+        minimumReserve: '2.0000000',
+        currentBalance: '50.0000000',
+        spendableBalance: '48.0000000',
+        bufferXLM: '48.0000000',
+        healthStatus: 'healthy'
+      }
+    });
+
+    expect(horizonService.fetchAccountData).toHaveBeenCalledWith(accountId);
+  });
+
+  test('2. Returns warning status when buffer is between 1 XLM and 5 XLM', async () => {
+    const accountId = 'GAWARNINGACCOUNT12345678901234567890123456789012345678901';
+
+    // 2 base + 0 subentries = 1.0 XLM reserve
+    // 4.0 balance - 1.0 reserve = 3.0 spendable buffer
+    horizonService.fetchAccountData.mockResolvedValue({
+      id: accountId,
+      subentry_count: 0,
+      balances: [
+        {
+          asset_type: 'native',
+          balance: '4.0000000',
+          selling_liabilities: '0.0000000'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get(`/account/${accountId}/reserve-health`)
+      .expect('Content-Type', /json/)
+      .expect(200);
+
+    expect(response.body).toEqual({
+      success: true,
+      data: {
+        accountId,
+        minimumReserve: '1.0000000',
+        currentBalance: '4.0000000',
+        spendableBalance: '3.0000000',
+        bufferXLM: '3.0000000',
+        healthStatus: 'warning'
+      }
+    });
+  });
+
+  test('3. Returns critical status when buffer is below 1 XLM', async () => {
+    const accountId = 'GACRITICALACCOUNT1234567890123456789012345678901234567890';
+
+    // 2 base + 1 subentry = 1.5 XLM reserve
+    // 2.0 balance - 1.5 reserve = 0.5 spendable buffer
+    horizonService.fetchAccountData.mockResolvedValue({
+      id: accountId,
+      subentry_count: 1,
+      balances: [
+        {
+          asset_type: 'native',
+          balance: '2.0000000',
+          selling_liabilities: '0.0000000'
+        }
+      ]
+    });
+
+    const response = await request(app)
+      .get(`/account/${accountId}/reserve-health`)
+      .expect('Content-Type', /json/)
+      .expect(200);
+
+    expect(response.body).toEqual({
+      success: true,
+      data: {
+        accountId,
+        minimumReserve: '1.5000000',
+        currentBalance: '2.0000000',
+        spendableBalance: '0.5000000',
+        bufferXLM: '0.5000000',
+        healthStatus: 'critical'
+      }
+    });
+  });
+
+  test('4. Returns 404 error when account does not exist', async () => {
+    const invalidAccountId = 'GANONEXISTENTACCOUNT123456789012345678901234567890123';
+
+    horizonService.fetchAccountData.mockResolvedValue(null);
+
+    const response = await request(app)
+      .get(`/account/${invalidAccountId}/reserve-health`)
+      .expect('Content-Type', /json/)
+      .expect(404);
+
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Account not found'
+    });
+
+    expect(horizonService.fetchAccountData).toHaveBeenCalledWith(invalidAccountId);
+  });
+});
+
+Setup & Execution Guide
+Dependencies (package.json)
+{
+  "name": "stellar-reserve-service",
+  "version": "1.0.0",
+  "description": "Stellar XLM minimum reserve health monitoring endpoint",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "test": "jest tests/routes/account.reserveHealth.test.js"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^11.2.0",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4"
+  }
+}
+
+Execution Steps
+# Install dependencies
+npm install
+
+# Run the test suite
+npm test
+
+Acceptance Criteria Verification
+| Requirement | Target Criteria | Status |
+|---|---|---|
+| Response Schema | Contains { success: true, data: { accountId, minimumReserve, currentBalance, spendableBalance, bufferXLM, healthStatus } } | PASS |
+| Critical Threshold | healthStatus is "critical" when buffer < 1.0\text{ XLM} | PASS |
+| Warning Threshold | healthStatus is "warning" when buffer < 5.0\text{ XLM} (and \ge 1.0\text{ XLM}) | PASS |
+| Healthy Threshold | healthStatus is "healthy" when buffer \ge 5.0\text{ XLM} | PASS |
+| Precision | All amounts formatted as seven-decimal strings (X.XXXXXXX) | PASS |
+| 404 Handling | Non-existent accounts return HTTP status 404 | PASS |
+
+
+const request = require("supertest");
+const app = require("../../app");
+
+jest.mock("../../services/assetHolders", () => ({
+  getAssetHolders: jest.fn(),
+}));
+
+jest.mock("../../services/dexPrice", () => ({
+  getCurrentPriceXLM: jest.fn(),
+}));
+
+const {
+  getAssetHolders,
+} = require("../../services/assetHolders");
+
+const {
+  getCurrentPriceXLM,
+} = require("../../services/dexPrice");
+
+describe("GET /asset/:code/:issuer/market-cap", () => {
+  const code = "TEST";
+  const issuer = "GISSUER123";
+
+  const url = () => `/asset/${code}/${issuer}/market-cap`;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe("circulating supply", () => {
+    test("excludes the issuer's 10% holding", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "40.0000000" },
+        { account: "GHOLDER2", balance: "50.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(2);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("returns zero when only the issuer holds the asset", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1000.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(3);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns zero when the holder list is empty", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+    });
+
+    test("does not subtract an issuer balance when it is absent", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: "GHOLDER1", balance: "25.0000000" },
+        { account: "GHOLDER2", balance: "75.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("100.0000000");
+    });
+
+    test("does not include the issuer in circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "500.0000000" },
+        { account: "GHOLDER1", balance: "200.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("200.0000000");
+    });
+  });
+
+  describe("market capitalization", () => {
+    test("computes market cap as circulating supply times price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+        { account: "GHOLDER1", balance: "600.0000000" },
+        { account: "GHOLDER2", balance: "300.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.5);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("900.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.5);
+      expect(response.body.marketCapXLM).toBe(450);
+    });
+
+    test("returns zero market cap for zero circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(10);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns null market cap when price is unavailable", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBeNull();
+      expect(response.body.marketCapXLM).toBeNull();
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("supports a zero market price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBe(0);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("preserves a positive circulating supply at a small price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1.0000000" },
+        { account: "GHOLDER1", balance: "999.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.000001);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("999.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.000001);
+      expect(response.body.marketCapXLM).toBeCloseTo(0.000999);
+    });
+  });
+
+  describe("mock verification", () => {
+    test("requests holder data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("requests DEX price data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getCurrentPriceXLM).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("queries both data sources once", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledTimes(1);
+      expect(getCurrentPriceXLM).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+const request = require("supertest");
+const app = require("../../app");
+
+jest.mock("../../services/assetHolders", () => ({
+  getAssetHolders: jest.fn(),
+}));
+
+jest.mock("../../services/dexPrice", () => ({
+  getCurrentPriceXLM: jest.fn(),
+}));
+
+const {
+  getAssetHolders,
+} = require("../../services/assetHolders");
+
+const {
+  getCurrentPriceXLM,
+} = require("../../services/dexPrice");
+
+describe("GET /asset/:code/:issuer/market-cap", () => {
+  const code = "TEST";
+  const issuer = "GISSUER123";
+
+  const url = () => `/asset/${code}/${issuer}/market-cap`;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe("circulating supply", () => {
+    test("excludes the issuer's 10% holding", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "40.0000000" },
+        { account: "GHOLDER2", balance: "50.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(2);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("returns zero when only the issuer holds the asset", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1000.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(3);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns zero when the holder list is empty", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("0.0000000");
+    });
+
+    test("does not subtract an issuer balance when it is absent", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: "GHOLDER1", balance: "25.0000000" },
+        { account: "GHOLDER2", balance: "75.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("100.0000000");
+    });
+
+    test("does not include the issuer in circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "500.0000000" },
+        { account: "GHOLDER1", balance: "200.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.1);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("200.0000000");
+    });
+  });
+
+  describe("market capitalization", () => {
+    test("computes market cap as circulating supply times price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+        { account: "GHOLDER1", balance: "600.0000000" },
+        { account: "GHOLDER2", balance: "300.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.5);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("900.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.5);
+      expect(response.body.marketCapXLM).toBe(450);
+    });
+
+    test("returns zero market cap for zero circulating supply", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "100.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(10);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("returns null market cap when price is unavailable", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBeNull();
+      expect(response.body.marketCapXLM).toBeNull();
+      expect(response.body.circulatingSupply).toBe("90.0000000");
+    });
+
+    test("supports a zero market price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "10.0000000" },
+        { account: "GHOLDER1", balance: "90.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.currentPriceXLM).toBe(0);
+      expect(response.body.marketCapXLM).toBe(0);
+    });
+
+    test("preserves a positive circulating supply at a small price", async () => {
+      getAssetHolders.mockResolvedValue([
+        { account: issuer, balance: "1.0000000" },
+        { account: "GHOLDER1", balance: "999.0000000" },
+      ]);
+
+      getCurrentPriceXLM.mockResolvedValue(0.000001);
+
+      const response = await request(app).get(url());
+
+      expect(response.status).toBe(200);
+      expect(response.body.circulatingSupply).toBe("999.0000000");
+      expect(response.body.currentPriceXLM).toBe(0.000001);
+      expect(response.body.marketCapXLM).toBeCloseTo(0.000999);
+    });
+  });
+
+  describe("mock verification", () => {
+    test("requests holder data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("requests DEX price data for the requested asset", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getCurrentPriceXLM).toHaveBeenCalledWith(code, issuer);
+    });
+
+    test("queries both data sources once", async () => {
+      getAssetHolders.mockResolvedValue([]);
+      getCurrentPriceXLM.mockResolvedValue(null);
+
+      await request(app).get(url());
+
+      expect(getAssetHolders).toHaveBeenCalledTimes(1);
+      expect(getCurrentPriceXLM).toHaveBeenCalledTimes(1);
+    });
+  });
+});

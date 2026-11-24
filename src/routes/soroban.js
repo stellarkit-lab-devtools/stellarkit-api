@@ -1,20 +1,105 @@
 const express = require("express");
 const router = express.Router();
 
-const { scValToNative, xdr, TransactionBuilder, Networks, Operation, Contract, nativeToScVal, Account } = require("@stellar/stellar-sdk");
+const { scValToNative, xdr, TransactionBuilder, Networks, Operation, Contract, nativeToScVal, Account, Asset, StrKey } = require("@stellar/stellar-sdk");
 const { sorobanServer, NETWORK } = require("../config/stellar");
-const { validateContractId, validateLimit } = require("../utils/validators");
+const { validateContractId, validateLimit, validateTransactionHash } = require("../utils/validators");
 const { success } = require("../utils/response");
 const { fetchContractDeployment } = require("../utils/contractDeployment");
 const StellarKitError = require("../utils/StellarKitError");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { parseFunctionsFromWasm } = require("../utils/contractSpec");
+const { loadResourceLimits } = require("../utils/resourceLimits");
+
+router.get("/resource-limits", async (req, res, next) => {
+  const key = `soroban:resource-limits:${NETWORK}`;
+  const cached = cacheService.get(key);
+  if (cached) return success(res, cached);
+  try {
+    if (!sorobanServer) throw new Error("RPC unavailable");
+    const data = await loadResourceLimits(sorobanServer);
+    cacheService.set(key, data, 300);
+    return success(res, data);
+  } catch (err) {
+    return next(new StellarKitError("Unable to read network resource limits from Soroban RPC.", 503, "ServiceUnavailable"));
+  }
+});
 
 const EXECUTABLE_TYPES = {
   contractExecutableWasm: "wasm",
   contractExecutableStellarAsset: "stellar_asset",
 };
+
+/** Default event/ledger retention exposed by Soroban RPC (~24h at 5s per ledger). */
+const SOROBAN_RETENTION_WINDOW_LEDGERS = 17280;
+/** Average ledger close time in seconds, used for the retention hours estimate. */
+const RPC_STATUS_AVG_CLOSE_TIME_SECONDS = 5;
+/** /rpc-status is a fast-moving health snapshot; cache it for 10 seconds. */
+const RPC_STATUS_CACHE_TTL_SECONDS = 10;
+const RPC_STATUS_CACHE_KEY = "soroban-rpc-status";
+
+/**
+ * GET /soroban/rpc-status
+ *
+ * Reports Soroban RPC health together with the event/ledger retention window,
+ * so callers know how far back getEvents can see. Version details are null
+ * when the RPC does not implement getVersionInfo.
+ */
+router.get("/rpc-status", async (req, res, next) => {
+  try {
+    const cached = cacheService.get(RPC_STATUS_CACHE_KEY);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    const rpcServer = requireSorobanServer();
+
+    let latestLedger;
+    try {
+      const response = await rpcServer.getLatestLedger();
+      latestLedger = response.sequence;
+    } catch (err) {
+      throw new StellarKitError(
+        "Soroban RPC is currently unavailable.",
+        503,
+        "UpstreamUnavailable",
+        null,
+        "Check SOROBAN_RPC_URL and verify the Soroban RPC endpoint is reachable."
+      );
+    }
+
+    let versionInfo = null;
+    if (typeof rpcServer.getVersionInfo === "function") {
+      try {
+        versionInfo = await rpcServer.getVersionInfo();
+      } catch (err) {
+        // Older RPC nodes do not implement getVersionInfo — treat as unsupported.
+        versionInfo = null;
+      }
+    }
+
+    const retentionWindowLedgers = SOROBAN_RETENTION_WINDOW_LEDGERS;
+    const data = {
+      status: "ok",
+      latestLedger,
+      oldestLedger: Math.max(1, latestLedger - retentionWindowLedgers),
+      retentionWindowLedgers,
+      retentionWindowApproxHours:
+        (retentionWindowLedgers * RPC_STATUS_AVG_CLOSE_TIME_SECONDS) / 3600,
+      version: versionInfo?.version ?? null,
+      protocolVersion: versionInfo?.protocolVersion ?? null,
+      networkPassphrase: versionInfo?.networkPassphrase ?? null,
+    };
+
+    cacheService.set(RPC_STATUS_CACHE_KEY, data, RPC_STATUS_CACHE_TTL_SECONDS);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * Recursively converts scValToNative() output into JSON-safe values:
@@ -870,6 +955,153 @@ router.get("/contract/:id/invoke-simulation", async (req, res, next) => {
       error: errorMessage,
       success: !hasError,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /soroban/transactions/:hash
+ *
+ * Returns the status and decoded return value of a Soroban contract transaction.
+ * Wraps the Soroban RPC `getTransaction` method.
+ *
+ * Path param:
+ *   - hash: 64-character hex transaction hash
+ *
+ * Response shape (success):
+ *   {
+ *     success: true,
+ *     data: {
+ *       hash:              string,          // the requested hash
+ *       status:            "SUCCESS" | "FAILED" | "NOT_FOUND",
+ *       ledger:            number | null,
+ *       createdAt:         string | null,   // ISO 8601 timestamp
+ *       applicationOrder:  number | null,
+ *       feeBump:           boolean | null,
+ *       returnValue:       any | null,      // decoded native value (BigInt → string)
+ *       errorCode:         string | null,   // only on FAILED
+ *       latestLedger:      number,
+ *       oldestLedger:      number
+ *     }
+ *   }
+ *
+ * Errors:
+ *   400 — malformed hash
+ *   404 — transaction not found (distinguishes not-yet-seen vs. older than retention window)
+ *   500 — Soroban RPC not configured
+ *
+ * Cache TTL: 30 seconds for finalized (SUCCESS/FAILED) results.
+ *            NOT_FOUND responses are not cached so the client can poll.
+ */
+router.get("/transactions/:hash", async (req, res, next) => {
+  try {
+    const { hash } = req.params;
+
+    // ── 1. Validate hash format ─────────────────────────────────────────────
+    validateTransactionHash(hash);
+
+    const rpcServer = requireSorobanServer();
+
+    // ── 2. Cache check (only finalized transactions) ────────────────────────
+    const cacheKey = `soroban-tx:${hash}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) {
+      res.set("X-Cache", "HIT");
+      return success(res, cached);
+    }
+
+    // ── 3. Fetch from Soroban RPC ───────────────────────────────────────────
+    let txResult;
+    try {
+      txResult = await rpcServer.getTransaction(hash);
+    } catch (err) {
+      // Network / RPC errors — let the global error handler deal with them
+      throw err;
+    }
+
+    const latestLedger = txResult.latestLedger ?? null;
+    const oldestLedger = txResult.oldestLedger ?? null;
+
+    // ── 4. NOT_FOUND handling ───────────────────────────────────────────────
+    // The RPC returns status "NOT_FOUND" for two distinct cases:
+    //   a. The transaction has not yet been ingested (submitted but pending)
+    //   b. The transaction is older than the RPC node's retention window
+    // We distinguish them using oldestLedger: if oldestLedger is set and the
+    // txn would have been before it, it is outside the retention window.
+    if (!txResult || txResult.status === "NOT_FOUND") {
+      const isOutsideRetention =
+        oldestLedger !== null && latestLedger !== null;
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "TransactionNotFound",
+          message: isOutsideRetention
+            ? `Transaction ${hash} is not found. It may be older than the RPC retention window (oldest tracked ledger: ${oldestLedger}).`
+            : `Transaction ${hash} has not been seen yet. It may still be pending or was never submitted.`,
+          hash,
+          latestLedger,
+          oldestLedger,
+        },
+      });
+    }
+
+    // ── 5. Decode return value ───────────────────────────────────────────────
+    let returnValue = null;
+    if (txResult.returnValue) {
+      try {
+        returnValue = toJsonSafe(scValToNative(txResult.returnValue));
+      } catch {
+        // If decoding fails, return raw base64 XDR
+        try {
+          returnValue = txResult.returnValue.toXDR("base64");
+        } catch {
+          returnValue = null;
+        }
+      }
+    }
+
+    // ── 6. Extract error code from result XDR on FAILED ─────────────────────
+    let errorCode = null;
+    if (txResult.status === "FAILED" && txResult.resultXdr) {
+      try {
+        const resultXdr =
+          typeof txResult.resultXdr === "string"
+            ? xdr.TransactionResult.fromXDR(txResult.resultXdr, "base64")
+            : txResult.resultXdr;
+        const result = resultXdr.result();
+        if (result && typeof result.switch === "function") {
+          errorCode = result.switch().name || null;
+        }
+      } catch {
+        errorCode = null;
+      }
+    }
+
+    // ── 7. Build response payload ────────────────────────────────────────────
+    const data = {
+      hash,
+      status: txResult.status,
+      ledger: txResult.ledger ?? null,
+      createdAt: txResult.createdAt
+        ? new Date(txResult.createdAt * 1000).toISOString()
+        : null,
+      applicationOrder: txResult.applicationOrder ?? null,
+      feeBump: txResult.feeBump ?? null,
+      returnValue,
+      errorCode,
+      latestLedger,
+      oldestLedger,
+    };
+
+    // ── 8. Cache finalized results only ──────────────────────────────────────
+    // SUCCESS and FAILED are immutable; cache them. PENDING/unknown: skip.
+    if (txResult.status === "SUCCESS" || txResult.status === "FAILED") {
+      cacheService.set(cacheKey, data, cacheTTL.sorobanTransaction);
+    }
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
   } catch (err) {
     next(err);
   }

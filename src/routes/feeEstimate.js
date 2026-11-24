@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const { server } = require("../config/stellar");
 const { success } = require("../utils/response");
@@ -6,9 +8,11 @@ const cacheService = require("../services/cache");
 const CACHE_TTL = parseInt(process.env.CACHE_TTL_MS || "5000", 10) / 1000; // seconds
 const cacheTTL = require("../config/cacheConfig");
 const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 const { parseStellarAmount } = require("../utils/parseStellarAmount");
 const { mapFeeStats } = require("../utils/mapFeeEstimate");
+const { singleFlight } = require("../utils/singleFlight");
 
 const LEDGER_HISTORY_LIMIT = 5;
 
@@ -34,10 +38,16 @@ const SURGE_STATUS_LEDGER_LIMIT = 10;
 router.get("/", async (req, res, next) => {
   try {
     const operations = Math.max(1, parseInt(req.query.operations) || 1);
-    const cacheKey = `fee-estimate:${operations}`;
-    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    // Key on the normalised operation count so ?operations=1, an omitted
+    // operations param and unknown extra params all share one entry.
+    const cacheKey = buildCacheKey(
+      { query: { operations } },
+      { namespace: "fee-estimate", allowedParams: ["operations"], defaults: { operations: 1 } }
+    );
+    const fresh = isFresh(req);
 
-    // Check cache first (unless fresh=true)
+    // Check cache first (unless fresh=true). A fresh request still repopulates
+    // the normal key below.
     if (!fresh) {
       const cached = cacheService.get(cacheKey);
       if (cached) {
@@ -46,7 +56,9 @@ router.get("/", async (req, res, next) => {
       }
     }
 
-    // Cache miss or fresh=true - fetch from Horizon
+    // Cache miss or fresh=true - fetch from Horizon, coalescing identical
+    // concurrent requests for the same key into one upstream call.
+    const data = await singleFlight(cacheKey, async () => {
     const feeStats = await server.feeStats();
     const ledgerHistory = await server
       .ledgers()
@@ -60,7 +72,7 @@ router.get("/", async (req, res, next) => {
     const priority = parseInt(feeStats.fee_charged.p95);
     const liveFees = mapFeeStats(feeStats);
 
-    const data = {
+    const result = {
       ...liveFees,
       note: `Fee estimates for a transaction with ${operations} operation(s). Fees are in stroops (1 XLM = 10,000,000 stroops).`,
       operationCount: operations,
@@ -143,7 +155,9 @@ router.get("/", async (req, res, next) => {
       })(),
     };
 
-    cacheService.set(cacheKey, data, cacheTTL.feeEstimate);
+    cacheService.set(cacheKey, result, cacheTTL.feeEstimate);
+    return result;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);
@@ -364,7 +378,7 @@ router.get("/trends", async (req, res, next) => {
  * POST /fee-estimate/batch
  * { "transactions": [{ "type": "payment", "operationCount": 1 }, { "type": "swap", "operationCount": 3 }] }
  */
-router.post("/batch", async (req, res, next) => {
+router.post("/batch", validateBody(schemas.feeBatch), async (req, res, next) => {
   try {
     const BATCH_MAX = 10;
     const { transactions } = req.body || {};

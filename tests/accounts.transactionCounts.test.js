@@ -40,7 +40,7 @@ jest.mock("../src/config/stellar", () => {
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
 
-const ADDR_1 = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+const ADDR_1 = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
 const ADDR_2 = "GBB67CMSCMGPROSFIVENXMRQ3KJWELDIUYITQI7YCKMSOPR2SNZB5NQ5";
 const ADDR_3 = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
 
@@ -263,7 +263,7 @@ describe("POST /accounts/transaction-counts — invalid input", () => {
   it("returns 400 when addresses is not an array", async () => {
     const res = await request(app)
       .post("/accounts/transaction-counts")
-      .send({ addresses: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" });
+      .send({ addresses: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7" });
 
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);
@@ -289,7 +289,8 @@ describe("POST /accounts/transaction-counts — invalid input", () => {
 
   it("returns 400 when body is missing entirely", async () => {
     const res = await request(app)
-      .post("/accounts/transaction-counts");
+      .post("/accounts/transaction-counts")
+      .set("Content-Type", "application/json");
 
     expect(res.statusCode).toBe(400);
     expect(res.body.success).toBe(false);

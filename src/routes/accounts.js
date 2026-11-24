@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router = express.Router();
 const accountRouter = require("./account");
 const { server, NETWORK } = require("../config/stellar");
@@ -134,7 +136,7 @@ function validateAddressBatch(addresses, fieldName = "addresses", maxAddresses =
  * Request body: { "addresses": ["G...", "G..."] }
  * Response: { success: true, data: { results: { "G...": { balance, buyingLiabilities, sellingLiabilities } } } }
  */
-router.post("/native-balances", async (req, res, next) => {
+router.post("/native-balances", validateBody(schemas.nativeBalances), async (req, res, next) => {
   try {
     const { addresses } = req.body;
     validateAddressBatch(addresses);
@@ -178,7 +180,7 @@ function validateEffectsLimit(limit) {
   return Math.min(numericLimit, 10);
 }
 
-router.post("/effects", async (req, res, next) => {
+router.post("/effects", validateBody(schemas.accountEffects), async (req, res, next) => {
   try {
     const { addresses, limit } = req.body || {};
     validateAddressBatch(addresses, "addresses", 10);
@@ -212,7 +214,7 @@ router.post("/effects", async (req, res, next) => {
   }
 });
 
-router.post("/trust-status", async (req, res, next) => {
+router.post("/trust-status", validateBody(schemas.trustStatus), async (req, res, next) => {
   try {
     const { addresses, asset } = req.body;
     validateAddressBatch(addresses);
@@ -376,7 +378,7 @@ function normalizeSignerPayload(account) {
  *     }
  *   }
  */
-router.post("/signers", async (req, res, next) => {
+router.post("/signers", validateBody(schemas.accountSigners), async (req, res, next) => {
   try {
     const { addresses } = req.body || {};
 
@@ -536,7 +538,7 @@ async function fetchTransactionCount(address) {
       cursor = records[records.length - 1].paging_token;
 
       if (records.length < 200) break;
-    } while (true); // eslint-disable-line no-constant-condition
+    } while (true);  
   } catch (err) {
     // Horizon 404 means account does not exist — return zeroed result
     if (err && err.response && err.response.status === 404) {
@@ -548,7 +550,7 @@ async function fetchTransactionCount(address) {
   return { count, firstTransactionAt, lastTransactionAt };
 }
 
-router.post("/transaction-counts", async (req, res, next) => {
+router.post("/transaction-counts", validateBody(schemas.transactionCounts), async (req, res, next) => {
   try {
     const { addresses } = req.body || {};
 

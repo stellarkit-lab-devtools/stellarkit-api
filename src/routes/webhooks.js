@@ -1,4 +1,6 @@
 const express = require("express");
+const { validateBody } = require("../middleware/validateBody");
+const schemas = require("../middleware/bodySchemas");
 const router  = express.Router();
 const webhookStore = require("../services/webhookStore");
 const { success }  = require("../utils/response");
@@ -74,6 +76,63 @@ function toWebhookListItem(entry) {
 }
 
 /**
+ * Build the webhook delivery health summary from the current store state.
+ *
+ * @returns {{
+ *   totalWebhooks: number,
+ *   activeWebhooks: number,
+ *   pausedWebhooks: number,
+ *   totalDeliveries: number,
+ *   successfulDeliveries: number,
+ *   failedDeliveries: number,
+ *   retryQueueSize: number,
+ *   topFailingWebhooks: Array<{ webhookId: string, failureCount: number }>
+ * }}
+ */
+function buildWebhookStats() {
+  const webhooks = webhookStore.list();
+
+  const totalWebhooks = webhooks.length;
+  const activeWebhooks = webhooks.filter((w) => (w.status ?? "active") === "active").length;
+  const pausedWebhooks = webhooks.filter((w) => w.status === "paused").length;
+
+  const deliveries = typeof webhookStore.listDeliveries === "function"
+    ? webhookStore.listDeliveries()
+    : [];
+
+  const totalDeliveries = deliveries.length;
+  const successfulDeliveries = deliveries.filter((d) => d.status === "success" || d.success === true).length;
+  const failedDeliveries = deliveries.filter((d) => d.status === "failed" || d.success === false).length;
+
+  const retryQueueSize = typeof webhookStore.retryQueueSize === "function"
+    ? webhookStore.retryQueueSize()
+    : deliveries.filter((d) => d.status === "retrying" || d.retryScheduled === true).length;
+
+  const failureCounts = new Map();
+  for (const delivery of deliveries) {
+    const failed = delivery.status === "failed" || delivery.success === false;
+    if (!failed || !delivery.webhookId) continue;
+    failureCounts.set(delivery.webhookId, (failureCounts.get(delivery.webhookId) || 0) + 1);
+  }
+
+  const topFailingWebhooks = Array.from(failureCounts.entries())
+    .map(([webhookId, failureCount]) => ({ webhookId, failureCount }))
+    .sort((a, b) => b.failureCount - a.failureCount)
+    .slice(0, 5);
+
+  return {
+    totalWebhooks,
+    activeWebhooks,
+    pausedWebhooks,
+    totalDeliveries,
+    successfulDeliveries,
+    failedDeliveries,
+    retryQueueSize,
+    topFailingWebhooks,
+  };
+}
+
+/**
  * POST /webhooks/register
  *
  * Register a new webhook via the /register path.
@@ -85,7 +144,7 @@ function toWebhookListItem(entry) {
  *
  * Response 400: invalid URL or missing required fields.
  */
-router.post("/register", (req, res, next) => {
+router.post("/register", validateBody(schemas.webhook), (req, res, next) => {
   try {
     const body = req.body || {};
 
@@ -147,7 +206,7 @@ router.post("/register", (req, res, next) => {
  *
  * Response 400: { "success": false, "error": { "type": "ValidationError", ... } }
  */
-router.post("/", webhookSignatureAuth, (req, res, next) => {
+router.post("/", webhookSignatureAuth, validateBody(schemas.webhook), (req, res, next) => {
   try {
     const validationError = validateRegistration(req.body);
     if (validationError) {
@@ -190,6 +249,17 @@ router.get("/", webhookSignatureAuth, (req, res) => {
   const accountId = typeof req.query.accountId === "string" ? req.query.accountId.trim() : "";
   const webhooks = webhookStore.list(accountId || undefined).map(toWebhookListItem);
   return success(res, { webhooks, total: webhooks.length });
+});
+
+/**
+ * GET /webhooks/stats
+ *
+ * Delivery health dashboard for operators. Reports how many webhooks are
+ * registered (and how many are active vs paused), delivery outcome totals,
+ * the current retry queue size, and the webhooks with the most failures.
+ */
+router.get("/stats", webhookSignatureAuth, (req, res) => {
+  return success(res, buildWebhookStats());
 });
 
 /**
@@ -267,8 +337,14 @@ router.delete("/:webhookId", webhookSignatureAuth, (req, res, next) => {
  *       "message": "Webhook 'wh_...' was not found."
  *     }
  *   }
+ * Paused webhooks will not receive event deliveries until resumed.
+ *
+ * Response 200:
+ *   { "success": true, "data": { "webhookId": "wh_...", "status": "paused" } }
+ *
+ * Response 404: webhook not found.
  */
-router.post("/:webhookId/pause", webhookSignatureAuth, (req, res, next) => {
+router.post("/:webhookId/pause", webhookSignatureAuth, validateBody(schemas.webhookAction), (req, res, next) => {
   try {
     const { webhookId } = req.params;
 
@@ -288,6 +364,8 @@ router.post("/:webhookId/pause", webhookSignatureAuth, (req, res, next) => {
 
     const updated = webhookStore.updateStatus(webhookId, "paused");
     return success(res, toWebhookListItem(updated));
+    webhookStore.updateStatus(webhookId, "paused");
+    return success(res, { webhookId, status: "paused" });
   } catch (err) {
     next(err);
   }
@@ -319,8 +397,14 @@ router.post("/:webhookId/pause", webhookSignatureAuth, (req, res, next) => {
  *       "message": "Webhook 'wh_...' was not found."
  *     }
  *   }
+ * Resume a paused webhook by setting its status back to "active".
+ *
+ * Response 200:
+ *   { "success": true, "data": { "webhookId": "wh_...", "status": "active" } }
+ *
+ * Response 404: webhook not found.
  */
-router.post("/:webhookId/resume", webhookSignatureAuth, (req, res, next) => {
+router.post("/:webhookId/resume", webhookSignatureAuth, validateBody(schemas.webhookAction), (req, res, next) => {
   try {
     const { webhookId } = req.params;
 
@@ -340,9 +424,12 @@ router.post("/:webhookId/resume", webhookSignatureAuth, (req, res, next) => {
 
     const updated = webhookStore.updateStatus(webhookId, "active");
     return success(res, toWebhookListItem(updated));
+    webhookStore.updateStatus(webhookId, "active");
+    return success(res, { webhookId, status: "active" });
   } catch (err) {
     next(err);
   }
 });
 
+module.exports = router;
 module.exports = router;

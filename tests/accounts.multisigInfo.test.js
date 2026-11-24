@@ -2,6 +2,7 @@ const request = require("supertest");
 const app = require("../src/index");
 const { server } = require("../src/config/stellar");
 const { Keypair } = require("@stellar/stellar-sdk");
+const { loadFixture } = require("./fixtures");
 
 jest.mock("../src/config/stellar", () => {
   const originalModule = jest.requireActual("../src/config/stellar");
@@ -22,18 +23,9 @@ describe("POST /accounts/multisig-info", () => {
   });
 
   it("returns multisig metadata for multiple accounts", async () => {
-    server.loadAccount.mockImplementation(async (id) => ({
-      id,
-      thresholds: {
-        low_threshold: 2,
-        med_threshold: 3,
-        high_threshold: 4,
-      },
-      signers: [
-        { key: id, type: "ed25519_public_key", weight: 1 },
-        { key: Keypair.random().publicKey(), type: "ed25519_public_key", weight: 2 },
-      ],
-    }));
+    server.loadAccount.mockImplementation(async (id) =>
+      loadFixture("account-multisig", { id })
+    );
 
     const res = await request(app)
       .post("/accounts/multisig-info")

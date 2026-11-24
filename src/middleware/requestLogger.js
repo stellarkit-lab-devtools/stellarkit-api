@@ -1,91 +1,179 @@
 /**
- * Request logging middleware.
- *
- * Logs a single structured entry for every completed request via the shared
- * Pino logger. Each entry includes the HTTP method, path, status code, request
- * ID, and the elapsed response time in milliseconds, giving consistent
- * visibility into how long individual requests take across all routes.
- *
- * When a route handler calls Horizon it should record the duration via the
- * helpers exported below so this middleware can include horizonResponseTimeMs
- * in the log entry. Routes that serve from cache omit the field entirely.
- *
- * Usage in a route handler:
- *   const { startHorizonTimer, stopHorizonTimer } = require("../middleware/requestLogger");
- *   startHorizonTimer(req);
- *   const account = await server.loadAccount(id);
- *   stopHorizonTimer(req);
+ * Request logging middleware with robust error handling.
+ * 
+ * Guards against:
+ * - Missing or odd headers
+ * - Undefined req.route on 404s
+ * - Requests aborted before finish
+ * - Non-string req.ip
+ * - Very long URLs
+ * - Circular structures in error context
+ * 
+ * Attaches finish hook once to prevent double logging.
+ * SDK version is logged when present (via X-StellarKit-SDK header).
  */
 
+const redactSeeds = require("../utils/redactSeeds");
+const sanitizeLogValue = require("../utils/sanitizeLogValue");
 const logger = require("../utils/logger");
 const metricsService = require("../services/metrics");
-
-/**
- * Record the start of a Horizon call on the request object.
- * Multiple calls within a single request are accumulated.
- *
- * @param {import('express').Request} req
- */
-function startHorizonTimer(req) {
-  req._horizonCallStart = process.hrtime.bigint();
-}
-
-/**
- * Stop the running Horizon timer and add the elapsed time to the request's
- * running Horizon total. Calling this without a prior startHorizonTimer is a
- * no-op so routes don't need guard logic.
- *
- * @param {import('express').Request} req
- */
-function stopHorizonTimer(req) {
-  if (!req._horizonCallStart) return;
-  const elapsed = Number(process.hrtime.bigint() - req._horizonCallStart) / 1e6;
-  req._horizonCallStart = undefined;
-  req.horizonResponseTimeMs = Math.round(((req.horizonResponseTimeMs || 0) + elapsed) * 1000) / 1000;
-}
 
 const SLOW_REQUEST_THRESHOLD_MS =
   parseInt(process.env.SLOW_REQUEST_THRESHOLD_MS, 10) || 2000;
 
+/**
+ * Validate and extract SDK version from X-StellarKit-SDK header.
+ * Valid format: name/major.minor.patch[-+prerelease]
+ * Maximum length: 64 characters
+ *
+ * @param {string} headerValue - The header value to validate
+ * @returns {string|null} The validated SDK version, or null if invalid
+ */
+function validateSdkHeader(headerValue) {
+  if (!headerValue || typeof headerValue !== "string") {
+    return null;
+  }
+
+  // Max length: 64 characters
+  if (headerValue.length > 64) {
+    return null;
+  }
+
+  // Pattern: alphanumeric/digits/dots/hyphens/plus, with version semver format
+  // Example: stellarkit-js/1.0.0, stellarkit-js/1.0.0-beta, stellarkit-py/1.2.3+build
+  const pattern = /^[\w.-]+\/\d+\.\d+\.\d+([-+][\w.]+)?$/;
+  if (!pattern.test(headerValue)) {
+    return null;
+  }
+
+  return headerValue;
+}
+
+function safeStringify(obj, depth = 3) {
+  const seen = new Set();
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === "object" && value !== null) {
+      if (seen.has(value)) return "[Circular]";
+      if (depth <= 0) return "[Truncated]";
+      seen.add(value);
+    }
+    return value;
+  }, 2);
+}
+
+function safeGet(obj, path) {
+  try {
+    return path.reduce((curr, key) => (curr && curr[key] !== undefined) ? curr[key] : undefined, obj);
+  } catch {
+    return undefined;
+  }
+}
+
 function requestLogger(req, res, next) {
   const start = process.hrtime.bigint();
+  let finished = false;
+  let logged = false;
 
-  res.on("finish", () => {
-    const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
-    // Keep sub-millisecond precision while avoiding noisy floating point tails.
-    const responseTimeMs = Math.round(elapsedMs * 1000) / 1000;
+  const logOnce = (extra = {}) => {
+    if (logged) return;
+    logged = true;
 
-    const requestId = req.requestId || "-";
-    const method = req.method;
-    const path = req.originalUrl || req.url;
-    const statusCode = res.statusCode;
+    try {
+      const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+      const responseTimeMs = Math.round(elapsedMs * 1000) / 1000;
+      const requestId = req.requestId || "-";
+      const method = req.method;
 
-    const fields = { requestId, method, path, statusCode, responseTimeMs };
+      // Sanitize user-supplied values: path, query string, User-Agent, Referer, Origin
+      const rawPath = req.originalUrl || req.url;
+      const path = sanitizeLogValue(redactSeeds(rawPath));
+      const query = sanitizeLogValue(req._parsedUrl && req._parsedUrl.query ? req._parsedUrl.query : '');
+      const userAgent = sanitizeLogValue(req.headers['user-agent']);
+      const referer = sanitizeLogValue(req.headers['referer']);
+      const origin = sanitizeLogValue(req.headers['origin']);
 
-    // Only include horizonResponseTimeMs when the request actually called
-    // Horizon — cache hits and non-Horizon routes will not have this field.
-    if (typeof req.horizonResponseTimeMs === "number") {
-      fields.horizonResponseTimeMs = req.horizonResponseTimeMs;
+      const statusCode = res.statusCode;
+
+      const ip = safeGet(req, ["ip"]);
+      const safeIp = typeof ip === "string" ? ip : "unknown";
+
+      const fields = {
+        requestId,
+        method,
+        path: path.length > 2048 ? path.substring(0, 2048) + "... [truncated]" : path,
+        statusCode,
+        responseTimeMs,
+        clientIp: safeIp,
+        ...extra
+      };
+
+      // Extract and validate SDK version header
+      const sdkHeader = req.get("X-StellarKit-SDK");
+      if (sdkHeader) {
+        const validatedSdk = validateSdkHeader(sdkHeader);
+        if (validatedSdk) {
+          fields.sdkVersion = validatedSdk;
+        }
+      }
+
+      if (typeof req.horizonResponseTimeMs === "number") {
+        fields.horizonResponseTimeMs = req.horizonResponseTimeMs;
+      }
+
+      logger.info(fields, `[${requestId}] ${method} ${path} ${statusCode} ${responseTimeMs}ms`);
+
+      const routePattern = (safeGet(req, ["route", "path"]))
+        ? (safeGet(req, ["baseUrl"]) || "") + safeGet(req, ["route", "path"])
+        : safeGet(req, ["path"]) || "unknown";
+
+      metricsService.recordResponseTime(method, routePattern, responseTimeMs);
+
+      if (responseTimeMs > SLOW_REQUEST_THRESHOLD_MS) {
+        logger.warn({ requestId, method, path, responseTimeMs, threshold: SLOW_REQUEST_THRESHOLD_MS }, "[SLOW REQUEST]");
+      }
+    } catch (logError) {
+      try {
+        logger.error({
+          error: safeStringify(logError),
+          originalPath: safeGet(req, ["originalUrl"]) || "unknown"
+        }, "[LOGGER FALLBACK] Failed to log request");
+      } catch {
+        // Silent fallback - never let logging crash the request
+      }
     }
+  };
 
-    logger.info(
-      fields,
-      `[${requestId}] ${method} ${path} ${statusCode} ${responseTimeMs}ms`,
-    );
+  const onFinish = () => {
+    if (finished) return;
+    finished = true;
+    logOnce();
+  };
 
-    // Record response time for slowest-endpoint tracking.
-    // Use the Express matched route pattern when available so dynamic segments
-    // like /account/:id are grouped together rather than tracked per unique ID.
-    const routePattern =
-      (req.route && req.route.path)
-        ? (req.baseUrl || "") + req.route.path
-        : req.path;
-    metricsService.recordResponseTime(method, routePattern, responseTimeMs);
+  const onClose = () => {
+    if (finished) return;
+    finished = true;
+    logOnce({ aborted: true });
+  };
+
+  res.on("finish", onFinish);
+  res.on("close", onClose);
+
+  req.once("close", () => {
+    if (!finished) {
+      res.removeListener("finish", onFinish);
+      res.removeListener("close", onClose);
+      onClose();
+    }
   });
 
   next();
 }
 
 module.exports = requestLogger;
-module.exports.startHorizonTimer = startHorizonTimer;
-module.exports.stopHorizonTimer = stopHorizonTimer;
+module.exports.startHorizonTimer = (req) => { req._horizonCallStart = process.hrtime.bigint(); };
+module.exports.stopHorizonTimer = (req) => {
+  if (!req._horizonCallStart) return;
+  const elapsed = Number(process.hrtime.bigint() - req._horizonCallStart) / 1e6;
+  req._horizonCallStart = undefined;
+  req.horizonResponseTimeMs = Math.round(((req.horizonResponseTimeMs || 0) + elapsed) * 1000) / 1000;
+};

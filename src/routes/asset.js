@@ -17,7 +17,7 @@ const {
   makeOrderBookEmptyError,
 } = require("../utils/errors");
 const cacheTTL = require("../config/cacheConfig");
-const { normalizeAsset } = require("../utils/asset");
+const { normalizeAsset, normalizeAssetFromString } = require("../utils/asset");
 const { fetchNormalisedToml } = require("../utils/tomlResolver");
 const { isNativeAsset } = require("../utils/assetHelpers");
 router.use(normalizeAssetCode);
@@ -206,7 +206,7 @@ router.get(
       const nextCursor = lastRecord ? lastRecord.paging_token : null;
 
       const meta = {
-        count: filteredHolders.length,
+        total: filteredHolders.length,
         limit,
         order,
         nextCursor,
@@ -317,6 +317,7 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
     validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
+    const topLimit = req.query.limit !== undefined ? validateLimit(req.query.limit, 200) : 10;
 
     // 1. Verify asset exists and get total holder count
     const assetsResponse = await server
@@ -333,8 +334,6 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
     const totalHolders = asset.num_accounts;
 
     // 2. Fetch top holders (up to 200)
-    // Note: Horizon doesn't allow sorting /accounts by balance.
-    // We fetch a page of accounts holding the asset.
     const accountsResponse = await server
       .accounts()
       .forAsset(new Asset(assetCode, issuer))
@@ -345,22 +344,31 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
     if (records.length === 0) {
       return success(res, {
         totalHolders: 0,
+        topHolders: [],
+        distributionStats: { top10HoldersPercent: 0, top25HoldersPercent: 0, largestHolder: null, smallestHolder: null },
+        giniCoefficient: 0,
         top10HoldersPercent: 0,
         top25HoldersPercent: 0,
-        giniCoefficient: 0,
         largestHolder: null,
         smallestHolder: null,
       });
     }
 
-    // Extract balances and sort descending
-    const balances = records.map(r => {
+    // Extract holders with balance, sort descending
+    const holdersData = records.map(r => {
       const b = r.balances.find(bal => bal.asset_code === assetCode && bal.asset_issuer === issuer);
-      return parseFloat(b ? b.balance : "0");
-    }).sort((a, b) => b - a);
+      return { address: r.id, balanceNum: parseFloat(b ? b.balance : "0") };
+    }).sort((a, b) => b.balanceNum - a.balanceNum);
 
+    const balances = holdersData.map(h => h.balanceNum);
     const totalInFetched = balances.reduce((sum, b) => sum + b, 0);
     const totalAssetSupply = parseFloat(asset.amount || "0");
+
+    // topHolders array limited by ?limit=
+    const topHolders = holdersData.slice(0, topLimit).map(h => ({
+      address: h.address,
+      balance: toSevenDecimalString(h.balanceNum),
+    }));
 
     // Concentration metrics relative to total supply
     const top10Sum = balances.slice(0, 10).reduce((sum, b) => sum + b, 0);
@@ -373,9 +381,10 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
       ? parseFloat(((top25Sum / totalAssetSupply) * 100).toFixed(2))
       : 0;
 
-    // Gini Coefficient Calculation (using the fetched set)
-    // G = (2 * sum(i * x_i) / (n * sum(x_i))) - ((n + 1) / n)
-    // where x_i is sorted ASCENDING
+    const largestHolder = holdersData[0]?.address || null;
+    const smallestHolder = holdersData[holdersData.length - 1]?.address || null;
+
+    // Gini Coefficient
     const n = balances.length;
     const sortedAsc = [...balances].sort((a, b) => a - b);
     let cumulativeSum = 0;
@@ -390,18 +399,67 @@ router.get("/:code/:issuer/distribution", async (req, res, next) => {
 
     return success(res, {
       totalHolders,
+      topHolders,
+      distributionStats: { top10HoldersPercent, top25HoldersPercent, largestHolder, smallestHolder },
+      giniCoefficient,
       top10HoldersPercent,
       top25HoldersPercent,
-      giniCoefficient,
-      largestHolder: records.find(r => {
-        const b = r.balances.find(bal => bal.asset_code === assetCode && bal.asset_issuer === issuer);
-        return parseFloat(b ? b.balance : "0") === balances[0];
-      })?.id || null,
-      smallestHolder: records.find(r => {
-        const b = r.balances.find(bal => bal.asset_code === assetCode && bal.asset_issuer === issuer);
-        return parseFloat(b ? b.balance : "0") === balances[balances.length - 1];
-      })?.id || null,
+      largestHolder,
+      smallestHolder,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /asset/:code/:issuer/liquidity-pools
+ * Lists the liquidity pools that contain the specified asset.
+ *
+ * Query params:
+ *   limit  (number, 1–100, default: 20)
+ *   cursor (string) — paging token from a previous response
+ *
+ * Use `XLM/native` for the native asset.
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/liquidity-pools?limit=10
+ */
+router.get("/:code/:issuer/liquidity-pools", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    const isNative = code.toUpperCase() === "XLM" && issuer.toLowerCase() === "native";
+    if (!isNative) validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const asset = isNative ? Asset.native() : new Asset(assetCode, issuer);
+    const assetString = isNative ? "native" : `${assetCode}:${issuer}`;
+    const { limit, cursor } = parsePaginationParams(req.query);
+
+    let query = server.liquidityPools().forAssets(asset).limit(limit);
+    if (cursor) query = query.cursor(cursor);
+    const response = await query.call();
+    const records = response.records || [];
+
+    const formatReserve = (r) => ({
+      asset: normalizeAssetFromString(r.asset),
+      amount: toSevenDecimalString(r.amount),
+    });
+
+    const pools = records
+      .filter((p) => (p.reserves || []).some((r) => r.asset === assetString))
+      .map((p) => ({
+        poolId: p.id,
+        fee: p.fee_bp,
+        totalShares: toSevenDecimalString(p.total_shares),
+        reserveA: formatReserve(p.reserves[0]),
+        reserveB: formatReserve(p.reserves[1]),
+        totalTrustlines: parseInt(p.total_trustlines || "0", 10),
+      }));
+
+    const nextCursor = records.length > 0 ? records[records.length - 1].paging_token || null : null;
+
+    return success(res, { pools, total: pools.length, limit, cursor: nextCursor });
   } catch (err) {
     next(err);
   }
@@ -535,7 +593,7 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
     validateAsset(code, issuer);
 
     const assetCode = code.toUpperCase();
-    const axios = require("axios");
+    const { safeFetchToml } = require("../utils/safeFetch");
 
     const checks = {
       accountExists: { passed: false, detail: "Account not found on Stellar network." },
@@ -565,8 +623,7 @@ router.get("/:code/:issuer/verify", async (req, res, next) => {
     const tomlUrl = `https://${homeDomain}/.well-known/stellar.toml`;
     let tomlText;
     try {
-      const response = await axios.get(tomlUrl, { timeout: 5000 });
-      tomlText = response.data;
+      tomlText = await safeFetchToml(homeDomain);
       checks.tomlReachable = { passed: true, detail: `stellar.toml fetched from ${tomlUrl}.` };
     } catch (err) {
       return success(res, { verified: false, checks });
@@ -775,4 +832,865 @@ router.get("/:code/:issuer/price", async (req, res, next) => {
   }
 });
 
+/**
+ * Resolution map for the holder-growth time series.
+ */
+const HOLDER_GROWTH_RESOLUTIONS = {
+  "7d": { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000 },
+  "30d": { windowMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 7 * 24 * 60 * 60 * 1000 },
+  "90d": { windowMs: 90 * 24 * 60 * 60 * 1000, bucketMs: 7 * 24 * 60 * 60 * 1000 },
+};
+
+function aggregateTrustlineGrowth(operations, windowStartMs, bucketMs) {
+  const buckets = new Map();
+
+  for (const op of operations) {
+    const opTime = new Date(op.created_at).getTime();
+    if (!Number.isFinite(opTime) || opTime < windowStartMs) {
+      continue;
+    }
+
+    const bucketStart = Math.floor(opTime / bucketMs) * bucketMs;
+    if (!buckets.has(bucketStart)) {
+      buckets.set(bucketStart, {
+        bucketStart,
+        date: new Date(bucketStart).toISOString(),
+        change: 0,
+        added: 0,
+        removed: 0,
+      });
+    }
+
+    const bucket = buckets.get(bucketStart);
+    if (parseFloat(op.limit) > 0) {
+      bucket.change += 1;
+      bucket.added += 1;
+    } else {
+      bucket.change -= 1;
+      bucket.removed += 1;
+    }
+  }
+
+  const sorted = Array.from(buckets.values()).sort(
+    (a, b) => a.bucketStart - b.bucketStart,
+  );
+
+  let cumulativeHolders = 0;
+  return sorted.map((bucket) => {
+    cumulativeHolders += bucket.change;
+    return {
+      date: bucket.date,
+      holders: cumulativeHolders,
+      change: bucket.change,
+      added: bucket.added,
+      removed: bucket.removed,
+    };
+  });
+}
+
+/**
+ * GET /asset/:code/:issuer/holder-growth
+ */
+router.get("/:code/:issuer/holder-growth", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const asset = new Asset(assetCode, issuer);
+    const resolution = req.query.resolution || "30d";
+
+    const resolutions = { "7d": 7, "30d": 30, "90d": 90 };
+    const days = resolutions[resolution] || 30;
+    const windowStartMs = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    let cursor;
+    const growth = [];
+    let cumulativeHolders = 0;
+    const holderCounts = new Map();
+
+    while (true) {
+      let query = server
+        .effects()
+        .forAsset(asset)
+        .order("asc")
+        .limit(200);
+      if (cursor) query = query.cursor(cursor);
+
+      const response = await query.call();
+      const records = response.records || [];
+      if (records.length === 0) break;
+
+      for (const effect of records) {
+        cursor = effect.paging_token;
+        if (effect.type !== "trustline_flags_updated") continue;
+        if (effect.asset_issuer !== issuer || effect.asset_code !== assetCode)
+          continue;
+
+        const timestamp = new Date(effect.created_at).getTime();
+        if (!Number.isFinite(timestamp)) continue;
+        if (timestamp < windowStartMs) continue;
+
+        const isAuthorized = effect.new_flags?.authorized === true;
+        const isClawbackEnabled = effect.new_flags?.clawback_enabled === true;
+        const flagsChanged =
+          (effect.new_flags?.authorized !== effect.old_flags?.authorized ||
+            effect.new_flags?.clawback_enabled !==
+              effect.old_flags?.clawback_enabled) ??
+          false;
+
+        if (!isAuthorized && !isClawbackEnabled) cumulativeHolders--;
+        else if (flagsChanged && isAuthorized && !holderCounts.has("add"))
+          cumulativeHolders++;
+
+        const bucketKey = Math.floor(timestamp / (days * 24 * 60 * 60 * 1000));
+        if (!holderCounts.has(bucketKey)) {
+          holderCounts.set(bucketKey, { added: 0, removed: 0 });
+        }
+        const bucket = holderCounts.get(bucketKey);
+        if (!isAuthorized) bucket.removed++;
+        else bucket.added++;
+      }
+
+      if (!response.records?.[response.records.length - 1]?.paging_token)
+        break;
+    }
+
+    const sortedBuckets = Array.from(holderCounts.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([bucket, data]) => ({
+        timestamp: new Date(bucket * days * 24 * 60 * 60 * 1000).toISOString(),
+        change: data.added - data.removed,
+        holders: cumulativeHolders,
+      }));
+
+    return success(res, {
+      asset: { code: assetCode, issuer, type: "credit_alphanum4" },
+      resolution,
+      growth: sortedBuckets,
+    });
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return next(makeAssetNotFoundError(code, issuer, NETWORK));
+    }
+    next(err);
+  }
+});
+
+/**
+ * GET /asset/:code/:issuer/trading-volume
+ *
+ * Returns the asset's traded volume, trade count, and distinct traders over
+ * the last 24 hours.
+ *
+ * @param {string} code   - Asset code (e.g. USDC)
+ * @param {string} issuer - Issuer account public key (G...)
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/trading-volume
+ */
+router.get("/:code/:issuer/trading-volume", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    const cacheKey = `trading-volume:${code}:${issuer}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const assetCode = code.toUpperCase();
+    const asset = new Asset(assetCode, issuer);
+    const now = Date.now();
+    const windowStart24hMs = now - 24 * 60 * 60 * 1000;
+    const windowStart7dMs = now - 7 * 24 * 60 * 60 * 1000;
+
+    const data24h = { volume: 0, tradeCount: 0, traders: new Set() };
+    const data7d = { volume: 0, tradeCount: 0, traders: new Set() };
+
+    let cursor;
+    let done = false;
+
+    while (!done) {
+      let query = server.trades().forAsset(asset).order("desc").limit(200);
+      if (cursor) query = query.cursor(cursor);
+
+      const response = await query.call();
+      const records = response.records || [];
+      if (records.length === 0) break;
+
+      for (const trade of records) {
+        cursor = trade.paging_token;
+        const timestamp = new Date(trade.ledger_close_time).getTime();
+        if (!Number.isFinite(timestamp)) continue;
+        if (timestamp < windowStart7dMs) {
+          done = true;
+          break;
+        }
+
+        const isBaseAsset =
+          trade.base_asset_code?.toUpperCase() === assetCode &&
+          trade.base_asset_issuer === issuer;
+        const isCounterAsset =
+          trade.counter_asset_code?.toUpperCase() === assetCode &&
+          trade.counter_asset_issuer === issuer;
+        if (!isBaseAsset && !isCounterAsset) continue;
+
+        const amount = Number(
+          isBaseAsset ? trade.base_amount : trade.counter_amount,
+        );
+        if (!Number.isFinite(amount)) continue;
+
+        // Update 7d data
+        data7d.volume += amount;
+        data7d.tradeCount += 1;
+        if (trade.base_account) data7d.traders.add(trade.base_account);
+        if (trade.counter_account) data7d.traders.add(trade.counter_account);
+
+        // Update 24h data if within 24h window
+        if (timestamp >= windowStart24hMs) {
+          data24h.volume += amount;
+          data24h.tradeCount += 1;
+          if (trade.base_account) data24h.traders.add(trade.base_account);
+          if (trade.counter_account) data24h.traders.add(trade.counter_account);
+        }
+      }
+
+      if (done || records.length < 200 || !cursor) break;
+    }
+
+    const response = {
+      code: assetCode,
+      issuer,
+      volume24h: data24h.volume.toFixed(7),
+      volume7d: data7d.volume.toFixed(7),
+      tradeCount24h: data24h.tradeCount,
+      tradeCount7d: data7d.tradeCount,
+      uniqueTraders24h: data24h.traders.size,
+    };
+
+    res.set("X-Cache", "MISS");
+    cacheService.set(cacheKey, response, cacheTTL.CACHE_TTL_ASSET_TRADING_VOLUME_MS / 1000 || 300);
+    return success(res, response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /asset/:code/:issuer/burn-history
+ *
+ * Returns a time series of burn events (payments sent to the issuer or burn
+ * addresses) with timestamp, amount, burner address, and transaction hash.
+ * Includes total lifetime burned amount and 7-day burn rate.
+ *
+ * Query params:
+ *   limit (number, 1–200, default: 50) — maximum number of events to return.
+ *   cursor (string, default: null)     — pagination cursor for next page.
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       code: string,
+ *       issuer: string,
+ *       totalBurned: string    // seven-decimal format
+ *       burnRate7d: string     // average daily burn over last 7 days
+ *       events: [
+ *         {
+ *           timestamp: string,
+ *           amount: string,
+ *           burnerAddress: string,
+ *           txHash: string
+ *         }
+ *       ]
+ *     }
+ *   }
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/burn-history?limit=50
+ */
+router.get("/:code/:issuer/burn-history", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const rawLimit = req.query.limit;
+    const limit = rawLimit !== undefined ? validateLimit(rawLimit, 200) : 50;
+    const cursor = req.query.cursor || null;
+
+    const asset = new Asset(assetCode, issuer);
+    const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let allEvents = [];
+    let allBurned = 0;
+    let sevenDaysBurned = 0;
+
+    // Query for payments involving this asset
+    let query = server
+      .payments()
+      .forAsset(asset)
+      .limit(200)
+      .order("desc");
+    if (cursor) query = query.cursor(cursor);
+
+    const response = await query.call();
+    const records = response.records || [];
+
+    for (const op of records) {
+      const isPayment = op.type === "payment";
+      const isPathPayment = [
+        "path_payment_strict_receive",
+        "path_payment_strict_send",
+      ].includes(op.type);
+      if (!isPayment && !isPathPayment) continue;
+
+      // Determine if this is a burn:
+      // A burn happens when the asset is sent TO the issuer
+      const to = op.to;
+      const amount = op.amount;
+
+      // Check if sent to issuer (self-burn)
+      if (to !== issuer) continue;
+      if (!amount || Number(amount) <= 0) continue;
+
+      const timestamp = new Date(op.created_at);
+      if (Number.isNaN(timestamp.getTime())) continue;
+
+      const burntAmount = Number(amount);
+      allBurned += burntAmount;
+
+      if (timestamp.getTime() >= sevenDaysAgoMs) {
+        sevenDaysBurned += burntAmount;
+      }
+
+      allEvents.push({
+        timestamp: timestamp.toISOString(),
+        amount: burntAmount.toFixed(7),
+        burnerAddress: op.from,
+        txHash: op.transaction_hash,
+      });
+    }
+
+    // Calculate 7-day burn rate (average daily burn)
+    const burnRate7d = (sevenDaysBurned / 7).toFixed(7);
+
+    // Return paginated response
+    const paginatedEvents = allEvents.slice(0, limit);
+    const nextCursor = paginatedEvents.length < allEvents.length
+      ? paginatedEvents[paginatedEvents.length - 1]?.txHash || null
+      : null;
+
+    const responseData = {
+      code: assetCode,
+      issuer,
+      totalBurned: allBurned.toFixed(7),
+      burnRate7d,
+      events: paginatedEvents,
+    };
+
+    if (nextCursor) {
+      res.set("X-Next-Cursor", nextCursor);
+    }
+
+    return success(res, responseData);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Returns the accounts with the highest trading volume for the specified asset
+ * in the last 24 hours. Each entry includes the account address, buy volume,
+ * sell volume, net volume, and trade count. Traders are ranked by total volume
+ * (buyVolume + sellVolume) descending.
+ *
+ * Query params:
+ *   limit (number, 1–50, default: 10) — maximum number of traders to return.
+ *   fresh (boolean, default: false)   — bypass the cache when "true".
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       code: string,
+ *       issuer: string,
+ *       traders: [{ address, buyVolume, sellVolume, netVolume, tradeCount }],
+ *       period: string   // ISO 8601 interval: "<windowStart>/<windowEnd>"
+ *     }
+ *   }
+ *
+ * Cache TTL: 5 minutes (CACHE_TTL_ASSET_TOP_TRADERS_MS).
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/top-traders?limit=5
+ */
+router.get("/:code/:issuer/top-traders", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+
+    // Validate limit: 1–50, default 10
+    const rawLimit = req.query.limit;
+    const limit = rawLimit !== undefined ? validateLimit(rawLimit, 50) : 10;
+
+    const fresh = isFreshRequest(req.query);
+    const cacheKey = `asset-top-traders:${assetCode}:${issuer}:${limit}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    const asset = new Asset(assetCode, issuer);
+    const windowEndMs = Date.now();
+    const windowStartMs = windowEndMs - 24 * 60 * 60 * 1000;
+
+    // Map of accountId → { buyVolume, sellVolume, tradeCount }
+    const traderMap = new Map();
+    let cursor;
+    let done = false;
+
+    while (!done) {
+      let query = server.trades().forAsset(asset).order("desc").limit(200);
+      if (cursor) query = query.cursor(cursor);
+
+      const response = await query.call();
+      const records = response.records || [];
+      if (records.length === 0) break;
+
+      for (const trade of records) {
+        cursor = trade.paging_token;
+        const timestamp = new Date(trade.ledger_close_time).getTime();
+        if (!Number.isFinite(timestamp)) continue;
+
+        // Trades are ordered desc; stop once we fall outside the 24h window
+        if (timestamp < windowStartMs) {
+          done = true;
+          break;
+        }
+
+        // Determine which side of the trade is our asset
+        const isBaseAsset =
+          trade.base_asset_code?.toUpperCase() === assetCode &&
+          trade.base_asset_issuer === issuer;
+        const isCounterAsset =
+          trade.counter_asset_code?.toUpperCase() === assetCode &&
+          trade.counter_asset_issuer === issuer;
+
+        if (!isBaseAsset && !isCounterAsset) continue;
+
+        // From the perspective of our asset:
+        //   base side  → base_account is the seller  (offering the asset)
+        //   counter side → counter_account is the buyer (receiving the asset)
+        const tradeAmount = Number(
+          isBaseAsset ? trade.base_amount : trade.counter_amount,
+        );
+        const amount = Number.isFinite(tradeAmount) ? tradeAmount : 0;
+
+        const sellerAccount = isBaseAsset ? trade.base_account : trade.counter_account;
+        const buyerAccount  = isBaseAsset ? trade.counter_account : trade.base_account;
+
+        if (sellerAccount) {
+          if (!traderMap.has(sellerAccount)) {
+            traderMap.set(sellerAccount, { buyVolume: 0, sellVolume: 0, tradeCount: 0 });
+          }
+          const entry = traderMap.get(sellerAccount);
+          entry.sellVolume += amount;
+          entry.tradeCount += 1;
+        }
+
+        if (buyerAccount && buyerAccount !== sellerAccount) {
+          if (!traderMap.has(buyerAccount)) {
+            traderMap.set(buyerAccount, { buyVolume: 0, sellVolume: 0, tradeCount: 0 });
+          }
+          const entry = traderMap.get(buyerAccount);
+          entry.buyVolume += amount;
+          entry.tradeCount += 1;
+        }
+      }
+
+      if (done || records.length < 200 || !cursor) break;
+    }
+
+    // Sort by total volume (buyVolume + sellVolume) descending, then take top `limit`
+    const traders = Array.from(traderMap.entries())
+      .map(([address, stats]) => ({
+        address,
+        buyVolume: toSevenDecimalString(stats.buyVolume),
+        sellVolume: toSevenDecimalString(stats.sellVolume),
+        netVolume: toSevenDecimalString(stats.buyVolume - stats.sellVolume),
+        tradeCount: stats.tradeCount,
+        // Internal sort key — not included in the response
+        _totalVolume: stats.buyVolume + stats.sellVolume,
+      }))
+      .sort((a, b) => b._totalVolume - a._totalVolume)
+      .slice(0, limit)
+      .map(({ address, buyVolume, sellVolume, netVolume, tradeCount }) => ({
+        address,
+        buyVolume,
+        sellVolume,
+        netVolume,
+        tradeCount,
+      }));
+
+    const period = `${new Date(windowStartMs).toISOString()}/${new Date(windowEndMs).toISOString()}`;
+
+    const data = {
+      code: assetCode,
+      issuer,
+      traders,
+      period,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.assetTopTraders);
+
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /asset/:code/:issuer/holder-growth
+ *
+ * Returns a time series of unique holder counts at regular intervals, computed
+ * from trustline creation and deletion (change_trust) operations. Shows whether
+ * adoption is accelerating, stable, or declining.
+ *
+ * Query params:
+ *   resolution (string, "7d" | "30d", default: "30d")
+ *   fresh      (boolean, default: false) — bypass the cache when "true".
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       code: string,
+ *       issuer: string,
+ *       resolution: string,
+ *       growth: [{ timestamp: string, holderCount: number, change: number }]
+ *     }
+ *   }
+ *
+ * Returns 404 if the asset does not exist on the network.
+ * Cache TTL: 5 minutes (CACHE_TTL_ASSET_HOLDER_GROWTH_MS).
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/holder-growth?resolution=7d
+ */
+router.get("/:code/:issuer/issuance-history", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+    const resolution = req.query.resolution || "30d";
+
+const validResolutions = ["7d", "30d", "90d"];
+    if (!validResolutions.includes(resolution)) {
+      const err = new Error(`Invalid resolution "${resolution}". Valid options are: ${validResolutions.join(", ")}.`);
+      err.isValidation = true;
+      err.status = 400;
+      err.field = "resolution";
+      err.receivedValue = resolution;
+      err.expectedFormat = validResolutions.join(", ");
+      throw err;
+    }
+
+    const cacheKey = `asset-issuance-history:${assetCode}:${issuer}:${resolution}`;
+    const fresh = isFreshRequest(req.query);
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Verify asset exists
+    const assetsResponse = await server
+      .assets()
+      .forCode(assetCode)
+      .forIssuer(issuer)
+      .call();
+
+    if (!assetsResponse.records || assetsResponse.records.length === 0) {
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
+    }
+
+    const asset = assetsResponse.records[0];
+    const currentSupply = asset.amount;
+
+    const now = Date.now();
+    const daysMap = { "7d": 7, "30d": 30, "90d": 90 };
+    const days = daysMap[resolution];
+    const startTime = now - (days * 24 * 60 * 60 * 1000);
+
+    const effectsResponse = await server
+      .effects()
+      .forAccount(issuer)
+      .order("desc")
+      .limit(200)
+      .call();
+
+    // Aggregate issuance data
+    const issuanceMap = new Map();
+    
+    for (const effect of effectsResponse.records || []) {
+      const timestamp = new Date(effect.created_at).getTime();
+      if (!Number.isFinite(timestamp) || timestamp < startTime) continue;
+      
+      const bucketKey = Math.floor(timestamp / (days * 24 * 60 * 60 * 1000));
+      if (!issuanceMap.has(bucketKey)) {
+        issuanceMap.set(bucketKey, { issued: 0, revoked: 0, transactions: 0 });
+      }
+      const bucket = issuanceMap.get(bucketKey);
+      
+      if (effect.type === "payment" && effect.to === issuer) {
+        bucket.issued += parseFloat(effect.amount || 0);
+        bucket.transactions += 1;
+      } else if (effect.type === "clawback" && effect.from === issuer) {
+        bucket.revoked += parseFloat(effect.amount || 0);
+        bucket.transactions += 1;
+      }
+    }
+
+    const sortedBuckets = Array.from(issuanceMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([bucket, data]) => ({
+        timestamp: new Date(bucket * days * 24 * 60 * 60 * 1000).toISOString(),
+        issued: data.issued.toFixed(7),
+        revoked: data.revoked.toFixed(7),
+        transactions: data.transactions,
+      }));
+
+    const data = {
+      issuance: sortedBuckets,
+      currentSupply,
+      asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
+      resolution,
+      growth,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.asset);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /asset/:code/:issuer/price-history
+ *
+ * Returns historical price data for an asset (quoted in XLM) as a time series
+ * of OHLC (open-high-low-close) candles derived from DEX trades.
+ *
+ * Query params:
+ *   - resolution (string, default: "24h") — candle interval: "1h", "24h", "7d"
+ *   - limit (integer, 1–100, default: 50) — maximum number of candles to return
+ *   - fresh (boolean, default: false) — bypass cache when set to "true"
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       asset: { code, issuer, type },
+ *       quoteAsset: "XLM",
+ *       resolution,
+ *       candles: [
+ *         {
+ *           timestamp,
+ *           open: "0.1234567",
+ *           high: "0.1345678",
+ *           low: "0.1123456",
+ *           close: "0.1287654",
+ *           volume: "1234.5678900",
+ *           trades: 42
+ *         },
+ *         ...
+ *       ]
+ *     }
+ *   }
+ *
+ * Errors:
+ *   - 400: ValidationError — invalid asset format, resolution, or limit
+ *   - 404: AssetNotFound — asset does not exist
+ *
+ * @example
+ * GET /asset/USDC/GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/price-history?resolution=1h&limit=24
+ */
+router.get("/:code/:issuer/price-history", async (req, res, next) => {
+  try {
+    const { code, issuer } = req.params;
+    validateAsset(code, issuer);
+
+    const assetCode = code.toUpperCase();
+
+    // Validate resolution parameter
+    const validResolutions = ["1h", "24h", "7d"];
+    const resolution = req.query.resolution || "24h";
+    
+    if (!validResolutions.includes(resolution)) {
+      const err = new Error(
+        `Invalid resolution "${resolution}". Valid options are: ${validResolutions.join(", ")}`
+      );
+      err.isValidation = true;
+      err.status = 400;
+      err.field = "resolution";
+      err.receivedValue = resolution;
+      err.expectedFormat = validResolutions.join(", ");
+      throw err;
+    }
+
+    // Validate limit parameter
+    const rawLimit = req.query.limit;
+    let limit = 50;
+    if (rawLimit !== undefined) {
+      const parsed = Number(rawLimit);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+        const err = new Error("Parameter 'limit' must be an integer between 1 and 100.");
+        err.isValidation = true;
+        err.status = 400;
+        err.field = "limit";
+        err.receivedValue = rawLimit;
+        throw err;
+      }
+      limit = parsed;
+    }
+
+    const fresh = req.query.fresh === "true";
+    const cacheKey = `asset:price-history:${assetCode}:${issuer}:${resolution}:${limit}`;
+
+    if (!fresh) {
+      const cached = cacheService.get(cacheKey);
+      if (cached) {
+        res.set("X-Cache", "HIT");
+        return success(res, cached);
+      }
+    }
+
+    // Verify asset exists
+    const assetsResponse = await server
+      .assets()
+      .forCode(assetCode)
+      .forIssuer(issuer)
+      .limit(1)
+      .call();
+
+    if (!assetsResponse.records || assetsResponse.records.length === 0) {
+      throw makeAssetNotFoundError(assetCode, issuer, NETWORK);
+    }
+
+    // Resolution to milliseconds
+    const resolutionMs = {
+      "1h": 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000,
+    };
+
+    const bucketMs = resolutionMs[resolution];
+    const now = Date.now();
+    const windowStart = now - (limit * bucketMs);
+
+    // Fetch trades for this asset pair
+    const asset = new Asset(assetCode, issuer);
+    const tradesResponse = await server
+      .trades()
+      .forAssetPair(asset, Asset.native())
+      .order("desc")
+      .limit(200)
+      .call();
+
+    const trades = tradesResponse.records || [];
+
+    // If no trades, return empty candles array
+    if (trades.length === 0) {
+      const data = {
+        asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
+        quoteAsset: "XLM",
+        resolution,
+        candles: [],
+      };
+      cacheService.set(cacheKey, data, cacheTTL.assetPrice);
+      res.set("X-Cache", "MISS");
+      return success(res, data);
+    }
+
+    // Group trades into buckets
+    const buckets = new Map();
+
+    for (const trade of trades) {
+      const timestamp = new Date(trade.ledger_close_time).getTime();
+      if (Number.isNaN(timestamp) || timestamp < windowStart) continue;
+
+      const bucketKey = Math.floor(timestamp / bucketMs) * bucketMs;
+      
+      if (!buckets.has(bucketKey)) {
+        buckets.set(bucketKey, {
+          trades: [],
+          volume: 0,
+        });
+      }
+
+      const bucket = buckets.get(bucketKey);
+      const price = parseFloat(trade.price?.n || 0) / parseFloat(trade.price?.d || 1);
+      const amount = parseFloat(trade.base_amount || 0);
+
+      bucket.trades.push(price);
+      bucket.volume += amount;
+    }
+
+    // Convert buckets to OHLC candles
+    const candles = Array.from(buckets.entries())
+      .map(([timestamp, bucket]) => {
+        const prices = bucket.trades;
+        const open = prices[prices.length - 1]; // First trade in bucket (reversed)
+        const close = prices[0]; // Last trade in bucket
+        const high = Math.max(...prices);
+        const low = Math.min(...prices);
+
+        return {
+          timestamp: new Date(timestamp).toISOString(),
+          open: open.toFixed(7),
+          high: high.toFixed(7),
+          low: low.toFixed(7),
+          close: close.toFixed(7),
+          volume: bucket.volume.toFixed(7),
+          trades: prices.length,
+        };
+      })
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .slice(-limit); // Take only the requested number of candles
+
+    const data = {
+      asset: normalizeAsset(assetCode, issuer, "credit_alphanum4"),
+      quoteAsset: "XLM",
+      resolution,
+      candles,
+    };
+
+    cacheService.set(cacheKey, data, cacheTTL.assetPrice);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
+

@@ -5,6 +5,7 @@ const { success } = require("../utils/response");
 const cacheService = require("../services/cache");
 const cacheTTL = require("../config/cacheConfig");
 const { fetchNetworkStatus } = require("../utils/mapNetworkStatus");
+const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 
 /**
  * GET /network-status
@@ -23,26 +24,108 @@ const { fetchNetworkStatus } = require("../utils/mapNetworkStatus");
  */
 router.get("/", async (req, res, next) => {
   try {
-    const cacheKey = "network-status";
-    const fresh = req.query.fresh === true || req.query.fresh === "true";
+    // No query params affect this response, so every variant (?x=1, ?x=2 ...)
+    // collapses onto the single "network-status" entry.
+    const cacheKey = buildCacheKey(req, { namespace: "network-status", allowedParams: [] });
+    const fresh = isFresh(req);
 
-    // Check cache first (unless fresh=true)
+    // Check cache first (unless fresh=true). A fresh request still repopulates
+    // the normal key below.
     if (!fresh) {
-      const cached = cacheService.get(cacheKey);
-      if (cached) {
-        res.set("X-Cache", "HIT");
-        return success(res, cached);
+      const cached = cacheService.getWithRevalidation(
+        cacheKey,
+        cacheTTL.networkStatus,
+        refresh,
+      );
+      if (cached.value !== undefined) {
+        res.set("X-Cache", cached.state);
+        return success(res, cached.value);
       }
     }
 
-    const data = await fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
-
-    cacheService.set(cacheKey, data, cacheTTL.networkStatus);
+    // Coalesce concurrent cache misses (and ?fresh=true requests) for the
+    // same key into a single Horizon call.
+    const data = await singleFlight(cacheKey, async () => {
+      const fetched = await fetchNetworkStatus(server, { network: NETWORK, horizonUrl });
+      cacheService.set(cacheKey, fetched, cacheTTL.networkStatus);
+      return fetched;
+    });
 
     res.set("X-Cache", "MISS");
     return success(res, data);
   } catch (err) {
     next(err);
+  }
+});
+
+/**
+ * GET /network-status/:sequence
+ * Returns a normalized, immutable ledger record by sequence.
+ */
+router.get("/:sequence", async (req, res, next) => {
+  const { sequence: rawSequence } = req.params;
+  if (!/^\d+$/.test(rawSequence) || !Number.isSafeInteger(Number(rawSequence)) || Number(rawSequence) <= 0) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        type: "ValidationError",
+        message: "Ledger sequence must be a positive integer.",
+        field: "sequence",
+        receivedValue: rawSequence,
+        expectedFormat: "positive integer",
+      },
+    });
+  }
+
+  const sequence = Number(rawSequence);
+  const cacheKey = `ledger:${sequence}`;
+  const cached = cacheService.get(cacheKey);
+  if (cached) {
+    res.set("X-Cache", "HIT");
+    return success(res, cached);
+  }
+
+  try {
+    const ledgerResponse = await server.ledgers().ledger(sequence).call();
+    const ledger = ledgerResponse.sequence ? ledgerResponse : ledgerResponse.records?.[0];
+    if (!ledger) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "LedgerNotFound",
+          message: `Ledger ${sequence} was not found.`,
+        },
+      });
+    }
+
+    const data = {
+      sequence: Number(ledger.sequence),
+      hash: ledger.hash,
+      previousHash: ledger.prev_hash,
+      closedAt: toISOTimestamp(ledger.closed_at),
+      protocolVersion: Number(ledger.protocol_version),
+      successfulTransactionCount: Number(ledger.successful_transaction_count),
+      failedTransactionCount: Number(ledger.failed_transaction_count),
+      operationCount: Number(ledger.operation_count),
+      baseFeeStroops: Number(ledger.base_fee_in_stroops),
+      baseReserveXLM: (Number(ledger.base_reserve_in_stroops) / 10_000_000).toFixed(7),
+      maxTxSetSize: Number(ledger.max_tx_set_size),
+    };
+
+    cacheService.set(cacheKey, data, LEDGER_CACHE_TTL);
+    res.set("X-Cache", "MISS");
+    return success(res, data);
+  } catch (err) {
+    if (err?.response?.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          type: "LedgerNotFound",
+          message: `Ledger ${sequence} was not found.`,
+        },
+      });
+    }
+    return next(err);
   }
 });
 

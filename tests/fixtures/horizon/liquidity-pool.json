@@ -1,0 +1,17 @@
+{
+  "id": "dd7b1ab831c273310ddbec6f97870aa83c2fbd78ce22aded37ecbf4f3380fac7",
+  "paging_token": "dd7b1ab831c273310ddbec6f97870aa83c2fbd78ce22aded37ecbf4f3380fac7",
+  "fee_bp": 30,
+  "total_shares": "1000.0000000",
+  "total_trustlines": 10,
+  "reserves": [
+    {
+      "asset": "native",
+      "amount": "2000.0000000"
+    },
+    {
+      "asset": "USDC:GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA",
+      "amount": "400.0000000"
+    }
+  ]
+}

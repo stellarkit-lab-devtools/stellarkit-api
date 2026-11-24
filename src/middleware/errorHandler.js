@@ -3,7 +3,9 @@
  * Formats Horizon / Stellar SDK errors into consistent JSON responses.
  * All non-Horizon errors are wrapped in StellarKitError for consistency.
  */
+const redactSeeds = require("../utils/redactSeeds");
 const logger = require("../utils/logger");
+const i18n = require("./i18n");
 const { translateHorizonError } = require("../utils/horizonErrors");
 const { mapHorizonErrorToStatus } = require("../utils/horizonStatusMapper");
 const StellarKitError = require("../utils/StellarKitError");
@@ -14,6 +16,7 @@ const {
 } = require("../utils/errors");
 const { NETWORK } = require("../config/stellar");
 const metrics = require("../services/metrics");
+const { withDocsUrl } = require("../utils/errorTypes");
 
 /**
  * Returns true when the application is running in production mode.
@@ -66,7 +69,7 @@ function logError(status, req, message) {
       {
         requestId,
         method: req.method,
-        path: req.path,
+        path: redactSeeds(req.path),
         status,
       },
       message
@@ -83,6 +86,9 @@ function logError(status, req, message) {
  * @param {object} body
  */
 function errorResponse(res, status, body) {
+  // Every error body gets a docs link; all other fields remain unchanged.
+  withDocsUrl(body && body.error);
+
   metrics.incrementError(status);
 
   // Track error per endpoint (route + method combination)
@@ -97,7 +103,10 @@ function errorResponse(res, status, body) {
     metrics.incrementErrorByEndpoint(method, routePattern, status);
   }
 
-  return res.status(status).json(body);
+  // Apply i18n translations to error messages
+  const translatedBody = req ? withTranslations(body, req) : body;
+
+  return res.status(status).json(translatedBody);
 }
 
 const ACCOUNT_MERGE_FAILURES = {
@@ -193,6 +202,31 @@ function buildTransactionSubmissionFailedError(horizonError) {
  */
 function withRequestId(body, req) {
   return { ...body, requestId: req.requestId || null };
+}
+
+/**
+ * Add translated message and suggestion to error body if i18n is available.
+ * Falls back to original values if translation fails or i18n not set.
+ */
+function withTranslations(body, req) {
+  if (!req.i18n || !req.i18n.t) {
+    return body;
+  }
+
+  const error = body && body.error;
+  if (!error || !error.type) {
+    return body;
+  }
+
+  const translated = req.i18n.t(error.type);
+  if (translated && translated.message) {
+    error.message = translated.message;
+  }
+  if (translated && translated.suggestion) {
+    error.suggestion = translated.suggestion;
+  }
+
+  return body;
 }
 
 function errorHandler(err, req, res, next) {
@@ -407,6 +441,19 @@ function errorHandler(err, req, res, next) {
     }, req));
   }
 
+  // InvalidAsset errors — thrown by validateAsset(code, issuer)
+  if (err.isInvalidAsset) {
+    logError(400, req, err.message);
+    return errorResponse(res, 400, withRequestId({
+      success: false,
+      error: {
+        type: "InvalidAsset",
+        message: err.message,
+        suggestion: err.suggestion || undefined,
+      },
+    }, req));
+  }
+
   // InvalidAccountId errors — thrown by validateAccountId(id)
   if (err.isInvalidAccountId) {
     logError(400, req, err.message);
@@ -416,6 +463,7 @@ function errorHandler(err, req, res, next) {
         type: "InvalidAccountId",
         message: err.message,
         suggestion: err.suggestion,
+        details: err.details,
       },
     }, req));
   }
@@ -454,6 +502,7 @@ function errorHandler(err, req, res, next) {
       error: {
         type: "ValidationError",
         message: err.message,
+        details: err.details,
         field: err.field,
         receivedValue: err.receivedValue,
         expectedFormat: err.expectedFormat,
