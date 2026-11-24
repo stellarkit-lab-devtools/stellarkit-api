@@ -48,6 +48,7 @@ async function withHorizonTiming(req, fn) {
 
 const { buildAccountAgeResponse } = require("../utils/accountAge");
 const { parsePaginationParams } = require("../utils/pagination");
+const { selectFields } = require("../utils/selectFields");
 const { cacheKey: buildCacheKey, isFresh } = require("../utils/cacheKey");
 const { formatLedgerSequence } = require("../utils/formatLedgerSequence");
 
@@ -890,10 +891,10 @@ router.get("/:id/operations", async (req, res, next) => {
         operation.asset = isNativeAsset({ type: assetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.asset_code || null,
-              issuer: op.asset_issuer || null,
-              type: assetType,
-            };
+            code: op.asset_code || null,
+            issuer: op.asset_issuer || null,
+            type: assetType,
+          };
         operation.from = op.from;
         operation.to = op.to;
       }
@@ -912,24 +913,24 @@ router.get("/:id/operations", async (req, res, next) => {
         operation.sourceMax = op.source_max;
         operation.from = op.from;
         operation.to = op.to;
-        
+
         const sourceAssetType = op.source_asset_type || "native";
         operation.sourceAsset = isNativeAsset({ type: sourceAssetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.source_asset_code || null,
-              issuer: op.source_asset_issuer || null,
-              type: sourceAssetType,
-            };
+            code: op.source_asset_code || null,
+            issuer: op.source_asset_issuer || null,
+            type: sourceAssetType,
+          };
 
         const assetType = op.asset_type || "native";
         operation.asset = isNativeAsset({ type: assetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.asset_code || null,
-              issuer: op.asset_issuer || null,
-              type: assetType,
-            };
+            code: op.asset_code || null,
+            issuer: op.asset_issuer || null,
+            type: assetType,
+          };
       }
 
       // Change trust operations
@@ -958,19 +959,19 @@ router.get("/:id/operations", async (req, res, next) => {
         operation.buyingAsset = isNativeAsset({ type: buyingAssetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.buying_asset_code || null,
-              issuer: op.buying_asset_issuer || null,
-              type: buyingAssetType,
-            };
+            code: op.buying_asset_code || null,
+            issuer: op.buying_asset_issuer || null,
+            type: buyingAssetType,
+          };
 
         const sellingAssetType = op.selling_asset_type || "native";
         operation.sellingAsset = isNativeAsset({ type: sellingAssetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.selling_asset_code || null,
-              issuer: op.selling_asset_issuer || null,
-              type: sellingAssetType,
-            };
+            code: op.selling_asset_code || null,
+            issuer: op.selling_asset_issuer || null,
+            type: sellingAssetType,
+          };
       }
 
       // Account merge operations
@@ -1005,10 +1006,10 @@ router.get("/:id/operations", async (req, res, next) => {
         operation.asset = isNativeAsset({ type: assetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.asset_code || null,
-              issuer: op.asset_issuer || null,
-              type: assetType,
-            };
+            code: op.asset_code || null,
+            issuer: op.asset_issuer || null,
+            type: assetType,
+          };
       }
 
       if (type === "claim_claimable_balance") {
@@ -1091,6 +1092,26 @@ router.get("/:id/operations", async (req, res, next) => {
  *   }
  */
 router.get("/:id/payments", async (req, res, next) => {
+  // Define allowed fields for sparse fieldset selection
+  const ALLOWED_FIELDS = [
+    'paymentId',
+    'type',
+    'from',
+    'to',
+    'asset',
+    'asset.code',
+    'asset.issuer',
+    'asset.type',
+    'amount',
+    'sourceAsset',
+    'sourceAsset.code',
+    'sourceAsset.issuer',
+    'sourceAsset.type',
+    'sourceAmount',
+    'createdAt',
+    'transactionHash'
+  ];
+
   try {
     const { id } = req.params;
     if (req.originalUrl && req.originalUrl.includes("//")) {
@@ -1117,12 +1138,12 @@ router.get("/:id/payments", async (req, res, next) => {
     // page size matches the requested limit exactly even when some records are
     // filtered out.  This is consistent with how other filtered endpoints in
     // the project work (e.g. /trustlines).
-    const filterCode   = req.query.assetCode   ? String(req.query.assetCode).toUpperCase()   : null;
-    const filterIssuer = req.query.assetIssuer ? String(req.query.assetIssuer)               : null;
+    const filterCode = req.query.assetCode ? String(req.query.assetCode).toUpperCase() : null;
+    const filterIssuer = req.query.assetIssuer ? String(req.query.assetIssuer) : null;
 
     // Date filters — ISO 8601, validated below
     let startDate = null;
-    let endDate   = null;
+    let endDate = null;
     if (req.query.startDate !== undefined) {
       startDate = validateISODate(req.query.startDate, "startDate");
     }
@@ -1148,7 +1169,15 @@ router.get("/:id/payments", async (req, res, next) => {
       const cached = cacheService.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
-        return success(res, cached.data, { meta: cached.meta });
+
+        // Apply field selection to cached data
+        const filteredData = selectFields(
+          cached.data,
+          req.query.fields,
+          ALLOWED_FIELDS
+        );
+
+        return success(res, filteredData, { meta: cached.meta });
       }
     }
 
@@ -1175,7 +1204,7 @@ router.get("/:id/payments", async (req, res, next) => {
       if (startDate || endDate) {
         const createdAtDate = new Date(op.created_at);
         if (startDate && createdAtDate < startDate) continue;
-        if (endDate   && createdAtDate > endDate)   continue;
+        if (endDate && createdAtDate > endDate) continue;
       }
 
       // ── Resolve destination asset and amounts by operation type ──────────
@@ -1185,32 +1214,32 @@ router.get("/:id/payments", async (req, res, next) => {
       let from, to;
 
       if (op.type === "create_account") {
-        destAssetCode   = "XLM";
+        destAssetCode = "XLM";
         destAssetIssuer = null;
-        destAssetType   = "native";
-        amount          = op.starting_balance;
-        from            = op.funder;
-        to              = op.account;
+        destAssetType = "native";
+        amount = op.starting_balance;
+        from = op.funder;
+        to = op.account;
       } else if (op.type === "payment") {
-        destAssetCode   = op.asset_type === "native" ? "XLM" : (op.asset_code || "XLM");
-        destAssetIssuer = op.asset_type === "native" ? null  : (op.asset_issuer || null);
-        destAssetType   = op.asset_type || "native";
-        amount          = op.amount;
-        from            = op.from;
-        to              = op.to;
+        destAssetCode = op.asset_type === "native" ? "XLM" : (op.asset_code || "XLM");
+        destAssetIssuer = op.asset_type === "native" ? null : (op.asset_issuer || null);
+        destAssetType = op.asset_type || "native";
+        amount = op.amount;
+        from = op.from;
+        to = op.to;
       } else {
         // path_payment_strict_send / path_payment_strict_receive
-        destAssetCode   = op.asset_type === "native" ? "XLM" : (op.asset_code || "XLM");
-        destAssetIssuer = op.asset_type === "native" ? null  : (op.asset_issuer || null);
-        destAssetType   = op.asset_type || "native";
-        amount          = op.amount;
-        from            = op.from;
-        to              = op.to;
+        destAssetCode = op.asset_type === "native" ? "XLM" : (op.asset_code || "XLM");
+        destAssetIssuer = op.asset_type === "native" ? null : (op.asset_issuer || null);
+        destAssetType = op.asset_type || "native";
+        amount = op.amount;
+        from = op.from;
+        to = op.to;
 
-        const srcType   = op.source_asset_type || "native";
+        const srcType = op.source_asset_type || "native";
         sourceAsset = normalizeAsset(
           srcType === "native" ? "XLM" : (op.source_asset_code || "XLM"),
-          srcType === "native" ? null  : (op.source_asset_issuer || null),
+          srcType === "native" ? null : (op.source_asset_issuer || null),
           srcType,
         );
         sourceAmount = op.source_amount || op.source_max || null;
@@ -1220,30 +1249,30 @@ router.get("/:id/payments", async (req, res, next) => {
       if (filterCode) {
         // Check both destination and source asset (for path payments)
         const destMatch = destAssetCode === filterCode;
-        const srcMatch  = sourceAsset && sourceAsset.code === filterCode;
+        const srcMatch = sourceAsset && sourceAsset.code === filterCode;
         if (!destMatch && !srcMatch) continue;
 
         // If assetIssuer is also specified, narrow further
         if (filterIssuer) {
-          const destIssuerMatch = destMatch  && destAssetIssuer === filterIssuer;
-          const srcIssuerMatch  = srcMatch   && sourceAsset.issuer === filterIssuer;
+          const destIssuerMatch = destMatch && destAssetIssuer === filterIssuer;
+          const srcIssuerMatch = srcMatch && sourceAsset.issuer === filterIssuer;
           if (!destIssuerMatch && !srcIssuerMatch) continue;
         }
       }
 
       const item = {
-        paymentId:       op.id,
-        type:            op.type,
+        paymentId: op.id,
+        type: op.type,
         from,
         to,
-        asset:           normalizeAsset(destAssetCode, destAssetIssuer, destAssetType),
+        asset: normalizeAsset(destAssetCode, destAssetIssuer, destAssetType),
         amount,
-        createdAt:       toISOTimestamp(op.created_at),
+        createdAt: toISOTimestamp(op.created_at),
         transactionHash: op.transaction_hash,
       };
 
       if (sourceAsset !== undefined) {
-        item.sourceAsset  = sourceAsset;
+        item.sourceAsset = sourceAsset;
         item.sourceAmount = sourceAmount;
       }
 
@@ -1266,7 +1295,15 @@ router.get("/:id/payments", async (req, res, next) => {
     cacheService.set(cacheKey, payload, cacheTTL.payments);
 
     res.set("X-Cache", "MISS");
-    return success(res, payload.data, { meta: payload.meta });
+
+    // Apply field selection if requested
+    const filteredPayments = selectFields(
+      payments,
+      req.query.fields,
+      ALLOWED_FIELDS
+    );
+
+    return success(res, { payments: filteredPayments }, { meta: payload.meta });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -1383,6 +1420,36 @@ router.get("/:id/funded-accounts", async (req, res, next) => {
  *   - 404: Account does not exist
  */
 router.get("/:id/trades", async (req, res, next) => {
+  // Define allowed fields for sparse fieldset selection
+  const ALLOWED_FIELDS = [
+    'id',
+    'tradeId',
+    'ledgerCloseTime',
+    'baseAsset',
+    'baseAsset.code',
+    'baseAsset.issuer',
+    'baseAsset.type',
+    'counterAsset',
+    'counterAsset.code',
+    'counterAsset.issuer',
+    'counterAsset.type',
+    'baseAmount',
+    'counterAmount',
+    'price',
+    'tradeType',
+    'offerId',
+    'selling',
+    'selling.code',
+    'selling.issuer',
+    'selling.type',
+    'buying',
+    'buying.code',
+    'buying.issuer',
+    'buying.type',
+    'soldAmount',
+    'boughtAmount'
+  ];
+
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -1421,7 +1488,15 @@ router.get("/:id/trades", async (req, res, next) => {
       const cached = cacheService.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
-        return success(res, cached);
+
+        // Apply field selection to cached data
+        const filteredData = selectFields(
+          cached,
+          req.query.fields,
+          ALLOWED_FIELDS
+        );
+
+        return success(res, filteredData);
       }
     }
 
@@ -1481,7 +1556,15 @@ router.get("/:id/trades", async (req, res, next) => {
 
     cacheService.set(cacheKey, { ...data, ...metadata }, cacheTTL.trades);
     res.set("X-Cache", "MISS");
-    return success(res, data, metadata);
+
+    // Apply field selection if requested
+    const filteredData = selectFields(
+      data,
+      req.query.fields,
+      ALLOWED_FIELDS
+    );
+
+    return success(res, filteredData, metadata);
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -1746,10 +1829,10 @@ router.get("/:id/signer-changes", async (req, res, next) => {
       const thresholds =
         type === "thresholds_updated"
           ? {
-              low: Number(effect.low_threshold ?? currentThresholds.low),
-              med: Number(effect.med_threshold ?? currentThresholds.med),
-              high: Number(effect.high_threshold ?? currentThresholds.high),
-            }
+            low: Number(effect.low_threshold ?? currentThresholds.low),
+            med: Number(effect.med_threshold ?? currentThresholds.med),
+            high: Number(effect.high_threshold ?? currentThresholds.high),
+          }
           : currentThresholds;
 
       return {
@@ -2190,15 +2273,15 @@ function normalizeEffect(eff) {
       sharesRedeemed: eff.shares_redeemed != null ? toSevenDecimalString(eff.shares_redeemed) : null,
       reservesReceived: Array.isArray(eff.reserves_received)
         ? eff.reserves_received.map((r) => ({
-            asset: normalizeEffectAsset(r),
-            amount: toSevenDecimalString(r.amount),
-          }))
+          asset: normalizeEffectAsset(r),
+          amount: toSevenDecimalString(r.amount),
+        }))
         : null,
       reservesDeposited: Array.isArray(eff.reserves_deposited)
         ? eff.reserves_deposited.map((r) => ({
-            asset: normalizeEffectAsset(r),
-            amount: toSevenDecimalString(r.amount),
-          }))
+          asset: normalizeEffectAsset(r),
+          amount: toSevenDecimalString(r.amount),
+        }))
         : null,
     };
   }
@@ -3111,96 +3194,96 @@ router.get("/:id", async (req, res, next) => {
     // Fetch live account data from Horizon. Concurrent misses (or ?fresh=true
     // requests) for the same account share a single upstream call.
     const data = await singleFlight(cacheKey, async () => {
-    const account = await withHorizonTiming(req, () => server.loadAccount(id));
+      const account = await withHorizonTiming(req, () => server.loadAccount(id));
 
-    // --- Balances -----------------------------------------------------------
-    // formatAccountBalances splits balances into the native XLM entry and
-    // all non-native asset trustlines, applying formatBalance() to each amount.
-    const { xlm, assets } = formatAccountBalances(account);
+      // --- Balances -----------------------------------------------------------
+      // formatAccountBalances splits balances into the native XLM entry and
+      // all non-native asset trustlines, applying formatBalance() to each amount.
+      const { xlm, assets } = formatAccountBalances(account);
 
-    // Raw XLM balance string needed for the spendable reserve calculation.
-    const xlmNativeEntry = (account.balances || []).find((b) => isNativeAsset(b));
-    const rawXlmBalance = parseFloat(xlmNativeEntry?.balance || "0");
+      // Raw XLM balance string needed for the spendable reserve calculation.
+      const xlmNativeEntry = (account.balances || []).find((b) => isNativeAsset(b));
+      const rawXlmBalance = parseFloat(xlmNativeEntry?.balance || "0");
 
-    // --- Reserve breakdown --------------------------------------------------
-    const baseReserve = 0.5; // 0.5 XLM per base reserve unit (protocol constant)
-    const STROOPS_PER_XLM = 10_000_000;
-    const accountReserve = 2 * baseReserve;
-    const subentryReserve = (account.subentry_count || 0) * baseReserve;
-    const totalLocked = accountReserve + subentryReserve;
+      // --- Reserve breakdown --------------------------------------------------
+      const baseReserve = 0.5; // 0.5 XLM per base reserve unit (protocol constant)
+      const STROOPS_PER_XLM = 10_000_000;
+      const accountReserve = 2 * baseReserve;
+      const subentryReserve = (account.subentry_count || 0) * baseReserve;
+      const totalLocked = accountReserve + subentryReserve;
 
-    const toXLM = (xlmVal) => xlmVal.toFixed(7);
-    const toStroops = (xlmVal) => Math.round(xlmVal * STROOPS_PER_XLM);
+      const toXLM = (xlmVal) => xlmVal.toFixed(7);
+      const toStroops = (xlmVal) => Math.round(xlmVal * STROOPS_PER_XLM);
 
-    // --- Signers ------------------------------------------------------------
-    // Normalise every signer type to a canonical string value and always
-    // include sponsoredBy (null when absent) for a consistent shape.
-    const signers = (account.signers || []).map((s) => ({
-      key: s.key,
-      weight: Number(s.weight) || 0,
-      type: normalizeSignerType(s.type),
-      sponsoredBy: s.sponsor || s.sponsored_by || null,
-    }));
+      // --- Signers ------------------------------------------------------------
+      // Normalise every signer type to a canonical string value and always
+      // include sponsoredBy (null when absent) for a consistent shape.
+      const signers = (account.signers || []).map((s) => ({
+        key: s.key,
+        weight: Number(s.weight) || 0,
+        type: normalizeSignerType(s.type),
+        sponsoredBy: s.sponsor || s.sponsored_by || null,
+      }));
 
-    // --- Thresholds ---------------------------------------------------------
-    // Map Horizon snake_case threshold keys to camelCase for consistency with
-    // the rest of the StellarKit response surface.
-    const thresholds = {
-      lowThreshold: account.thresholds?.low_threshold ?? 0,
-      medThreshold: account.thresholds?.med_threshold ?? 0,
-      highThreshold: account.thresholds?.high_threshold ?? 0,
-    };
+      // --- Thresholds ---------------------------------------------------------
+      // Map Horizon snake_case threshold keys to camelCase for consistency with
+      // the rest of the StellarKit response surface.
+      const thresholds = {
+        lowThreshold: account.thresholds?.low_threshold ?? 0,
+        medThreshold: account.thresholds?.med_threshold ?? 0,
+        highThreshold: account.thresholds?.high_threshold ?? 0,
+      };
 
-    // --- Flags --------------------------------------------------------------
-    // Horizon returns booleans under snake_case keys; map to camelCase and
-    // ensure every flag is always present (false when absent from Horizon).
-    const rawFlags = account.flags || {};
-    const flags = {
-      authRequired: rawFlags.auth_required === true,
-      authRevocable: rawFlags.auth_revocable === true,
-      authImmutable: rawFlags.auth_immutable === true,
-      clawbackEnabled: rawFlags.auth_clawback_enabled === true,
-    };
+      // --- Flags --------------------------------------------------------------
+      // Horizon returns booleans under snake_case keys; map to camelCase and
+      // ensure every flag is always present (false when absent from Horizon).
+      const rawFlags = account.flags || {};
+      const flags = {
+        authRequired: rawFlags.auth_required === true,
+        authRevocable: rawFlags.auth_revocable === true,
+        authImmutable: rawFlags.auth_immutable === true,
+        clawbackEnabled: rawFlags.auth_clawback_enabled === true,
+      };
 
-    const accountData = {
-      accountId: account.id,
-      sequence: account.sequence,
-      subentryCount: account.subentry_count,
-      xlm,
-      assets,
-      assetCount: assets.length,
-      signers,
-      thresholds,
-      flags,
-      homeDomain: account.home_domain || null,
-      lastModifiedLedger: account.last_modified_ledger,
-      reserveBreakdown: {
-        baseReserve: {
-          xlm: toXLM(baseReserve),
-          stroops: toStroops(baseReserve),
+      const accountData = {
+        accountId: account.id,
+        sequence: account.sequence,
+        subentryCount: account.subentry_count,
+        xlm,
+        assets,
+        assetCount: assets.length,
+        signers,
+        thresholds,
+        flags,
+        homeDomain: account.home_domain || null,
+        lastModifiedLedger: account.last_modified_ledger,
+        reserveBreakdown: {
+          baseReserve: {
+            xlm: toXLM(baseReserve),
+            stroops: toStroops(baseReserve),
+          },
+          accountReserve: {
+            xlm: toXLM(accountReserve),
+            stroops: toStroops(accountReserve),
+          },
+          subentryReserve: {
+            xlm: toXLM(subentryReserve),
+            stroops: toStroops(subentryReserve),
+          },
+          totalLocked: {
+            xlm: toXLM(totalLocked),
+            stroops: toStroops(totalLocked),
+          },
+          spendable: {
+            xlm: toXLM(rawXlmBalance - totalLocked),
+            stroops: toStroops(rawXlmBalance - totalLocked),
+          },
         },
-        accountReserve: {
-          xlm: toXLM(accountReserve),
-          stroops: toStroops(accountReserve),
-        },
-        subentryReserve: {
-          xlm: toXLM(subentryReserve),
-          stroops: toStroops(subentryReserve),
-        },
-        totalLocked: {
-          xlm: toXLM(totalLocked),
-          stroops: toStroops(totalLocked),
-        },
-        spendable: {
-          xlm: toXLM(rawXlmBalance - totalLocked),
-          stroops: toStroops(rawXlmBalance - totalLocked),
-        },
-      },
-    };
+      };
 
-    // Cache the normalised response
-    cacheService.set(cacheKey, accountData, CACHE_TTL_ACCOUNT);
-    return accountData;
+      // Cache the normalised response
+      cacheService.set(cacheKey, accountData, CACHE_TTL_ACCOUNT);
+      return accountData;
     });
 
     res.set("X-Cache", "MISS");
@@ -4555,7 +4638,7 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
     let reachedOlderHistory = false;
     let cursor;
 
-    for (;;) {
+    for (; ;) {
       let query = server.payments().forAccount(id).limit(200).order("desc");
       if (cursor) query = query.cursor(cursor);
 
@@ -4763,7 +4846,7 @@ router.get("/:id/net-flow", async (req, res, next) => {
     const flowMap = {};
     let cursor;
 
-    for (;;) {
+    for (; ;) {
       let query = server.payments().forAccount(id).limit(200).order("asc");
       if (cursor) query = query.cursor(cursor);
 
@@ -4964,7 +5047,7 @@ router.get("/:id/asset-received-summary", async (req, res, next) => {
     const receivedByAsset = new Map();
     let cursor;
 
-    for (;;) {
+    for (; ;) {
       let query = server.payments().forAccount(id).limit(200).order("asc");
       if (cursor) query = query.cursor(cursor);
 
@@ -5073,7 +5156,7 @@ router.get("/:id/asset-sent-summary", async (req, res, next) => {
     const sentByAsset = new Map();
     let cursor;
 
-    for (;;) {
+    for (; ;) {
       let query = server.payments().forAccount(id).limit(200).order("asc");
       if (cursor) query = query.cursor(cursor);
 
@@ -5583,7 +5666,7 @@ router.get("/:id/liquidity-contribution", async (req, res, next) => {
     // Calculate impermanent loss percentage
     const totalDepositedXLM = parseStellarAmount(Math.round(totalDepositedStroops));
     const totalCurrentValueXLM = parseStellarAmount(Math.round(totalCurrentValueStroops));
-    const impermanentLossPercent = 
+    const impermanentLossPercent =
       parseFloat(totalDepositedXLM) > 0
         ? ((parseFloat(totalCurrentValueXLM) - parseFloat(totalDepositedXLM)) / parseFloat(totalDepositedXLM) * 100)
         : 0;
@@ -7208,6 +7291,7 @@ router.get("/:id/trustline-health", async (req, res, next) => {
  *   - order  ("asc" | "desc", default: "desc")
  *   - type   (string, optional) — filter to transactions containing the given operation type
  *            e.g. ?type=payment, ?type=change_trust, ?type=create_account
+ *   - fields (string, optional) — comma-separated list of fields to return (e.g., "hash,createdAt,fee.charged")
  *
  * Returns 400 if an unrecognised operation type is supplied, along with a list of valid types.
  * Omitting the param returns all transactions.
@@ -7215,8 +7299,34 @@ router.get("/:id/trustline-health", async (req, res, next) => {
  * @example
  *   GET /account/:id/transactions?type=payment&limit=20
  *   GET /account/:id/transactions?type=change_trust&order=asc
+ *   GET /account/:id/transactions?fields=hash,createdAt,ledger
  */
 router.get("/:id/transactions", async (req, res, next) => {
+  // Define allowed fields for sparse fieldset selection
+  const ALLOWED_FIELDS = [
+    'id',
+    'hash',
+    'ledger',
+    'createdAt',
+    'sourceAccount',
+    'fee',
+    'fee.charged',
+    'fee.chargedInXLM',
+    'fee.max',
+    'fee.maxInXLM',
+    'fee.account',
+    'feeSummary',
+    'feeSummary.chargedInStroops',
+    'feeSummary.chargedInXLM',
+    'feeSummary.perOperationInStroops',
+    'feeSummary.perOperationInXLM',
+    'operationCount',
+    'memoType',
+    'memo',
+    'successful',
+    'envelopeXdr',
+    'operations'
+  ];
   try {
     const { id } = req.params;
     validateAccountId(id);
@@ -7249,7 +7359,15 @@ router.get("/:id/transactions", async (req, res, next) => {
       const cached = cacheService.get(cacheKey);
       if (cached) {
         res.set("X-Cache", "HIT");
-        return success(res, cached);
+
+        // Apply field selection to cached data
+        const filteredData = selectFields(
+          { items: cached.items },
+          req.query.fields,
+          ALLOWED_FIELDS
+        );
+
+        return success(res, { ...cached, items: filteredData.items });
       }
     }
 
@@ -7362,7 +7480,15 @@ router.get("/:id/transactions", async (req, res, next) => {
       cacheService.set(cacheKey, typedData, cacheTTL.accountTransactions);
 
       res.set("X-Cache", "MISS");
-      return success(res, typedData);
+
+      // Apply field selection if requested
+      const filteredData = selectFields(
+        { items: typedData.items },
+        req.query.fields,
+        ALLOWED_FIELDS
+      );
+
+      return success(res, { ...typedData, items: filteredData.items });
     }
 
     // No ?type= filter — standard paginated transaction history
@@ -7386,7 +7512,15 @@ router.get("/:id/transactions", async (req, res, next) => {
     cacheService.set(cacheKey, data, cacheTTL.accountTransactions);
 
     res.set("X-Cache", "MISS");
-    return success(res, data);
+
+    // Apply field selection if requested
+    const filteredData = selectFields(
+      { items: data.items },
+      req.query.fields,
+      ALLOWED_FIELDS
+    );
+
+    return success(res, { ...data, items: filteredData.items });
   } catch (err) {
     handleAccountNotFound(err, next, req.params.id);
   }
@@ -8592,10 +8726,10 @@ router.get("/:id/funding-history", async (req, res, next) => {
         asset = isNativeAsset({ type: assetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.asset_code || null,
-              issuer: op.asset_issuer || null,
-              type: assetType,
-            };
+            code: op.asset_code || null,
+            issuer: op.asset_issuer || null,
+            type: assetType,
+          };
         if (!firstFundedAt) firstFundedAt = op.created_at;
       } else if (
         (op.type === "path_payment_strict_receive" || op.type === "path_payment_strict_send") &&
@@ -8607,10 +8741,10 @@ router.get("/:id/funding-history", async (req, res, next) => {
         asset = isNativeAsset({ type: assetType })
           ? { code: "XLM", issuer: null, type: "native" }
           : {
-              code: op.asset_code || null,
-              issuer: op.asset_issuer || null,
-              type: assetType,
-            };
+            code: op.asset_code || null,
+            issuer: op.asset_issuer || null,
+            type: assetType,
+          };
         if (!firstFundedAt) firstFundedAt = op.created_at;
       }
 
@@ -8978,13 +9112,13 @@ router.get("/:id/fee-spending", async (req, res, next) => {
     let cursor;
 
     // Paginate through transactions
-    for (;;) {
+    for (; ;) {
       let query = server
         .transactions()
         .forAccount(id)
         .limit(200)
         .order("desc");
-      
+
       if (cursor) query = query.cursor(cursor);
 
       const page = await withHorizonTiming(req, () => query.call());
@@ -8995,7 +9129,7 @@ router.get("/:id/fee-spending", async (req, res, next) => {
       for (const tx of records) {
         const createdAt = new Date(tx.created_at).getTime();
         if (Number.isNaN(createdAt)) continue;
-        
+
         // Stop if we've gone past the time window
         if (createdAt < windowStart) {
           cursor = null; // Signal we're done
@@ -9757,7 +9891,7 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
     }
 
     const currentBalances = {};
-    
+
     // Build map of current balances
     account.balances.forEach((balance) => {
       if (balance.asset_type === "native") {
@@ -9792,7 +9926,7 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
     // Calculate balance changes by asset
     payments.forEach((payment) => {
       const operationTimestamp = new Date(payment.created_at).getTime();
-      
+
       // Determine asset key
       let assetKey;
       if (payment.asset_type === "native" || payment.asset_code === "XLM") {
@@ -9824,7 +9958,7 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
       }
       if (operationTimestamp > timeWindows["7d"]) {
         balanceChanges[assetKey].change7d += change;
-        
+
         // Track daily change for velocity calculation
         const dayIndex = Math.floor((now - operationTimestamp) / (24 * 60 * 60 * 1000));
         if (!balanceChanges[assetKey].dailyChanges[dayIndex]) {
@@ -9844,7 +9978,7 @@ router.get("/:id/balance-velocity", async (req, res, next) => {
         const mean = dailyChanges.reduce((a, b) => a + b, 0) / dailyChanges.length;
         const variance = dailyChanges.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / dailyChanges.length;
         const stdDev = Math.sqrt(variance);
-        
+
         // Check if any recent change exceeds mean + 2σ
         const recentChange = changes.change24h;
         velocityFlag = Math.abs(recentChange - mean) > 2 * stdDev;
