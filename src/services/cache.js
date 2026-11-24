@@ -2,6 +2,10 @@ const NodeCache = require("node-cache");
 const logger = require("../utils/logger");
 const { getCoalescedRequests } = require("../utils/singleFlight");
 
+// LRU cache enforcement constants
+const CACHE_MAX_ENTRIES = parseInt(process.env.CACHE_MAX_ENTRIES, 10) || 5000;
+const KEY_MAX_LENGTH = 512;
+
 /**
  * Centralised in-memory TTL cache service backed by node-cache.
  *
@@ -13,6 +17,9 @@ const { getCoalescedRequests } = require("../utils/singleFlight");
  *     cache miss) and the caller is expected to re-fetch and re-set.
  *   - A singleton instance is exported so every route and middleware shares
  *     the same key-space and the same hit/miss counters.
+ *   - Cache is bounded by CACHE_MAX_ENTRIES with LRU eviction — the least
+ *     recently read entry is removed when capacity is reached.
+ *   - Cache keys longer than 512 characters are not cached (no error thrown).
  *
  * Key format convention:
  *   Use colon-delimited namespaces that describe the endpoint and any
@@ -24,15 +31,14 @@ const { getCoalescedRequests } = require("../utils/singleFlight");
  *   collisions between endpoints.
  *
  * Cache-full behaviour:
- *   node-cache stores entries in a plain JS object; there is no hard entry
- *   limit.  If memory pressure is a concern, set an explicit `maxKeys` option
- *   in the NodeCache constructor.  Expired entries are lazily removed on
- *   access and periodically swept by the internal check-period timer
- *   (configured below as 20% of the default TTL).
+ *   When the number of cached entries reaches CACHE_MAX_ENTRIES, the least
+ *   recently accessed entry (tracked by read/write timestamps) is evicted to
+ *   make room for new entries. TTL-based expiry still applies independently.
  *
  * Tracking:
  *   `this.hits` and `this.misses` are incremented on every `get` call so that
  *   `getStats()` can report a live hit-rate without an extra dependency.
+ *   `this.evictions` counts both LRU-triggered evictions and manual deletes.
  */
 class CacheService {
   /**
@@ -67,6 +73,9 @@ class CacheService {
     // one background refresh runs for a stale entry.
     this.swrMeta = new Map();
     this.swrInflight = new Set();
+
+    // Track last access time for each key to enable LRU eviction
+    this.accessOrder = new Map();
   }
 
   /**
@@ -87,6 +96,8 @@ class CacheService {
     const value = this.cache.get(key);
     if (value !== undefined) {
       this.hits++;
+      // Update access order for LRU tracking (refresh recency on read)
+      this.accessOrder.set(key, Date.now());
       if (process.env.NODE_ENV !== "test") {
         logger.debug(`Cache hit: ${key}`);
       }
@@ -106,13 +117,67 @@ class CacheService {
    * Passing a TTL shorter than the node-cache `checkperiod` means the
    * entry may briefly outlive its intended lifetime before the next sweep.
    *
+   * Cache keys longer than KEY_MAX_LENGTH (512 characters) are skipped
+   * without error; a debug log is emitted.
+   *
+   * When the cache reaches CACHE_MAX_ENTRIES capacity, the least recently
+   * accessed entry is evicted to make room.
+   *
    * @param {string} key        - The cache key (see key format convention above).
    * @param {any}    value      - Any JSON-serialisable value to cache.
    * @param {number} ttlSeconds - How long (in seconds) to keep this entry.
-   * @returns {boolean} `true` if the value was stored successfully.
+   * @returns {boolean} `true` if the value was stored successfully, `false` if skipped due to key length.
    */
   set(key, value, ttlSeconds) {
-    return this.cache.set(key, value, ttlSeconds);
+    // Skip caching if key exceeds maximum length
+    if (key.length > KEY_MAX_LENGTH) {
+      if (process.env.NODE_ENV !== "test") {
+        logger.debug(
+          `Cache key too long (${key.length} > ${KEY_MAX_LENGTH}): ${key.substring(0, 50)}...`
+        );
+      }
+      return false;
+    }
+
+    // Enforce LRU eviction when at capacity
+    const currentSize = this.cache.keys().length;
+    if (currentSize >= CACHE_MAX_ENTRIES) {
+      this._evictLru();
+    }
+
+    // Store the value and track access time
+    const result = this.cache.set(key, value, ttlSeconds);
+    if (result) {
+      this.accessOrder.set(key, Date.now());
+    }
+    return result;
+  }
+
+  /**
+   * Find and evict the least recently accessed entry.
+   * @private
+   */
+  _evictLru() {
+    // Find the entry with the oldest access time
+    let oldestKey = null;
+    let oldestTime = Infinity;
+
+    for (const [key, time] of this.accessOrder.entries()) {
+      if (time < oldestTime) {
+        oldestTime = time;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey !== null) {
+      this.cache.del(oldestKey);
+      this.accessOrder.delete(oldestKey);
+      this.swrMeta.delete(oldestKey);
+      this.evictions++;
+      if (process.env.NODE_ENV !== "test") {
+        logger.debug(`Cache evicted (LRU): ${oldestKey}`);
+      }
+    }
   }
 
   /**
@@ -226,6 +291,7 @@ class CacheService {
   delete(key) {
     this.cache.del(key);
     this.swrMeta.delete(key);
+    this.accessOrder.delete(key);
     this.evictions++;
   }
 
@@ -238,6 +304,9 @@ class CacheService {
    */
   flush() {
     this.cache.flushAll();
+    this.accessOrder.clear();
+    this.swrMeta.clear();
+    this.swrInflight.clear();
   }
 
   /**
@@ -247,7 +316,9 @@ class CacheService {
    * close to 100% means the cache is working well; a low rate may indicate
    * TTLs are too short or keys are not being reused.
    *
-   * @returns {{ hits: number, misses: number, hitRate: string, cachedKeys: number, coalescedRequests: number }}
+   * `evictions` counts both LRU-triggered evictions and manual deletes.
+   *
+   * @returns {{ hits: number, misses: number, hitRate: string, cachedKeys: number, evictions: number, coalescedRequests: number }}
    */
   getStats() {
     const total = this.hits + this.misses;
@@ -258,6 +329,7 @@ class CacheService {
       hitRate: `${hitRate}%`,
       // Number of keys that are currently live (not yet expired or deleted)
       cachedKeys: this.cache.keys().length,
+      evictions: this.evictions,
       // Requests that shared an upstream call via src/utils/singleFlight.js
       coalescedRequests: getCoalescedRequests(),
     };

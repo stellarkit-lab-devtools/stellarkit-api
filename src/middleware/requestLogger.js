@@ -10,6 +10,7 @@
  * - Circular structures in error context
  * 
  * Attaches finish hook once to prevent double logging.
+ * SDK version is logged when present (via X-StellarKit-SDK header).
  */
 
 const redactSeeds = require("../utils/redactSeeds");
@@ -19,6 +20,34 @@ const metricsService = require("../services/metrics");
 
 const SLOW_REQUEST_THRESHOLD_MS =
   parseInt(process.env.SLOW_REQUEST_THRESHOLD_MS, 10) || 2000;
+
+/**
+ * Validate and extract SDK version from X-StellarKit-SDK header.
+ * Valid format: name/major.minor.patch[-+prerelease]
+ * Maximum length: 64 characters
+ *
+ * @param {string} headerValue - The header value to validate
+ * @returns {string|null} The validated SDK version, or null if invalid
+ */
+function validateSdkHeader(headerValue) {
+  if (!headerValue || typeof headerValue !== "string") {
+    return null;
+  }
+
+  // Max length: 64 characters
+  if (headerValue.length > 64) {
+    return null;
+  }
+
+  // Pattern: alphanumeric/digits/dots/hyphens/plus, with version semver format
+  // Example: stellarkit-js/1.0.0, stellarkit-js/1.0.0-beta, stellarkit-py/1.2.3+build
+  const pattern = /^[\w.-]+\/\d+\.\d+\.\d+([-+][\w.]+)?$/;
+  if (!pattern.test(headerValue)) {
+    return null;
+  }
+
+  return headerValue;
+}
 
 function safeStringify(obj, depth = 3) {
   const seen = new Set();
@@ -85,6 +114,15 @@ function requestLogger(req, res, next) {
         clientIp: safeIp,
         ...extra
       };
+
+      // Extract and validate SDK version header
+      const sdkHeader = req.get("X-StellarKit-SDK");
+      if (sdkHeader) {
+        const validatedSdk = validateSdkHeader(sdkHeader);
+        if (validatedSdk) {
+          fields.sdkVersion = validatedSdk;
+        }
+      }
 
       if (typeof req.horizonResponseTimeMs === "number") {
         fields.horizonResponseTimeMs = req.horizonResponseTimeMs;
