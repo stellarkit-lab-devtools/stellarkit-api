@@ -952,3 +952,10 @@ All account endpoints return errors in the standard StellarKit envelope:
 | Horizon did not respond | 504 | `HorizonTimeout` |
 
 See [docs/error-reference.md](./error-reference.md) for the full error type catalogue.
+
+/**
+ * Declarative schemas for every POST request body in the API.
+ * Applied with validateBody(schema) in each route (see PR description for the list).StellarKit API exposes over 25 endpoints under `/account/:id`. This guide groups them by the workflows they support, explains what each one returns, and shows when to combine them rather than calling them individually.
+
+The `:id` path parameter is always a 56-character Stellar public key starting with `G`. Every endpoint returns `400 InvalidAccountId` for a malformed key and `404 AccountNotFound` when the account does not exist on the configured network.
+ */

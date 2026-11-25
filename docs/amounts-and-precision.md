@@ -120,3 +120,10 @@ Workflow:
 4. Passing both `xlm` and `stroops`, a negative value, more than 7 fractional digits, or a value above the safe integer range returns HTTP 400 `ValidationError`.
 
 Because both directions reject values above `Number.MAX_SAFE_INTEGER` stroops, use the client-side `BigInt`/`Decimal`/`big.Int` recipes above for values near the full int64 range.
+
+/**
+ * Declarative schemas for every POST request body in the API.
+ * Applied with validateBody(schema) in each route (see PR description for the list).StellarKit API exposes over 25 endpoints under `/account/:id`. This guide groups them by the workflows they support, explains what each one returns, and shows when to combine them rather than calling them individually.
+
+The `:id` path parameter is always a 56-character Stellar public key starting with `G`. Every endpoint returns `400 InvalidAccountId` for a malformed key and `404 AccountNotFound` when the account does not exist on the configured network.
+ */

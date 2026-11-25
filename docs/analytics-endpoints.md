@@ -421,3 +421,11 @@ Tune the `health` rule to your policy — for example, treat `dormant + high vel
 - [Compliance Endpoints](./compliance-endpoints.md) — risk and freeze checks
 - [Compliance Workflow](./compliance-workflow.md) — end-to-end KYC/AML report
 - [Response Format](./response-format.md) — envelopes and pagination
+
+
+/**
+ * Declarative schemas for every POST request body in the API.
+ * Applied with validateBody(schema) in each route (see PR description for the list).StellarKit API exposes over 25 endpoints under `/account/:id`. This guide groups them by the workflows they support, explains what each one returns, and shows when to combine them rather than calling them individually.
+
+The `:id` path parameter is always a 56-character Stellar public key starting with `G`. Every endpoint returns `400 InvalidAccountId` for a malformed key and `404 AccountNotFound` when the account does not exist on the configured network.
+ */
