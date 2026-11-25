@@ -3814,3 +3814,1653 @@ Run `npm run doctor` to check Node, required .env values (STELLAR_NETWORK and PO
 ### Security contact
 
 Set SECURITY_CONTACT (for example, `mailto:security@example.com`) to serve the public `/.well-known/security.txt` endpoint. SECURITY_TXT_EXPIRES overrides the default expiry of one year ahead; SECURITY_POLICY_URL adds a disclosure policy link. Without a contact, the endpoint returns 404.
+MARKET ANALYTICS DATA INTEGRATION
+
+Comprehensive Technical Documentation
+
+Project: Market Analytics Infrastructure
+Components: EventTimeline, LiquidityChart, LiquidityDisplay, VolumeStats
+Technology: Next.js, React, TypeScript, REST APIs, Smart Contract Event Indexing
+Implementation Focus: Replacing Mock Data with Verified Backend and Blockchain Records
+Document Type: Technical Implementation README
+Version: 1.0.0
+
+---
+
+TABLE OF CONTENTS
+
+1. Introduction
+2. Project Overview
+3. Background and Motivation
+4. Existing Implementation Problems
+5. Implementation Goals
+6. Scope of Work
+7. System Architecture
+8. Technology Stack
+9. Repository Organization
+10. Data Integration Principles
+11. EventTimeline Overview
+12. EventTimeline Data Sources
+13. Indexed Contract Events
+14. Backend Lifecycle Records
+15. Stable Event Identifiers
+16. Event Normalization
+17. Event Deduplication
+18. Event Ordering
+19. Event Timeline Rendering
+20. Event Timeline Error Handling
+21. EventTimeline Acceptance Criteria
+22. LiquidityChart Overview
+23. Liquidity Data Sources
+24. Liquidity Depth
+25. Historical Liquidity
+26. Liquidity Measurement Units
+27. Liquidity Chart Periods
+28. Liquidity Data Validation
+29. Chart Rendering Requirements
+30. LiquidityChart Error Handling
+31. LiquidityChart Acceptance Criteria
+32. LiquidityDisplay Overview
+33. Liquidity Activity Records
+34. Liquidity Summary Calculations
+35. Data Consistency
+36. Latest Liquidity Measurements
+37. Missing Liquidity Information
+38. LiquidityDisplay Acceptance Criteria
+39. VolumeStats Overview
+40. Confirmed Trading Fills
+41. Trading Volume Calculation
+42. Timeframe Aggregation
+43. Reporting Period Boundaries
+44. Excluding Unconfirmed Transactions
+45. Zero Trading Activity
+46. Unavailable Trading Data
+47. VolumeStats Acceptance Criteria
+48. Shared API Service Layer
+49. API Configuration
+50. API Request Management
+51. Response Validation
+52. Error Handling Architecture
+53. Loading State Management
+54. Empty State Management
+55. Error State Management
+56. Data Synchronization
+57. React State Management
+58. Component Lifecycle
+59. Request Cancellation
+60. Race Condition Prevention
+61. Data Refresh Strategy
+62. Performance Optimization
+63. Backend Integration Requirements
+64. Suggested API Endpoints
+65. Suggested Response Structures
+66. Backend Responsibilities
+67. Database Considerations
+68. Blockchain Indexing Requirements
+69. Data Integrity
+70. Security Considerations
+71. Environment Configuration
+72. Frontend Integration
+73. Component Integration
+74. Testing Strategy
+75. Unit Testing
+76. Integration Testing
+77. API Testing
+78. EventTimeline Testing
+79. LiquidityChart Testing
+80. LiquidityDisplay Testing
+81. VolumeStats Testing
+82. Edge Case Testing
+83. Error Scenario Testing
+84. Performance Testing
+85. Accessibility Requirements
+86. User Interface Requirements
+87. Monitoring and Logging
+88. Troubleshooting
+89. Common Implementation Mistakes
+90. Deployment Considerations
+91. Future Improvements
+92. Implementation Checklist
+93. Acceptance Criteria
+94. Expected Outcomes
+95. Conclusion
+
+---
+
+1. INTRODUCTION
+
+This document describes the technical requirements and implementation approach for integrating real market data into the application's market analytics interface.
+
+The implementation focuses on four important components:
+
+- EventTimeline
+- LiquidityChart
+- LiquidityDisplay
+- VolumeStats
+
+These components provide users with information about market activity, contract events, liquidity availability, and trading volume.
+
+The reliability of these components depends on the accuracy and consistency of their underlying data.
+
+A market analytics interface should not independently generate fictional information to populate its visual elements.
+
+Instead, displayed information should originate from legitimate backend records, indexed smart contract events, and confirmed trading transactions.
+
+This implementation therefore introduces a backend-driven data retrieval architecture that removes mock datasets and replaces them with verified market records.
+
+The resulting system should ensure that every displayed event, liquidity measurement, and trading statistic can be traced to an appropriate data source.
+
+2. PROJECT OVERVIEW
+
+The project involves modernizing the market analytics data infrastructure.
+
+Previously, several components generated or synthesized information locally.
+
+Although this approach allowed the interface to display sample information during development, it introduced inconsistencies between frontend presentation and actual market activity.
+
+The updated architecture establishes a clear separation between data retrieval, data processing, and visual presentation.
+
+The backend becomes the authoritative source of market records.
+
+The frontend retrieves these records, validates their structure, processes them when necessary, and displays them to users.
+
+The four components have separate responsibilities.
+
+EventTimeline
+
+Displays contract events and backend lifecycle activities in chronological order.
+
+LiquidityChart
+
+Visualizes actual market liquidity depth and historical liquidity measurements.
+
+LiquidityDisplay
+
+Presents summarized liquidity information using actual market records.
+
+VolumeStats
+
+Calculates trading volume using confirmed fills over user-selected reporting periods.
+
+3. BACKGROUND AND MOTIVATION
+
+Accurate market analytics are important because users rely on displayed information when evaluating market conditions.
+
+Incorrect trading statistics can create misleading impressions of market activity.
+
+Fictional timeline events can make users believe that transactions or lifecycle changes occurred when they did not.
+
+Artificial liquidity measurements can misrepresent the availability of market liquidity.
+
+Similarly, independently generated volume datasets can produce inconsistent trading statistics across different reporting periods.
+
+These problems make it necessary to establish a consistent data retrieval and processing mechanism.
+
+The implementation is motivated by the following requirements:
+
+1. Improve market data accuracy.
+2. Eliminate fictional event generation.
+3. Remove default mock liquidity datasets.
+4. Eliminate synthesized liquidity activity.
+5. Calculate trading volume from confirmed fills.
+6. Improve the reliability of reporting periods.
+7. Introduce stable identifiers.
+8. Improve frontend error handling.
+9. Establish consistent API integration.
+10. Make market information traceable to legitimate records.
+
+4. EXISTING IMPLEMENTATION PROBLEMS
+
+4.1 Fictional Timeline Events
+
+EventTimeline previously generated creation, trade, and milestone events.
+
+These events were not guaranteed to correspond to indexed blockchain transactions or backend lifecycle records.
+
+This could result in inaccurate event histories.
+
+4.2 Mock Liquidity Data
+
+LiquidityChart supplied mock depth and historical data by default.
+
+This meant that the chart could display information even when no corresponding market liquidity records existed.
+
+4.3 Synthesized Liquidity Activity
+
+LiquidityDisplay generated activity independently instead of retrieving actual liquidity records.
+
+This created a possibility of inconsistent information between the liquidity summary and the liquidity chart.
+
+4.4 Generated Trading Volume
+
+VolumeStats generated a different dataset for each timeframe.
+
+This prevented the component from providing reliable statistics based on confirmed market transactions.
+
+4.5 Inconsistent Empty and Error States
+
+A successful request returning no records is different from a failed request.
+
+Treating these situations identically can result in incorrect reporting.
+
+For example, an unavailable backend should not cause the application to display zero trading volume.
+
+5. IMPLEMENTATION GOALS
+
+The implementation must achieve the following:
+
+- Replace locally generated timeline events.
+- Retrieve indexed contract events.
+- Retrieve backend lifecycle records.
+- Introduce deterministic event identifiers.
+- Prevent duplicate event presentation.
+- Retrieve actual liquidity measurements.
+- Display historical liquidity information.
+- Clearly label measurement units.
+- Clearly identify measurement periods.
+- Remove synthesized liquidity activity.
+- Aggregate confirmed fills.
+- Support multiple reporting periods.
+- Exclude unconfirmed transactions.
+- Distinguish zero activity from unavailable data.
+- Introduce consistent loading states.
+- Improve error handling.
+- Validate backend responses.
+
+6. SCOPE OF WORK
+
+The scope includes frontend and backend integration requirements.
+
+Frontend
+
+- Update EventTimeline.
+- Update LiquidityChart.
+- Update LiquidityDisplay.
+- Update VolumeStats.
+- Implement shared API services.
+- Introduce appropriate TypeScript interfaces.
+- Add data validation.
+- Implement loading, empty, and error states.
+
+Backend
+
+- Provide indexed contract events.
+- Provide lifecycle records.
+- Provide liquidity measurements.
+- Provide confirmed fill records.
+- Support timeframe filtering.
+- Return consistent response structures.
+- Provide reliable timestamps and identifiers.
+
+Testing
+
+- Test successful retrieval.
+- Test empty responses.
+- Test malformed responses.
+- Test unavailable services.
+- Test timeframe changes.
+- Test event deduplication.
+- Test volume aggregation.
+
+7. SYSTEM ARCHITECTURE
+
+The proposed architecture follows a layered approach.
+
+The frontend components should not independently generate market information.
+
+Instead, they should communicate with a shared service layer.
+
+The service layer communicates with backend APIs and returns validated records.
+
+The components then use these records to render the appropriate interface.
+
+Architecture Flow
+
+                 DATA SOURCES
+                      |
+          +-----------+-----------+
+          |           |           |
+       Contract    Backend     Market
+       Indexer    Lifecycle   Data Service
+          |           |           |
+          +-----------+-----------+
+                      |
+                 BACKEND API
+                      |
+              API SERVICE LAYER
+                      |
+          +-----------+-----------+
+          |           |           |
+       Event       Liquidity    Confirmed
+       Service      Service       Fills
+          |           |           |
+          +-----------+-----------+
+                      |
+                FRONTEND STATE
+                      |
+          +-----------+-----------+
+          |           |           |
+      EventTimeline  Liquidity  VolumeStats
+                     Components
+
+8. TECHNOLOGY STACK
+
+The implementation is intended for an application using the following technologies.
+
+Technology| Responsibility
+Next.js| Application framework
+React| Component rendering
+TypeScript| Type safety
+REST API| Backend communication
+Smart contracts| Blockchain event generation
+Event indexer| Contract event retrieval
+Database| Lifecycle and market records
+Tailwind CSS| Interface styling
+Testing framework| Automated verification
+
+The actual technology choices should remain consistent with the existing repository.
+
+9. REPOSITORY ORGANIZATION
+
+The following structure is recommended.
+
+src/
+|
++-- components/
+|   |
+|   +-- EventTimeline.tsx
+|   +-- LiquidityChart.tsx
+|   +-- LiquidityDisplay.tsx
+|   +-- VolumeStats.tsx
+|
++-- services/
+|   |
+|   +-- marketAnalytics.ts
+|   +-- contractEvents.ts
+|   +-- liquidityService.ts
+|   +-- volumeService.ts
+|
++-- types/
+|   |
+|   +-- marketAnalytics.ts
+|
++-- hooks/
+|   |
+|   +-- useTimelineEvents.ts
+|   +-- useLiquidityRecords.ts
+|   +-- useVolumeStats.ts
+|
++-- lib/
+    |
+    +-- api.ts
+    +-- validation.ts
+
+This is a proposed organization rather than a requirement to restructure the existing application.
+
+10. DATA INTEGRATION PRINCIPLES
+
+The implementation should follow several fundamental principles.
+
+10.1 Backend as the Source of Truth
+
+The frontend must not invent market information.
+
+10.2 Consistent Data Definitions
+
+Different components displaying the same market information should use consistent definitions.
+
+10.3 Stable Identifiers
+
+Records must have deterministic identifiers.
+
+10.4 Explicit Measurement Units
+
+Every numerical market measurement should have a clearly defined unit.
+
+10.5 Accurate Time Boundaries
+
+Historical records and reporting periods must use consistent timestamp conventions.
+
+10.6 Reliable Error Handling
+
+Unavailable data must never be represented as successful zero activity.
+
+11. EVENTTIMELINE OVERVIEW
+
+EventTimeline provides users with a chronological representation of important market activities.
+
+Its responsibility is to display events that have actually been recorded by the contract indexer or backend lifecycle service.
+
+The component should not generate fictional events.
+
+The timeline should combine records from the relevant sources and normalize them into a common structure.
+
+12. EVENTTIMELINE DATA SOURCES
+
+The component uses two primary sources.
+
+1. Indexed contract events.
+2. Backend lifecycle records.
+
+Both sources provide information about market activity, but they may have different schemas.
+
+The frontend service layer should normalize these schemas before rendering.
+
+13. INDEXED CONTRACT EVENTS
+
+Smart contracts emit events when specified actions occur.
+
+An event indexer monitors contract activity and stores or exposes these events through an API.
+
+Examples include:
+
+- Market creation.
+- Token transfers.
+- Liquidity additions.
+- Liquidity removals.
+- Trading execution.
+- Ownership transfers.
+- Administrative updates.
+
+The frontend should retrieve the actual indexed events.
+
+It should not assume that an event occurred merely because a market reached a particular application state.
+
+14. BACKEND LIFECYCLE RECORDS
+
+Some application events may not originate directly from smart contracts.
+
+Examples include:
+
+- Market initialization.
+- Backend-managed status transitions.
+- Administrative lifecycle changes.
+- Internal market processing milestones.
+
+These records should be retrieved from the backend lifecycle service.
+
+They should retain their original identifiers and timestamps.
+
+15. STABLE EVENT IDENTIFIERS
+
+Stable identifiers are essential for reliable rendering.
+
+Random identifiers should not be generated during React rendering.
+
+For contract events, a deterministic identifier may be constructed from:
+
+- Chain identifier.
+- Contract address.
+- Transaction hash.
+- Event log index.
+
+For backend events, the backend-provided primary event ID should be used.
+
+This allows React to preserve event identity when new records arrive.
+
+It also helps prevent duplicates.
+
+16. EVENT NORMALIZATION
+
+Contract and backend records may use different field names.
+
+A normalization layer should transform them into a consistent interface.
+
+Recommended normalized fields:
+
+interface TimelineEvent {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  timestamp: string;
+  transactionHash?: string;
+  source: "contract" | "backend";
+}
+
+Normalization should preserve the original event identity.
+
+Missing optional fields should remain optional.
+
+Invalid timestamps should be rejected or flagged.
+
+17. EVENT DEDUPLICATION
+
+When retrieving records from multiple services, the same activity may appear more than once.
+
+Deduplication should use reliable source identifiers.
+
+A contract event should not automatically be considered identical to a backend lifecycle event merely because their descriptions or timestamps are similar.
+
+A deterministic deduplication key should be used.
+
+18. EVENT ORDERING
+
+Timeline events should be ordered using their actual timestamps.
+
+The interface should use a consistent timezone presentation.
+
+The stored timestamp should remain in a standard machine-readable format, preferably ISO 8601 or an equivalent UTC representation.
+
+19. EVENT TIMELINE RENDERING
+
+Each event should present the information available for that event.
+
+Recommended fields:
+
+- Event title.
+- Event type.
+- Description.
+- Timestamp.
+- Source.
+- Transaction hash, where applicable.
+
+Transaction hashes may link to a block explorer if the application already supports verified explorer URLs.
+
+20. EVENT TIMELINE ERROR HANDLING
+
+The component should support four distinct states.
+
+Loading: Event retrieval is in progress.
+
+Success: Events have been retrieved.
+
+Empty: The request succeeded but no events were returned.
+
+Error: The request failed or returned invalid data.
+
+The interface should never fabricate events to fill an empty timeline.
+
+21. EVENTTIMELINE ACCEPTANCE CRITERIA
+
+- No fictional creation events.
+- No fictional trading events.
+- No fictional milestones.
+- Indexed contract events retrieved successfully.
+- Backend lifecycle records retrieved successfully.
+- Stable event identifiers.
+- Correct event ordering.
+- Appropriate deduplication.
+- Accurate timestamps.
+- Correct loading state.
+- Correct empty state.
+- Correct error state.
+
+22. LIQUIDITYCHART OVERVIEW
+
+LiquidityChart provides a visual representation of market liquidity.
+
+It should display actual market measurements rather than predefined mock datasets.
+
+The chart should retrieve data using the selected market identifier.
+
+The data source must provide sufficient information for the intended visualization.
+
+23. LIQUIDITY DATA SOURCES
+
+Liquidity data may originate from:
+
+- Backend market records.
+- Order-book snapshots.
+- Liquidity pool records.
+- Indexed liquidity transactions.
+- Historical market measurements.
+
+The implementation must use the appropriate source for each type of liquidity measurement.
+
+An executed liquidity transaction is not necessarily equivalent to currently available market depth.
+
+24. LIQUIDITY DEPTH
+
+Liquidity depth describes the quantity of assets available at different price levels or within a defined market range.
+
+Where the backend supports it, the chart should distinguish between:
+
+- Bid-side liquidity.
+- Ask-side liquidity.
+- Total available depth.
+
+The measurement method should be documented.
+
+25. HISTORICAL LIQUIDITY
+
+Historical liquidity records describe liquidity measurements over time.
+
+Each record should include:
+
+- Measurement timestamp.
+- Market identifier.
+- Token quantity.
+- Quote asset value.
+- Relevant depth information.
+
+The chart should use the original measurements.
+
+It should not create artificial historical records to fill gaps.
+
+26. LIQUIDITY MEASUREMENT UNITS
+
+Units should be explicit.
+
+Examples include:
+
+- ETH.
+- USDC.
+- USDT.
+- USD.
+- Token quantity.
+- Base asset quantity.
+- Quote asset quantity.
+
+The application must not display an unlabeled numerical value when the unit is known.
+
+27. LIQUIDITY CHART PERIODS
+
+The chart may support multiple historical periods.
+
+Examples:
+
+- 24 hours.
+- 7 days.
+- 30 days.
+- 90 days.
+
+The selected period should correspond to the actual backend query.
+
+The chart must not imply that the dataset covers an entire period if the backend returned only a partial range.
+
+28. LIQUIDITY DATA VALIDATION
+
+The component should validate:
+
+- Timestamp format.
+- Numeric liquidity values.
+- Market identifiers.
+- Asset denomination.
+- Optional bid and ask depth.
+- Duplicate measurements.
+
+Invalid measurements should not be rendered as genuine market information.
+
+29. CHART RENDERING REQUIREMENTS
+
+The chart should:
+
+- Render actual liquidity measurements.
+- Preserve chronological ordering.
+- Display appropriate axes.
+- Display units.
+- Display reporting periods.
+- Handle incomplete historical data.
+- Avoid synthetic data points.
+- Avoid misleading interpolations.
+
+30. LIQUIDITYCHART ERROR HANDLING
+
+The chart should distinguish between:
+
+- Initial loading.
+- Successful data retrieval.
+- Successful empty response.
+- Invalid response.
+- Backend failure.
+
+An empty chart should not automatically be populated with sample information.
+
+31. LIQUIDITYCHART ACCEPTANCE CRITERIA
+
+- Mock depth removed.
+- Mock historical data removed.
+- Actual liquidity records integrated.
+- Correct measurement units.
+- Correct historical periods.
+- Correct timestamp handling.
+- Correct empty state.
+- Correct error state.
+- No fabricated chart measurements.
+
+32. LIQUIDITYDISPLAY OVERVIEW
+
+LiquidityDisplay summarizes market liquidity.
+
+It should use the same underlying market data definitions as LiquidityChart.
+
+This avoids situations where the summary displays one liquidity value while the chart represents an incompatible measurement.
+
+33. LIQUIDITY ACTIVITY RECORDS
+
+The component should retrieve real liquidity records.
+
+Possible information includes:
+
+- Liquidity additions.
+- Liquidity removals.
+- Latest liquidity measurements.
+- Current pool reserves.
+- Historical liquidity changes.
+
+The component must distinguish between liquidity activity and current available liquidity.
+
+These are related but different measurements.
+
+34. LIQUIDITY SUMMARY CALCULATIONS
+
+Any summarized value must have a clearly defined calculation.
+
+For example, total pool reserves may be different from available order-book depth.
+
+The application should not add incompatible measurements together.
+
+USD valuation must use a valid price source and an explicitly defined conversion method.
+
+35. DATA CONSISTENCY
+
+LiquidityDisplay and LiquidityChart should share:
+
+- Market identifiers.
+- Asset denomination.
+- Measurement conventions.
+- Timestamp standards.
+- Relevant backend data definitions.
+
+This does not necessarily mean that both components must display identical numerical values.
+
+A summary and a historical chart may represent different measurements.
+
+Their definitions must simply remain consistent and understandable.
+
+36. LATEST LIQUIDITY MEASUREMENTS
+
+The latest measurement should be selected using the actual record timestamp.
+
+The implementation should not assume that the first returned record is always the newest unless the API explicitly guarantees descending ordering.
+
+37. MISSING LIQUIDITY INFORMATION
+
+Missing information should not be silently converted to zero.
+
+For example, a missing USD valuation does not mean that the liquidity value is zero USD.
+
+The interface should display unavailable information or omit optional fields appropriately.
+
+38. LIQUIDITYDISPLAY ACCEPTANCE CRITERIA
+
+- Synthesized activity removed.
+- Actual liquidity records integrated.
+- Consistent data definitions.
+- Accurate timestamps.
+- Correct asset denomination.
+- No fabricated measurements.
+- Missing values handled appropriately.
+- Empty and error states implemented.
+
+39. VOLUMESTATS OVERVIEW
+
+VolumeStats provides trading volume information across different reporting periods.
+
+The component should calculate its statistics using confirmed fills.
+
+Independent generated datasets should be removed.
+
+40. CONFIRMED TRADING FILLS
+
+A confirmed fill represents an executed trade that has satisfied the application's required confirmation criteria.
+
+The backend should expose reliable fill records.
+
+Each record should include:
+
+- Unique fill identifier.
+- Execution timestamp.
+- Executed quantity.
+- Execution price.
+- Confirmation status.
+- Relevant asset denomination.
+
+The frontend must use the actual confirmation status.
+
+It should not assume that a transaction is confirmed merely because it exists in a transaction list.
+
+41. TRADING VOLUME CALCULATION
+
+Where the execution price is denominated in USD:
+
+Fill Volume = Executed Quantity × Execution Price.
+
+Total Trading Volume = Sum of Eligible Confirmed Fill Values.
+
+The calculation must account for token decimals and asset denomination.
+
+For non-USD quote assets, the application must use an appropriate verified conversion before reporting USD-denominated volume.
+
+42. TIMEFRAME AGGREGATION
+
+The component should support the configured reporting periods.
+
+Examples include:
+
+- 24 hours.
+- 7 days.
+- 30 days.
+- 90 days.
+
+When the user changes the timeframe, the component should retrieve the appropriate confirmed fills or request a backend aggregation for that period.
+
+The selected timeframe should be reflected in the displayed information.
+
+43. REPORTING PERIOD BOUNDARIES
+
+The backend and frontend must agree on reporting period boundaries.
+
+A 24-hour period should represent a clearly defined rolling or calendar period.
+
+The same applies to weekly and monthly periods.
+
+The system should document whether periods are rolling windows or calendar-based windows.
+
+All calculations should use consistent timezone rules.
+
+44. EXCLUDING UNCONFIRMED TRANSACTIONS
+
+The following should not contribute to confirmed volume:
+
+- Pending transactions.
+- Rejected transactions.
+- Failed transactions.
+- Cancelled orders that never executed.
+- Unconfirmed fills.
+
+Only records satisfying the application's confirmation requirements should contribute.
+
+45. ZERO TRADING ACTIVITY
+
+A successful backend request returning no confirmed fills represents zero trading activity.
+
+The interface should communicate this clearly.
+
+Recommended message:
+
+"No confirmed trading activity for this period."
+
+A zero result should be displayed only when the data source successfully confirms that no eligible records exist.
+
+46. UNAVAILABLE TRADING DATA
+
+Unavailable data represents a retrieval or service problem.
+
+Examples include:
+
+- Network failure.
+- Server error.
+- Indexer unavailable.
+- Invalid backend response.
+- Authentication failure.
+- Timeout.
+
+The interface should display an appropriate error message.
+
+It must not convert these failures into zero volume.
+
+47. VOLUMESTATS ACCEPTANCE CRITERIA
+
+- Generated datasets removed.
+- Confirmed fills retrieved.
+- Correct timeframe aggregation.
+- Unconfirmed fills excluded.
+- Correct volume calculation.
+- Correct asset denomination.
+- Accurate timestamps.
+- Zero activity handled correctly.
+- Unavailable data handled correctly.
+
+48. SHARED API SERVICE LAYER
+
+The API service layer centralizes backend communication.
+
+It should provide reusable methods for retrieving:
+
+- Timeline events.
+- Liquidity records.
+- Confirmed fills.
+
+This prevents multiple components from implementing their own independent API logic.
+
+49. API CONFIGURATION
+
+The backend URL should be configured through environment variables.
+
+Example:
+
+"NEXT_PUBLIC_API_URL=https://api.example.com"
+
+The actual value should come from the project's deployment configuration.
+
+Secrets must never be placed in public frontend environment variables.
+
+50. API REQUEST MANAGEMENT
+
+API requests should:
+
+- Use the correct HTTP method.
+- Encode dynamic URL parameters.
+- Validate response status.
+- Handle network failures.
+- Support cancellation where appropriate.
+- Return predictable data structures.
+
+51. RESPONSE VALIDATION
+
+A successful HTTP response does not automatically guarantee valid data.
+
+The service layer should validate the returned structure.
+
+Important validation fields include:
+
+- IDs.
+- Timestamps.
+- Numeric quantities.
+- Transaction hashes.
+- Market identifiers.
+- Confirmation status.
+
+Malformed records should be rejected or handled explicitly.
+
+52. ERROR HANDLING ARCHITECTURE
+
+The implementation should use consistent error handling.
+
+Possible error categories:
+
+Error| Meaning
+400| Invalid request
+401| Authentication required
+403| Access denied
+404| Resource unavailable
+429| Rate limit exceeded
+500| Internal server error
+503| Service unavailable
+Network error| No successful connection
+
+The frontend should present appropriate messages without exposing sensitive backend implementation details.
+
+53. LOADING STATE MANAGEMENT
+
+Every component should indicate when information is being retrieved.
+
+Loading states should not display fabricated values.
+
+If a new timeframe or market is selected, stale information should not be mistaken for the newly selected dataset.
+
+54. EMPTY STATE MANAGEMENT
+
+An empty state represents a successful request with no relevant records.
+
+Examples:
+
+- No events recorded.
+- No liquidity records available.
+- No confirmed trading activity.
+
+Empty states should be informative and distinct from error messages.
+
+55. ERROR STATE MANAGEMENT
+
+Error states represent unsuccessful data retrieval.
+
+The interface may provide a retry action where supported.
+
+It should not silently substitute mock values.
+
+56. DATA SYNCHRONIZATION
+
+The components should use consistent market identifiers and backend definitions.
+
+Where market data changes, the application should refresh affected views using an appropriate invalidation or subscription mechanism.
+
+57. REACT STATE MANAGEMENT
+
+React state should be used for:
+
+- Retrieved records.
+- Loading status.
+- Error information.
+- Selected timeframe.
+- Selected market.
+
+Derived values should be calculated from the retrieved data.
+
+They should not be independently generated.
+
+58. COMPONENT LIFECYCLE
+
+Data fetching should respond to relevant changes.
+
+Examples:
+
+- Contract address changes.
+- Market ID changes.
+- Selected timeframe changes.
+
+Unnecessary requests should be avoided.
+
+59. REQUEST CANCELLATION
+
+When a component unmounts or its query changes, outdated requests should not update its state.
+
+AbortController or an equivalent request lifecycle mechanism can be used.
+
+60. RACE CONDITION PREVENTION
+
+Multiple requests may complete in a different order from the order in which they were started.
+
+The application should ensure that older results cannot overwrite newer selections.
+
+61. DATA REFRESH STRATEGY
+
+The application may use:
+
+- Manual refresh.
+- Scheduled polling.
+- Query invalidation.
+- WebSocket subscriptions.
+
+The appropriate approach depends on the backend's data update characteristics.
+
+62. PERFORMANCE OPTIMIZATION
+
+Large datasets should not be downloaded unnecessarily.
+
+Recommended improvements include:
+
+- Backend-side filtering.
+- Pagination.
+- Timeframe-specific queries.
+- Response caching.
+- Shared query caching.
+- Efficient aggregation.
+- Limited chart data points.
+
+63. BACKEND INTEGRATION REQUIREMENTS
+
+The backend must provide the records required by each component.
+
+The frontend should not be responsible for inventing missing market information.
+
+Backend responses must be consistent, documented, and validated.
+
+64. SUGGESTED API ENDPOINTS
+
+The following routes are illustrative.
+
+Method| Endpoint| Purpose
+GET| "/contracts/:address/events"| Indexed events
+GET| "/contracts/:address/lifecycle"| Lifecycle records
+GET| "/markets/:id/liquidity"| Liquidity measurements
+GET| "/markets/:id/fills"| Confirmed fills
+
+These routes must be mapped to the existing backend implementation.
+
+65. SUGGESTED RESPONSE STRUCTURES
+
+Contract Events
+
+{
+  "data": [
+    {
+      "id": "event-123",
+      "type": "LIQUIDITY_ADDED",
+      "title": "Liquidity Added",
+      "timestamp": "2026-11-24T10:00:00Z",
+      "transactionHash": "0x...",
+      "source": "contract"
+    }
+  ]
+}
+
+Liquidity Records
+
+{
+  "data": [
+    {
+      "timestamp": "2026-11-24T10:00:00Z",
+      "tokenAmount": 2500,
+      "usdValue": 5000,
+      "bidDepth": 1200,
+      "askDepth": 1300
+    }
+  ]
+}
+
+Confirmed Fills
+
+{
+  "data": [
+    {
+      "id": "fill-123",
+      "timestamp": "2026-11-24T10:00:00Z",
+      "quantity": 100,
+      "price": 2.5,
+      "status": "confirmed"
+    }
+  ]
+}
+
+These examples illustrate possible response structures and are not proof that the existing backend uses these schemas.
+
+66. BACKEND RESPONSIBILITIES
+
+The backend should:
+
+1. Retrieve actual contract events.
+2. Store or expose lifecycle records.
+3. Retrieve liquidity measurements.
+4. Identify confirmed trading fills.
+5. Apply appropriate timeframe filters.
+6. Return stable identifiers.
+7. Return accurate timestamps.
+8. Validate incoming query parameters.
+9. Handle pagination.
+10. Provide consistent error responses.
+
+67. DATABASE CONSIDERATIONS
+
+Where records are stored in a database, the implementation should use suitable indexes.
+
+Potential indexes include:
+
+- Contract address.
+- Market ID.
+- Event timestamp.
+- Transaction hash.
+- Event log index.
+- Fill ID.
+- Fill confirmation status.
+- Execution timestamp.
+
+These indexes can improve retrieval performance for historical market analytics.
+
+68. BLOCKCHAIN INDEXING REQUIREMENTS
+
+The event indexer should maintain reliable contract event records.
+
+It should account for:
+
+- Chain identification.
+- Contract address.
+- Transaction hash.
+- Log index.
+- Block number.
+- Event timestamp.
+- Confirmation or finality status.
+- Reorganizations where relevant.
+
+An event should not be treated as finalized unless it satisfies the application's blockchain confirmation policy.
+
+69. DATA INTEGRITY
+
+Data integrity should be maintained throughout the retrieval process.
+
+The frontend must not silently modify the meaning of backend records.
+
+All transformations should preserve the original identifiers and measurement definitions.
+
+70. SECURITY CONSIDERATIONS
+
+The implementation should:
+
+- Validate contract addresses.
+- Validate market identifiers.
+- Use established authentication mechanisms.
+- Avoid exposing private credentials.
+- Handle untrusted API responses safely.
+- Avoid rendering unescaped external content.
+- Respect backend authorization rules.
+
+71. ENVIRONMENT CONFIGURATION
+
+Example development configuration:
+
+NEXT_PUBLIC_API_URL=http://localhost:3001/api
+
+Example production configuration:
+
+NEXT_PUBLIC_API_URL=https://api.example.com
+
+Environment configuration should be managed through the application's existing deployment system.
+
+72. FRONTEND INTEGRATION
+
+Each component should receive the relevant identifier through its props.
+
+Examples:
+
+- EventTimeline receives a contract address.
+- LiquidityChart receives a market ID.
+- LiquidityDisplay receives a market ID.
+- VolumeStats receives a market ID.
+
+The components should not hardcode specific markets.
+
+73. COMPONENT INTEGRATION
+
+The updated components should preserve existing interfaces wherever possible.
+
+Existing styling, layout, navigation, and application behavior should remain intact unless modification is necessary for accurate data presentation.
+
+74. TESTING STRATEGY
+
+Testing should verify both the correctness of the returned data and the behavior of the interface.
+
+Testing should cover:
+
+- Unit tests.
+- Integration tests.
+- API tests.
+- Error handling.
+- Empty responses.
+- Invalid records.
+- Timeframe changes.
+- Performance.
+
+75. UNIT TESTING
+
+Unit tests should verify individual functions.
+
+Examples:
+
+- Event normalization.
+- Event identifier generation.
+- Event deduplication.
+- Timestamp sorting.
+- Liquidity validation.
+- Fill filtering.
+- Volume aggregation.
+
+76. INTEGRATION TESTING
+
+Integration tests should verify that components correctly communicate with the API service layer.
+
+They should ensure that successful API responses result in correct interface updates.
+
+77. API TESTING
+
+API tests should verify:
+
+- Correct routes.
+- Correct query parameters.
+- Correct response schemas.
+- Correct HTTP statuses.
+- Correct authentication.
+- Correct error responses.
+
+78. EVENTTIMELINE TESTING
+
+Test cases:
+
+1. Contract events load successfully.
+2. Lifecycle events load successfully.
+3. Both sources are combined.
+4. Duplicate records are handled.
+5. Stable identifiers are preserved.
+6. Events appear in the correct order.
+7. Empty responses display the correct message.
+8. Failed requests display an error.
+
+79. LIQUIDITYCHART TESTING
+
+Test cases:
+
+1. Actual liquidity data loads.
+2. Historical measurements render correctly.
+3. Bid and ask depth are displayed where available.
+4. Measurement units are correct.
+5. Reporting periods are correct.
+6. Missing data is handled.
+7. API failures are handled.
+8. Mock data is not used.
+
+80. LIQUIDITYDISPLAY TESTING
+
+Test cases:
+
+1. Liquidity records load.
+2. Latest measurements are selected correctly.
+3. USD values are displayed correctly.
+4. Token quantities are displayed correctly.
+5. Missing measurements are handled.
+6. Empty records are handled.
+7. Backend errors are handled.
+8. Synthesized activity is removed.
+
+81. VOLUMESTATS TESTING
+
+Test cases:
+
+1. Confirmed fills are retrieved.
+2. Unconfirmed fills are excluded.
+3. Volume calculations are correct.
+4. Timeframe changes work.
+5. Empty periods display zero activity.
+6. Failed requests display unavailable data.
+7. Invalid quantities are rejected.
+8. Invalid prices are rejected.
+9. Asset denomination is respected.
+
+82. EDGE CASE TESTING
+
+The implementation should account for:
+
+- Empty event collections.
+- Duplicate contract events.
+- Invalid transaction hashes.
+- Missing timestamps.
+- Negative liquidity quantities.
+- Missing USD valuations.
+- Empty trading periods.
+- Large fill collections.
+- Delayed backend responses.
+- Timeframe changes during pending requests.
+
+83. ERROR SCENARIO TESTING
+
+Simulate:
+
+- Network disconnection.
+- Server unavailable.
+- Request timeout.
+- Authentication failure.
+- Invalid JSON.
+- Malformed response.
+- Missing records.
+- Indexer synchronization delays.
+
+The interface should respond predictably in each situation.
+
+84. PERFORMANCE TESTING
+
+Performance tests should examine:
+
+- Large event histories.
+- Large liquidity datasets.
+- Large confirmed fill collections.
+- Repeated timeframe changes.
+- Multiple simultaneous component requests.
+
+The application should remain responsive when processing larger datasets.
+
+85. ACCESSIBILITY REQUIREMENTS
+
+The interface should:
+
+- Use meaningful headings.
+- Provide accessible loading indicators.
+- Communicate errors clearly.
+- Use readable contrast.
+- Support keyboard navigation.
+- Provide accessible chart descriptions.
+- Avoid relying on color alone to communicate market status.
+
+86. USER INTERFACE REQUIREMENTS
+
+The existing interface should remain visually consistent.
+
+Only the underlying data behavior should change unless a presentation modification is required.
+
+The components should maintain:
+
+- Existing layout conventions.
+- Existing responsive behavior.
+- Existing styling system.
+- Consistent numerical formatting.
+- Clear units.
+- Clear reporting periods.
+
+87. MONITORING AND LOGGING
+
+The application should record useful diagnostic information.
+
+Examples include:
+
+- Failed API requests.
+- Invalid backend responses.
+- Event indexing delays.
+- Liquidity retrieval failures.
+- Volume aggregation errors.
+
+Logs should not contain private credentials or unnecessary sensitive information.
+
+88. TROUBLESHOOTING
+
+Timeline is empty
+
+Check:
+
+- Contract address.
+- Indexed event availability.
+- Backend lifecycle endpoint.
+- API authentication.
+- Indexer synchronization.
+
+Liquidity chart is empty
+
+Check:
+
+- Market identifier.
+- Liquidity endpoint.
+- Historical record availability.
+- Measurement format.
+- API response structure.
+
+LiquidityDisplay differs from LiquidityChart
+
+Check:
+
+- Measurement definitions.
+- Data timestamps.
+- Market identifiers.
+- Asset denominations.
+- Whether both components use the same source.
+
+VolumeStats displays zero
+
+Check whether the backend successfully returned an empty confirmed-fill collection.
+
+If the request failed, the component should display an unavailable-data state instead.
+
+Timeframe changes do not update statistics
+
+Check:
+
+- Selected timeframe state.
+- API query parameters.
+- Request cancellation.
+- Backend filtering.
+- Response caching.
+
+89. COMMON IMPLEMENTATION MISTAKES
+
+Avoid the following:
+
+1. Generating random event IDs.
+2. Creating fictional timeline records.
+3. Using mock liquidity as a fallback.
+4. Treating liquidity activity as current liquidity depth.
+5. Adding incompatible liquidity measurements.
+6. Displaying unlabeled numerical values.
+7. Assuming every fill price is USD-denominated.
+8. Including pending transactions in confirmed volume.
+9. Treating API failures as zero activity.
+10. Assuming backend records are always correctly ordered.
+11. Ignoring token decimal precision.
+12. Ignoring stale requests.
+13. Using array indexes as long-term event identifiers.
+14. Silently replacing invalid data with fabricated values.
+15. Hiding backend errors.
+
+90. DEPLOYMENT CONSIDERATIONS
+
+Before deployment:
+
+- Confirm API configuration.
+- Verify production endpoint availability.
+- Verify authentication.
+- Verify backend response structures.
+- Confirm blockchain indexer synchronization.
+- Test market identifiers.
+- Test historical queries.
+- Test empty responses.
+- Test error states.
+- Run automated tests.
+- Verify existing component imports.
+- Confirm that no mock data remains in production paths.
+
+91. FUTURE IMPROVEMENTS
+
+Potential future enhancements include:
+
+Real-Time Timeline Updates
+
+WebSocket subscriptions can deliver new contract events without requiring manual refreshes.
+
+Live Liquidity Monitoring
+
+Liquidity records can be refreshed as new measurements become available.
+
+Advanced Historical Charts
+
+Users may be able to compare liquidity changes across multiple historical periods.
+
+Buy and Sell Volume Breakdown
+
+Confirmed fills can be categorized according to trade direction.
+
+Market Performance Comparisons
+
+Users may compare trading volume across different markets.
+
+Event Filtering
+
+Timeline events may be filtered by type, source, or date.
+
+Transaction Explorer Integration
+
+Verified transaction hashes can link directly to the appropriate block explorer.
+
+Advanced Aggregation
+
+Backend-side aggregation can reduce the amount of data transferred to the browser.
+
+92. IMPLEMENTATION CHECKLIST
+
+EventTimeline
+
+- [ ] Remove fictional event generation.
+- [ ] Connect indexed contract events.
+- [ ] Connect lifecycle records.
+- [ ] Normalize event schemas.
+- [ ] Preserve stable identifiers.
+- [ ] Deduplicate overlapping records.
+- [ ] Sort by timestamp.
+- [ ] Add loading state.
+- [ ] Add empty state.
+- [ ] Add error state.
+
+LiquidityChart
+
+- [ ] Remove mock depth.
+- [ ] Remove mock historical data.
+- [ ] Connect liquidity API.
+- [ ] Validate records.
+- [ ] Display actual measurements.
+- [ ] Label units.
+- [ ] Label reporting periods.
+- [ ] Add loading state.
+- [ ] Add empty state.
+- [ ] Add error state.
+
+LiquidityDisplay
+
+- [ ] Remove synthesized activity.
+- [ ] Connect liquidity API.
+- [ ] Display actual measurements.
+- [ ] Maintain consistent definitions.
+- [ ] Handle missing values.
+- [ ] Add loading state.
+- [ ] Add empty state.
+- [ ] Add error state.
+
+VolumeStats
+
+- [ ] Remove generated datasets.
+- [ ] Retrieve confirmed fills.
+- [ ] Validate fill records.
+- [ ] Exclude unconfirmed fills.
+- [ ] Aggregate selected reporting periods.
+- [ ] Verify asset denomination.
+- [ ] Handle zero activity.
+- [ ] Handle unavailable data.
+- [ ] Add loading state.
+- [ ] Test timeframe changes.
+
+93. ACCEPTANCE CRITERIA
+
+The implementation is complete when all four components use actual backend or indexed data sources.
+
+EventTimeline must display real events with stable identifiers.
+
+LiquidityChart must display actual liquidity measurements with clearly identified units and reporting periods.
+
+LiquidityDisplay must retrieve actual liquidity records rather than synthesizing activity.
+
+VolumeStats must aggregate confirmed fills over the selected timeframe.
+
+Successful empty responses must be distinguished from unavailable data.
+
+All components must implement appropriate loading, empty, and error states.
+
+The application must not present fictional market information as genuine activity.
+
+94. EXPECTED OUTCOMES
+
+The expected results include:
+
+1. Improved accuracy of market analytics.
+2. Elimination of fictional timeline events.
+3. More reliable contract activity histories.
+4. Accurate liquidity representations.
+5. Consistent liquidity information.
+6. Reliable confirmed trading volume.
+7. Correct timeframe reporting.
+8. Improved error handling.
+9. Better data traceability.
+10. Improved confidence in displayed market information.
+
+The architecture should also make future enhancements easier because data retrieval and presentation responsibilities are clearly separated.
+
+95. CONCLUSION
+
+The Market Analytics Data Integration implementation addresses the limitations associated with locally generated market information.
+
+By replacing fictional timeline events, mock liquidity datasets, synthesized liquidity activity, and generated trading volume with actual backend and indexed records, the application establishes a more reliable foundation for presenting market information.
+
+EventTimeline becomes responsible for presenting real contract and backend lifecycle events.
+
+LiquidityChart becomes responsible for visualizing actual liquidity measurements.
+
+LiquidityDisplay becomes responsible for presenting verified liquidity summaries.
+
+VolumeStats becomes responsible for aggregating confirmed trading fills over clearly defined reporting periods.
+
+The implementation also establishes consistent validation, loading, empty, and error-handling practices across the four components.
+
+These changes improve data integrity, reduce the risk of misleading market information, and provide a foundation for future real-time market analytics capabilities.
+
+Ultimately, the objective is to ensure that every displayed event, liquidity measurement, and trading statistic represents information that can be traced to an appropriate and reliable data source.
+
+---
+
+END OF DOCUMENT
+
+Document status: Technical implementation specification.
+
+Important: This README describes the intended architecture and implementation requirements. Actual API routes, response schemas, and integration status must be verified against the existing repository before the implementation is considered complete.
