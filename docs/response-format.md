@@ -97,6 +97,8 @@ See [Error Reference](error-reference.md) for comprehensive error documentation.
 
 Endpoints that return lists of records (transactions, payments, operations, etc.) support pagination and include metadata in the `meta` object.
 
+> **📖 For advanced pagination techniques** including cursor resumption, parallel fetching, and streaming large datasets, see the [Advanced Pagination Patterns Guide](pagination-patterns.md).
+
 **Request Parameters:**
 - `limit` (number, default: 10, max: 200) — Number of records to return
 - `order` (string, default: "desc") — Sort order ("asc" or "desc")
