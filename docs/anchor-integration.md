@@ -291,3 +291,10 @@ The response includes an `interactiveUrl` for the user to complete the off-ramp 
 
 - [SEP Integration](./sep-integration.md) — Details on SEP-10, SEP-24, and SEP-31 support in StellarKit.
 - [README](../README.md) — Project overview and getting started.
+
+/**
+ * Declarative schemas for every POST request body in the API.
+ * Applied with validateBody(schema) in each route (see PR description for the list).StellarKit API exposes over 25 endpoints under `/account/:id`. This guide groups them by the workflows they support, explains what each one returns, and shows when to combine them rather than calling them individually.
+
+The `:id` path parameter is always a 56-character Stellar public key starting with `G`. Every endpoint returns `400 InvalidAccountId` for a malformed key and `404 AccountNotFound` when the account does not exist on the configured network.
+ */
