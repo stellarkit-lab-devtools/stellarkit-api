@@ -204,3 +204,100 @@ describe("Endpoint rate limiting", () => {
     process.env.RATE_LIMIT_MAX = originalGlobalMax;
   }, 30000);
 });
+
+describe("API key rate limiting (#1193)", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("two different API keys have independent buckets", async () => {
+    process.env.API_KEY_RATE_LIMIT_MAX = "2";
+    process.env.RATE_LIMIT_MAX = "1000";
+
+    const { app } = loadFreshApp();
+
+    // Exhaust key A
+    for (let i = 0; i < 2; i++) {
+      const res = await request(app).get("/").set("X-Api-Key", "key-alpha");
+      expect(res.statusCode).toBe(200);
+    }
+    const resA = await request(app).get("/").set("X-Api-Key", "key-alpha");
+    expect(resA.statusCode).toBe(429);
+
+    // key B still has capacity
+    const resB = await request(app).get("/").set("X-Api-Key", "key-beta");
+    expect(resB.statusCode).toBe(200);
+
+    delete process.env.API_KEY_RATE_LIMIT_MAX;
+    process.env.RATE_LIMIT_MAX = "100";
+  }, 30000);
+
+  it("the same key shared across two different IPs shares one bucket", async () => {
+    process.env.API_KEY_RATE_LIMIT_MAX = "2";
+    process.env.RATE_LIMIT_MAX = "1000";
+
+    const { app } = loadFreshApp();
+
+    // Two requests from "different IPs" but same key (supertest always sends
+    // from loopback, so we simulate by simply sending the key twice)
+    for (let i = 0; i < 2; i++) {
+      const res = await request(app).get("/").set("X-Api-Key", "shared-key");
+      expect(res.statusCode).toBe(200);
+    }
+    const res = await request(app).get("/").set("X-Api-Key", "shared-key");
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe("2");
+
+    delete process.env.API_KEY_RATE_LIMIT_MAX;
+    process.env.RATE_LIMIT_MAX = "100";
+  }, 30000);
+
+  it("requests without an API key fall back to the IP bucket", async () => {
+    process.env.API_KEY_RATE_LIMIT_MAX = "1000";
+    process.env.RATE_LIMIT_MAX = "2";
+
+    const { app } = loadFreshApp();
+
+    for (let i = 0; i < 2; i++) {
+      const res = await request(app).get("/");
+      expect(res.statusCode).toBe(200);
+    }
+    const res = await request(app).get("/");
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe("2");
+
+    delete process.env.API_KEY_RATE_LIMIT_MAX;
+    process.env.RATE_LIMIT_MAX = "100";
+  }, 30000);
+
+  it("bucket identifier is a hash, not the raw key", async () => {
+    const crypto = require("crypto");
+    const { hashApiKey } = require("../src/middleware/rateLimiter");
+    const key = "my-secret-api-key";
+    const hash = hashApiKey(key);
+    // Must be a 64-char hex string
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    // Must equal SHA-256 of the key
+    expect(hash).toBe(crypto.createHash("sha256").update(key).digest("hex"));
+    // Must NOT equal the key itself
+    expect(hash).not.toBe(key);
+  });
+
+  it("enforces the per-key limit", async () => {
+    process.env.API_KEY_RATE_LIMIT_MAX = "3";
+    process.env.RATE_LIMIT_MAX = "1000";
+
+    const { app } = loadFreshApp();
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app).get("/").set("X-Api-Key", "rate-test-key");
+      expect(res.statusCode).toBe(200);
+    }
+    const res = await request(app).get("/").set("X-Api-Key", "rate-test-key");
+    expect(res.statusCode).toBe(429);
+    expect(res.body.error.type).toBe("RateLimitExceeded");
+
+    delete process.env.API_KEY_RATE_LIMIT_MAX;
+    process.env.RATE_LIMIT_MAX = "100";
+  }, 30000);
+});

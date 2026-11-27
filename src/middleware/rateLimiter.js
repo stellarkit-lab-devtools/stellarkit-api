@@ -1,10 +1,12 @@
 const rateLimit = require("express-rate-limit");
+const crypto = require("crypto");
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const GLOBAL_RATE_LIMIT_MAX = 100;
 const ACCOUNT_SUMMARY_RATE_LIMIT_MAX = 20;
 const ASSET_HOLDERS_RATE_LIMIT_MAX = 10;
 const DEFAULT_ACCOUNT_RATE_LIMIT_MAX = 500;
+const DEFAULT_API_KEY_RATE_LIMIT_MAX = 600;
 
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -99,6 +101,21 @@ const ACCOUNT_MAX = parsePositiveInteger(
   process.env.ACCOUNT_RATE_LIMIT_MAX,
   DEFAULT_ACCOUNT_RATE_LIMIT_MAX,
 );
+const API_KEY_MAX = parsePositiveInteger(
+  process.env.API_KEY_RATE_LIMIT_MAX,
+  DEFAULT_API_KEY_RATE_LIMIT_MAX,
+);
+
+/**
+ * Hash an API key with SHA-256 so the raw key is never stored in the limiter
+ * or emitted in logs.
+ *
+ * @param {string} key - Raw API key string.
+ * @returns {string} 64-character lowercase hex digest.
+ */
+function hashApiKey(key) {
+  return crypto.createHash("sha256").update(key).digest("hex");
+}
 
 const globalRateLimiter = createLimiter({
   max: GLOBAL_MAX,
@@ -112,12 +129,28 @@ const accountRateLimiter = createLimiter({
     String(req.headers["x-account-id"] || req.ip),
 });
 
+const apiKeyRateLimiter = createLimiter({
+  max: API_KEY_MAX,
+  message: "Too many requests for this API key, please try again later.",
+  keyGenerator: (req) => {
+    const key = req.headers["x-api-key"];
+    return key ? `apikey:${hashApiKey(String(key).trim())}` : req.ip;
+  },
+});
+
 /**
  * Composite rate-limit middleware.
- * Requests with a valid X-Account-ID header use the per-account limiter;
+ * Requests with a valid X-API-Key header use the per-key limiter;
+ * requests with a valid X-Account-ID header use the per-account limiter;
  * all others fall back to the global limiter.
+ *
+ * X-RateLimit-* headers reflect whichever bucket applied.
  */
 function rateLimitMiddleware(req, res, next) {
+  const apiKey = req.headers["x-api-key"];
+  if (apiKey) {
+    return apiKeyRateLimiter(req, res, next);
+  }
   const accountId = req.headers["x-account-id"];
   if (accountId) {
     return accountRateLimiter(req, res, next);
@@ -140,8 +173,11 @@ const assetHoldersRateLimiter = createLimiter({
 module.exports = rateLimitMiddleware;
 module.exports.accountRateLimiter = accountRateLimiter;
 module.exports.globalRateLimiter = globalRateLimiter;
+module.exports.apiKeyRateLimiter = apiKeyRateLimiter;
 module.exports.accountSummaryRateLimiter = accountSummaryRateLimiter;
 module.exports.assetHoldersRateLimiter = assetHoldersRateLimiter;
 module.exports.createLimiter = createLimiter;
 module.exports.RATE_LIMIT_WINDOW_MS = RATE_LIMIT_WINDOW_MS;
 module.exports.ACCOUNT_RATE_LIMIT_MAX = ACCOUNT_MAX;
+module.exports.API_KEY_RATE_LIMIT_MAX = API_KEY_MAX;
+module.exports.hashApiKey = hashApiKey;

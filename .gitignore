@@ -4,6 +4,7 @@ coverage/
 *.log
 .DS_Store
 dist/
+.seed/
 
 # ── Editor settings ────────────────────────────────────────────────────────────
 .vscode/

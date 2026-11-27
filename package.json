@@ -12,6 +12,7 @@
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix",
     "seed": "node scripts/seed-testnet.js",
+    "seed:testnet": "node scripts/seed-testnet.js"
     "doctor": "node scripts/doctor.js",
     "new:route": "node scripts/new-route.js"
   },
